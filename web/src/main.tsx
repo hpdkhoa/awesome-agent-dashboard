@@ -4,7 +4,7 @@ import { onAuthStateChanged, signInWithPopup, signOut, type User } from "firebas
 import { auth, google } from "./firebase";
 import { checkOwner } from "./owner";
 
-type State = { kind: "loading" } | { kind: "out"; refused: boolean } | { kind: "in"; user: User };
+type State = { kind: "loading" } | { kind: "out"; refused: boolean; error?: string } | { kind: "in"; user: User };
 
 function App() {
   const [state, setState] = useState<State>({ kind: "loading" });
@@ -25,7 +25,16 @@ function App() {
       <main className="card">
         <h1>Agent dashboard</h1>
         {state.refused && <p className="bad">This account is not allowed.</p>}
-        <button onClick={() => signInWithPopup(auth, google).catch(() => undefined)}>Sign in with Google</button>
+        {state.error && <p className="bad">Sign-in failed: {state.error}</p>}
+        <button
+          onClick={() =>
+            signInWithPopup(auth, google).catch((e: { code?: string; message?: string }) =>
+              setState({ kind: "out", refused: false, error: e.code ?? e.message ?? "unknown error" }),
+            )
+          }
+        >
+          Sign in with Google
+        </button>
       </main>
     );
   return (
