@@ -6,6 +6,7 @@ Delivery (the owner's choice, 2026-11-01, "option 1"):
   `claude -p --resume <session>` (deliver.py). The bridge never resumes a session that is still open: each open
   session's inbox server writes a heartbeat to liveSessions/<session> every minute.
 
+Kinds: question, suggestion, result, approval (a tool call in a run started from the dashboard).
 Item states: open -> answered (the owner, on the page) -> delivered (live or by resume), or closed (nothing to send).
 """
 
@@ -82,6 +83,18 @@ class Inbox:
                 if text:
                     out.append(text)
         return out
+
+
+def approval_reply(item: dict | None, tool_input: dict) -> str:
+    """The JSON a --permission-prompt-tool returns: allow with the input unchanged, or deny with the owner's note."""
+    import json
+
+    a = (item or {}).get("answer") or {}
+    if a.get("choice") == "Allow":
+        return json.dumps({"behavior": "allow", "updatedInput": tool_input})
+    if item is None:
+        return json.dumps({"behavior": "deny", "message": "No answer from the owner in time; the call was not run."})
+    return json.dumps({"behavior": "deny", "message": "The owner denied this call." + (f" Note: {a['text']}" if a.get("text") else "")})
 
 
 def answer_text(item: dict) -> str:
@@ -173,6 +186,26 @@ def server():
     async def inbox_wait(item_id: str, ctx: Context, wait_minutes: float = MAX_WAIT_MINUTES) -> str:
         """Keep waiting for the owner's answer to an earlier inbox_ask."""
         return await wait_for(item_id, wait_minutes, ctx)
+
+    @mcp.tool()
+    async def inbox_approve(tool_name: str, input: dict, tool_use_id: str = "") -> str:
+        """Permission prompt for runs started from the dashboard: the owner allows or denies the call in the inbox."""
+        import json
+
+        item_id = await asyncio.to_thread(
+            inbox.post, "approval", f"Allow {tool_name}?", json.dumps(input, indent=1, ensure_ascii=False)[:3500],
+            [{"label": "Allow", "detail": "run this call"}, {"label": "Deny", "detail": "the session is told it was denied"}],
+        )
+        end = time.time() + MAX_WAIT_MINUTES * 60
+        while time.time() < end:
+            item = await asyncio.to_thread(inbox.store.get, f"inbox/{item_id}")
+            if item and item.get("status") == "answered":
+                await asyncio.to_thread(inbox.store.update, f"inbox/{item_id}",
+                                        {"status": "delivered", "deliveredAt": now_iso(), "deliveredVia": "live"})
+                return approval_reply(item, input)
+            await asyncio.sleep(POLL_SECONDS)
+        await asyncio.to_thread(inbox.store.update, f"inbox/{item_id}", {"status": "closed", "error": "No answer in time; denied."})
+        return approval_reply(None, input)
 
     @mcp.tool()
     async def inbox_suggest(title: str, suggestion: str) -> str:

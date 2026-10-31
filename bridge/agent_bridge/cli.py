@@ -1,7 +1,8 @@
 """agent-bridge signin | sync | watch | inbox.
 
 sync and watch read Claude Code's logs. watch also delivers the owner's answers to closed sessions by resuming them
-(deliver.py); that is the only time it runs claude. inbox is the MCP server each session starts.
+(deliver.py) and starts and stops the runs the owner asks for on the page (runs.py). inbox is the MCP server each
+session starts.
 """
 
 from __future__ import annotations
@@ -15,7 +16,10 @@ from .auth import Session, sign_in
 from .config import Config, data_dir
 from .firestore import Firestore
 from .deliver import deliver, find_claude
+from .runs import Runs
 from .sync import run
+
+COMMAND_SECONDS = 5  # how often watch looks for start and stop commands from the page
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -57,23 +61,35 @@ def main(argv: list[str] | None = None) -> None:
     if not a.dry_run:
         store = Firestore(Session(cfg))
         store.check_owner()
+    claude = find_claude(cfg.claude_bin)
+    runs = None
+    if store is not None and a.cmd == "watch":
+        runs = Runs(store, cfg.machine, cfg.roots, claude, data_dir() / "runs")
+        runs.forget_lost()
+    stamp = lambda: time.strftime("%Y-%m-%d %H:%M:%S")
+    next_sync = 0.0
     while True:
         try:
-            r = run(cfg, a.days, store, dry_run=a.dry_run)
-            print(
-                f"{time.strftime('%Y-%m-%d %H:%M:%S')} sessions {r['sessions']}, tokens {r['tokens']:,}, "
-                f"list-price estimate ${r['costUsd']:,}, documents {'to write' if a.dry_run else 'written'} "
-                f"{r['toWrite'] if a.dry_run else r['written']}",
-                flush=True,
-            )
-            if store is not None:
-                for line in deliver(store, cfg.machine, find_claude(cfg.claude_bin)):
-                    print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} inbox {line}", flush=True)
+            if time.time() >= next_sync:
+                next_sync = time.time() + a.every
+                r = run(cfg, a.days, store, dry_run=a.dry_run)
+                print(
+                    f"{stamp()} sessions {r['sessions']}, tokens {r['tokens']:,}, "
+                    f"list-price estimate ${r['costUsd']:,}, documents {'to write' if a.dry_run else 'written'} "
+                    f"{r['toWrite'] if a.dry_run else r['written']}",
+                    flush=True,
+                )
+                if store is not None:
+                    for line in deliver(store, cfg.machine, claude):
+                        print(f"{stamp()} inbox {line}", flush=True)
+            if runs is not None:
+                for line in runs.step():
+                    print(f"{stamp()} run {line}", flush=True)
         except (Exception, SystemExit) as e:
             if a.cmd == "sync":
                 raise
             # watch keeps going through a network drop or a refused write, and tries again next round
-            print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} sync failed, retrying in {a.every:.0f}s: {e}", flush=True)
+            print(f"{stamp()} failed, retrying: {e}", flush=True)
         if a.cmd == "sync":
             return
-        time.sleep(a.every)
+        time.sleep(COMMAND_SECONDS)

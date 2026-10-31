@@ -54,7 +54,8 @@ def documents(cfg: Config, sessions: dict[str, list[FileState]], days: float) ->
     out = {f"sessions/{sid}": d for sid, d in docs.items()}
     out.update({f"usage/{day}": u for day, u in usage.items() if day >= first_day})
     out.update({f"workTypes/{w}": d for w, d in wts.items()})
-    out[f"machines/{cfg.machine}"] = {"name": cfg.machine, "windowDays": days, "sessions": len(docs)}
+    out[f"machines/{cfg.machine}"] = {"name": cfg.machine, "windowDays": days, "sessions": len(docs),
+                                      "folders": [{"workType": w, "path": p} for w, p in cfg.roots]}
     return out, now
 
 

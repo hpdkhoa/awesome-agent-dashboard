@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { answerItem, type InboxItem, type Session } from "./data";
 
-const KIND = { question: "Question", suggestion: "Suggestion", result: "Result to review" };
+const KIND = { question: "Question", suggestion: "Suggestion", result: "Result to review", approval: "Approval" };
 const STATUS = {
   open: "waiting for you",
   answered: "answered, waiting to reach the session",
@@ -71,7 +71,7 @@ export function InboxView({ item, session }: { item: InboxItem; session?: Sessio
         from session: {session?.title ?? item.sessionId}
       </p>
       <h1>{item.title}</h1>
-      <p className="quote">{item.text}</p>
+      <p className={item.kind === "approval" ? "quote mono" : "quote"}>{item.text}</p>
 
       {item.files.length > 0 && (
         <>
@@ -86,7 +86,7 @@ export function InboxView({ item, session }: { item: InboxItem; session?: Sessio
         </>
       )}
 
-      {item.options.length > 0 && (
+      {item.options.length > 0 && item.kind !== "approval" && (
         <>
           <h2>Options</h2>
           <div className="options">
@@ -140,6 +140,16 @@ export function InboxView({ item, session }: { item: InboxItem; session?: Sessio
                 </button>
                 <button disabled={busy} onClick={() => send("Decline")}>
                   Decline
+                </button>
+              </>
+            )}
+            {item.kind === "approval" && (
+              <>
+                <button className="primary" disabled={busy} onClick={() => send("Allow")}>
+                  Allow
+                </button>
+                <button disabled={busy} onClick={() => send("Deny")}>
+                  Deny
                 </button>
               </>
             )}

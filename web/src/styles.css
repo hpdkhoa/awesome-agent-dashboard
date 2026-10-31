@@ -85,6 +85,13 @@ textarea { width: 100%; font: inherit; padding: 8px 10px; border-radius: 8px; bo
 .actions { display: flex; gap: 8px; margin-top: 10px; }
 .primary { background: var(--accent); color: var(--bg); border-color: var(--accent); }
 code { font-size: 12px; }
+.mono { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+.pad { padding: 12px; }
+select { width: 100%; font: inherit; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: inherit; margin-bottom: 8px; }
+.run { border-bottom: 1px solid var(--line); padding: 10px 0; display: grid; gap: 6px; }
+.run button { justify-self: start; }
+.run .dot { display: inline-block; margin: 0 4px 1px 0; }
+.dot.inline { display: inline-block; margin: 0 0 1px 4px; }
 
 @media (max-width: 900px) {
   .app { grid-template-columns: 1fr; grid-template-areas: "top" "side" "main" "usage"; height: auto; }

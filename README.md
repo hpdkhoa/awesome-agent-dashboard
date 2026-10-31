@@ -8,7 +8,7 @@ A one-owner web portal over your own Claude Code: display, summarize, Q&A and ex
 - Every install is one owner: another person runs their own install, with their own `.env`, Firebase project and
   machine.
 
-Status: P2 (inbox: questions, suggestions and results; answers go back to the session).
+Status: P3 (start and stop sessions from the page; tool approvals in the inbox).
 
 ## Set up your own install
 
@@ -68,6 +68,20 @@ An answer to a session that has closed is delivered by `watch`, which resumes th
 `claude -p --resume <session>`. It needs the Claude Code CLI on this machine, signed in through Anthropic's own sign-in
 (or `CLAUDE_BIN` in `.env` pointing to it). The bridge never resumes a session that is still open: each open session's
 inbox server sends a heartbeat every minute.
+
+## Runs from the page (P3)
+
+The Runs tab starts your own Claude Code in a folder registered in `WORK_ROOTS` on that machine, and stops runs it
+started. `watch` carries it out within 5 seconds:
+
+```
+claude -p <prompt> --output-format json --session-id <new id> --permission-prompt-tool mcp__agent-inbox__inbox_approve
+```
+
+Permissions stay on: each tool call that needs approval becomes an Approval in the inbox (Allow or Deny), and a call
+with no answer in 25 minutes is denied. The prompt is passed to `claude` as one argument, never through a shell. It
+needs the Claude Code CLI on that machine, signed in through Anthropic's own sign-in. Open terminal or desktop-app
+sessions cannot be started or stopped from the page.
 
 ## Checks
 

@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { signOut } from "firebase/auth";
 import { auth } from "./firebase";
-import { useInbox, useMachines, useSessions, useUsage, useWorkTypes, type Session, type Tokens } from "./data";
+import { useInbox, useMachines, useRuns, useSessions, useUsage, useWorkTypes, type Session, type Tokens } from "./data";
+import { RunList, StartForm } from "./Runs";
 import { InboxList, InboxView, isWaiting } from "./Inbox";
 
 const ACTIVE_MS = 5 * 60 * 1000;
@@ -27,9 +28,10 @@ export function Dashboard() {
   const workTypes = useWorkTypes();
   const machines = useMachines();
   const inbox = useInbox();
+  const runs = useRuns();
   const [wt, setWt] = useState<string>("all");
   const [picked, setPicked] = useState<string | null>(null);
-  const [tab, setTab] = useState<"inbox" | "sessions">("inbox");
+  const [tab, setTab] = useState<"inbox" | "sessions" | "runs">("inbox");
   const [pickedItem, setPickedItem] = useState<string | null>(null);
 
   const shown = useMemo(() => (sessions ?? []).filter((s) => wt === "all" || s.workType === wt), [sessions, wt]);
@@ -91,8 +93,15 @@ export function Dashboard() {
           <button className={tab === "sessions" ? "tab on" : "tab"} onClick={() => setTab("sessions")}>
             Sessions
           </button>
+          <button className={tab === "runs" ? "tab on" : "tab"} onClick={() => setTab("runs")}>
+            Runs {(runs ?? []).some((r) => r.status === "running") && <span className="dot live inline" />}
+          </button>
         </div>
-        {tab === "inbox" ? (
+        {tab === "runs" ? (
+          <div className="pad">
+            <StartForm machines={machines ?? []} />
+          </div>
+        ) : tab === "inbox" ? (
           <InboxList items={items} picked={item?.id} onPick={setPickedItem} />
         ) : (
         <ul className="list">
@@ -113,7 +122,9 @@ export function Dashboard() {
       </aside>
 
       <main className="main">
-        {tab === "inbox" ? (
+        {tab === "runs" ? (
+          <RunList runs={runs ?? []} />
+        ) : tab === "inbox" ? (
           item ? (
             <InboxView key={item.id} item={item} session={sessions.find((s) => s.id === item.sessionId)} />
           ) : (

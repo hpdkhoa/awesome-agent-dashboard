@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { collection, doc, limit, onSnapshot, orderBy, query, updateDoc, type QueryConstraint } from "firebase/firestore";
+import { collection, doc, limit, onSnapshot, orderBy, query, setDoc, updateDoc, type QueryConstraint } from "firebase/firestore";
 import { db } from "./firebase";
 
 // The shapes the bridge writes (bridge/agent_bridge/aggregate.py).
@@ -38,7 +38,7 @@ export type Usage = Tokens & { day: string; byWorkType: Record<string, Tokens>; 
 export type WorkType = Tokens & { id: string; sessions: number; lastAt: string };
 export type InboxItem = {
   id: string;
-  kind: "question" | "suggestion" | "result";
+  kind: "question" | "suggestion" | "result" | "approval";
   sessionId: string;
   machine: string;
   cwd: string;
@@ -57,7 +57,31 @@ export type InboxItem = {
   error?: string | null;
 };
 
-export type Machine = { name: string; windowDays: number; sessions: number; syncedAt: string };
+export type Machine = {
+  name: string;
+  windowDays: number;
+  sessions: number;
+  syncedAt: string;
+  folders?: { workType: string; path: string }[];
+};
+
+export type Run = {
+  id: string;
+  action: "start" | "stop";
+  machine: string;
+  folder?: string;
+  prompt?: string;
+  target?: string;
+  status: "new" | "running" | "stopping" | "done" | "stopped" | "failed" | "lost";
+  createdAt: string;
+  sessionId?: string;
+  workType?: string;
+  startedAt?: string;
+  endedAt?: string;
+  result?: string;
+  costUsd?: number;
+  error?: string;
+};
 
 function useCollection<T>(name: string, ...constraints: QueryConstraint[]): T[] | null {
   const [rows, setRows] = useState<T[] | null>(null);
@@ -77,3 +101,16 @@ export const useInbox = () => useCollection<InboxItem>("inbox", orderBy("created
 // The owner's answer. The session picks it up live, or the bridge resumes the session if it has closed.
 export const answerItem = (id: string, choice: string, text: string) =>
   updateDoc(doc(db, "inbox", id), { status: "answered", answer: { choice, text, at: new Date().toISOString() }, error: null });
+export const useRuns = () => useCollection<Run>("commands", orderBy("createdAt", "desc"), limit(100));
+
+const newId = () => crypto.randomUUID().replace(/-/g, "").slice(0, 20);
+
+// Commands the bridge on that machine carries out: start claude in a registered folder, or stop a run it started.
+export const startRun = (machine: string, folder: string, prompt: string) => {
+  const id = newId();
+  return setDoc(doc(db, "commands", id), { id, action: "start", machine, folder, prompt, status: "new", createdAt: new Date().toISOString() });
+};
+export const stopRun = (machine: string, target: string) => {
+  const id = newId();
+  return setDoc(doc(db, "commands", id), { id, action: "stop", machine, target, status: "new", createdAt: new Date().toISOString() });
+};

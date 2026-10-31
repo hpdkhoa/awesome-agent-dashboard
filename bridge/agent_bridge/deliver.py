@@ -33,6 +33,8 @@ def deliver(store, machine: str, claude: str | None, run=subprocess.run) -> list
     """Resumes closed sessions with their answers. Returns one line per item acted on."""
     log = []
     for item in store.where("inbox", "status", "answered"):
+        if item.get("kind") == "approval":
+            continue  # approvals are only ever answered live, inside the waiting run
         if item.get("machine") != machine or item.get("sessionId") in (None, "", "unknown"):
             continue
         if is_live(store, item["sessionId"]):
