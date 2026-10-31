@@ -67,12 +67,13 @@ export type Machine = {
 
 export type Run = {
   id: string;
-  action: "start" | "stop";
+  action: "start" | "stop" | "message";
   machine: string;
   folder?: string;
   prompt?: string;
   target?: string;
-  status: "new" | "running" | "stopping" | "done" | "stopped" | "failed" | "lost";
+  cwd?: string;
+  status: "new" | "waiting" | "running" | "stopping" | "done" | "stopped" | "failed" | "lost";
   createdAt: string;
   sessionId?: string;
   workType?: string;
@@ -109,6 +110,13 @@ const newId = () => crypto.randomUUID().replace(/-/g, "").slice(0, 20);
 export const startRun = (machine: string, folder: string, prompt: string) => {
   const id = newId();
   return setDoc(doc(db, "commands", id), { id, action: "start", machine, folder, prompt, status: "new", createdAt: new Date().toISOString() });
+};
+// A message to an existing session: the bridge resumes it with the message once it is closed.
+export const sendMessage = (machine: string, sessionId: string, cwd: string, prompt: string) => {
+  const id = newId();
+  return setDoc(doc(db, "commands", id), {
+    id, action: "message", machine, sessionId, cwd, prompt, status: "new", createdAt: new Date().toISOString(),
+  });
 };
 export const stopRun = (machine: string, target: string) => {
   const id = newId();

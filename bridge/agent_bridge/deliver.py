@@ -7,7 +7,6 @@ ANTHROPIC_API_KEY is removed from its environment so it always uses the plan (T7
 
 from __future__ import annotations
 
-import json
 import os
 import shutil
 import subprocess
@@ -15,6 +14,7 @@ from datetime import datetime, timezone
 
 from .inbox import answer_text, is_live, now_iso
 from .redact import redact
+from .runs import parse_result
 
 RETRY_SECONDS = 600
 
@@ -58,19 +58,16 @@ def deliver(store, machine: str, claude: str | None, run=subprocess.run) -> list
         try:
             p = run(resume_command(claude, item["sessionId"], answer_text(item)), cwd=cwd, env=env,
                     capture_output=True, text=True, encoding="utf-8", timeout=1800)
-            ok = p.returncode == 0
-            try:
-                out = json.loads(p.stdout or "{}")
-                reply = out.get("result", "") if isinstance(out, dict) else ""
-            except ValueError:
-                reply = p.stdout or ""
+            out = parse_result(p.stdout)
+            ok = p.returncode == 0 and not out.get("is_error")
+            reply = str(out.get("result", "")) if out else (p.stdout or "")
             if ok:
                 store.update(f"inbox/{item['id']}", {"status": "delivered", "deliveredAt": now_iso(),
                              "deliveredVia": "resume", "followUp": redact(reply, 2000), "error": None})
                 log.append(f"{item['id']}: delivered by resume")
             else:
                 store.update(f"inbox/{item['id']}", {"status": "answered",
-                             "error": redact((p.stderr or p.stdout or "")[-600:], 600)})
+                             "error": redact(reply if out.get("is_error") else (p.stderr or p.stdout or "")[-600:], 600)})
                 log.append(f"{item['id']}: resume failed ({p.returncode})")
         except (OSError, subprocess.TimeoutExpired) as e:
             store.update(f"inbox/{item['id']}", {"status": "answered", "error": redact(str(e), 600)})

@@ -1,12 +1,16 @@
-"""Starts and stops Claude Code runs the owner asks for on the dashboard (P3).
+"""Starts, messages and stops Claude Code runs the owner asks for on the dashboard (P3 and the message box).
 
-The page writes commands/<id> with action "start" (a registered folder and a prompt) or "stop" (a run to end). The
-bridge on the named machine runs the owner's own `claude` CLI:
+The page writes commands/<id> with action "start" (a registered folder and a prompt), "message" (a message to an
+existing session) or "stop" (a run to end). The bridge on the named machine runs the owner's own `claude` CLI:
 
-    claude -p <prompt> --output-format json --session-id <new id>
-           --permission-prompt-tool mcp__agent-inbox__inbox_approve
+    start:    claude -p <prompt> --output-format json --session-id <new id> --permission-prompt-tool <inbox approve>
+    message:  claude -p <message> --output-format json --resume <session> --permission-prompt-tool <inbox approve>
 
-Rules from the plan: only a folder registered in WORK_ROOTS, a fixed list of actions, the prompt goes to claude as one
+A message to a session that is still open waits ("waiting") until it closes: the session counts as open while its
+inbox heartbeat is fresh, a run of this bridge works in it, or its log file changed in the last 3 minutes. A session
+open but idle in a window shows none of these, so the page tells the owner to close that window first.
+
+Rules from the plan: only folders registered in WORK_ROOTS, a fixed list of actions, the prompt goes to claude as one
 argument (never through a shell), permissions stay on and every approval goes to the owner's inbox (no bypass mode),
 ANTHROPIC_API_KEY is removed so the run uses the plan (terms T7).
 """
@@ -17,18 +21,35 @@ import json
 import os
 import signal
 import subprocess
+import time
 import uuid
 from pathlib import Path
 
-from .inbox import now_iso
+from .aggregate import work_type_of
+from .inbox import LIVE_SECONDS, is_live, now_iso
 from .redact import redact
 
 APPROVAL_TOOL = "mcp__agent-inbox__inbox_approve"
+NO_CLI = "No signed-in claude CLI on this machine. Install Claude Code and sign in, or set CLAUDE_BIN."
 
 
 def start_command(claude: str, prompt: str, session_id: str) -> list[str]:
     return [claude, "-p", prompt, "--output-format", "json", "--session-id", session_id,
             "--permission-prompt-tool", APPROVAL_TOOL]
+
+
+def message_command(claude: str, message: str, session_id: str) -> list[str]:
+    return [claude, "-p", message, "--output-format", "json", "--resume", session_id,
+            "--permission-prompt-tool", APPROVAL_TOOL]
+
+
+def parse_result(out: str | None) -> dict:
+    """claude's JSON result. An "is_error" result carries its message in "result", such as "Not logged in"."""
+    try:
+        r = json.loads(out or "{}")
+    except ValueError:
+        return {}
+    return r if isinstance(r, dict) else {}
 
 
 def folder_ok(folder: str, roots: list[tuple[str, str]]) -> str | None:
@@ -51,8 +72,9 @@ class Runs:
     """The runs this bridge started, kept in memory while it lives."""
 
     def __init__(self, store, machine: str, roots: list[tuple[str, str]], claude: str | None, out_dir: Path,
-                 popen=subprocess.Popen):
+                 popen=subprocess.Popen, logs: Path | None = None):
         self.store, self.machine, self.roots, self.claude, self.popen = store, machine, roots, claude, popen
+        self.logs = logs  # Claude Code's log folder, to see whether a session wrote recently
         self.out_dir = out_dir  # each run's output goes to files, so a long run never blocks on a full pipe
         self.out_dir.mkdir(parents=True, exist_ok=True)
         self.procs: dict[str, subprocess.Popen] = {}
@@ -66,19 +88,34 @@ class Runs:
 
     def step(self) -> list[str]:
         log = []
-        for c in self.store.where("commands", "status", "new"):
+        todo = self.store.where("commands", "status", "new") + self.store.where("commands", "status", "waiting")
+        for c in todo:
             if c.get("machine") != self.machine:
                 continue
-            if c.get("action") == "start":
-                log.append(self._start(c))
-            elif c.get("action") == "stop":
-                log.append(self._stop(c))
-            else:
-                self.store.update(f"commands/{c['id']}", {"status": "failed", "error": "Unknown action."})
+            action = c.get("action")
+            line = (self._start(c) if action == "start" else self._message(c) if action == "message"
+                    else self._stop(c) if action == "stop" else self._unknown(c))
+            if line:
+                log.append(line)
         for cid, p in list(self.procs.items()):
             if p.poll() is not None:
                 log.append(self._finish(cid, p))
         return log
+
+    def _unknown(self, c: dict) -> str:
+        self.store.update(f"commands/{c['id']}", {"status": "failed", "error": "Unknown action."})
+        return f"{c['id']}: refused, unknown action"
+
+    def _spawn(self, cid: str, cmd: list[str], cwd: str) -> subprocess.Popen:
+        env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+        extra = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt" else {"start_new_session": True}
+        with (
+            open(self.out_dir / f"{cid}.out", "w", encoding="utf-8") as out,
+            open(self.out_dir / f"{cid}.err", "w", encoding="utf-8") as err,
+        ):
+            p = self.popen(cmd, cwd=cwd, env=env, stdout=out, stderr=err, stdin=subprocess.DEVNULL, **extra)
+        self.procs[cid] = p
+        return p
 
     def _start(self, c: dict) -> str:
         path = f"commands/{c['id']}"
@@ -91,21 +128,47 @@ class Runs:
             self.store.update(path, {"status": "failed", "error": "Empty prompt."})
             return f"{c['id']}: refused, empty prompt"
         if not self.claude:
-            self.store.update(path, {"status": "failed",
-                              "error": "No signed-in claude CLI on this machine. Install Claude Code and sign in, or set CLAUDE_BIN."})
+            self.store.update(path, {"status": "failed", "error": NO_CLI})
             return f"{c['id']}: no claude CLI"
         sid = str(uuid.uuid4())
-        env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
-        extra = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt" else {"start_new_session": True}
-        with (
-            open(self.out_dir / f"{c['id']}.out", "w", encoding="utf-8") as out,
-            open(self.out_dir / f"{c['id']}.err", "w", encoding="utf-8") as err,
-        ):
-            p = self.popen(start_command(self.claude, prompt, sid), cwd=c["folder"], env=env, stdout=out, stderr=err,
-                           stdin=subprocess.DEVNULL, **extra)
-        self.procs[c["id"]] = p
+        p = self._spawn(c["id"], start_command(self.claude, prompt, sid), c["folder"])
         self.store.update(path, {"status": "running", "sessionId": sid, "workType": wt, "pid": p.pid, "startedAt": now_iso()})
         return f"{c['id']}: started session {sid} in {c['folder']}"
+
+    def session_open(self, session_id: str) -> bool:
+        if is_live(self.store, session_id):
+            return True
+        for k in self.procs:
+            if (self.store.get(f"commands/{k}") or {}).get("sessionId") == session_id:
+                return True  # a run of this bridge is working in it
+        if self.logs and self.logs.is_dir():
+            for f in self.logs.glob(f"*/{session_id}.jsonl"):
+                if time.time() - f.stat().st_mtime < LIVE_SECONDS:
+                    return True
+        return False
+
+    def _message(self, c: dict) -> str | None:
+        path = f"commands/{c['id']}"
+        sid, cwd, text = c.get("sessionId", ""), c.get("cwd", ""), (c.get("prompt") or "").strip()
+        if not sid or not text:
+            self.store.update(path, {"status": "failed", "error": "A message needs a session and some text."})
+            return f"{c['id']}: refused, empty"
+        wt = work_type_of(cwd, self.roots)
+        if wt == "other" or not os.path.isdir(cwd):
+            self.store.update(path, {"status": "failed",
+                              "error": "The session's folder is not under a registered folder on this machine."})
+            return f"{c['id']}: refused, folder not registered"
+        if not self.claude:
+            self.store.update(path, {"status": "failed", "error": NO_CLI})
+            return f"{c['id']}: no claude CLI"
+        if self.session_open(sid):
+            if c.get("status") != "waiting":
+                self.store.update(path, {"status": "waiting", "workType": wt})
+                return f"{c['id']}: session {sid} is open, the message waits"
+            return None
+        p = self._spawn(c["id"], message_command(self.claude, text, sid), cwd)
+        self.store.update(path, {"status": "running", "workType": wt, "pid": p.pid, "startedAt": now_iso()})
+        return f"{c['id']}: sent to session {sid}"
 
     def _stop(self, c: dict) -> str:
         target = c.get("target", "")
@@ -124,20 +187,21 @@ class Runs:
         err = (self.out_dir / f"{cid}.err").read_text(encoding="utf-8", errors="replace")
         stopped = (self.store.get(f"commands/{cid}") or {}).get("status") == "stopping"
         fields = {"endedAt": now_iso(), "exitCode": p.returncode}
-        try:
-            r = json.loads(out or "{}")
-        except ValueError:
-            r = {}
-        if isinstance(r, dict) and r.get("result") is not None:
-            fields["result"] = redact(str(r["result"]), 4000)
-        if isinstance(r, dict) and r.get("total_cost_usd") is not None:
+        r = parse_result(out)
+        if r.get("total_cost_usd") is not None:
             fields["costUsd"] = float(r["total_cost_usd"])
         if stopped:
             fields["status"] = "stopped"
+        elif r.get("is_error"):
+            # claude ran but reported an error: show its message, not the raw JSON
+            fields["status"] = "failed"
+            fields["error"] = redact(str(r.get("result") or r.get("terminal_reason") or "claude reported an error"), 800)
         elif p.returncode == 0:
             fields["status"] = "done"
+            if r.get("result") is not None:
+                fields["result"] = redact(str(r["result"]), 4000)
         else:
             fields["status"] = "failed"
-            fields["error"] = redact((err or out or "")[-800:], 800)
+            fields["error"] = redact(str(r.get("result") or (err or out or "")[-800:]), 800)
         self.store.update(f"commands/{cid}", fields)
         return f"{cid}: {fields['status']}"

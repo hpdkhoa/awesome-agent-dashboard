@@ -135,3 +135,12 @@ def test_reviewed_result_without_a_note_closes():
 
 def test_resume_command_shape():
     assert resume_command("claude", "abc", "hi") == ["claude", "-p", "hi", "--resume", "abc", "--output-format", "json"]
+
+
+def test_resume_error_shows_claudes_message():
+    store = FakeStore()
+    qid = make(store).post("question", "q", "q")
+    owner_answers(store, qid, "A")
+    run = Runner(code=1, out='{"type": "result", "is_error": true, "result": "Not logged in · Please run /login"}')
+    deliver(store, "PC", "claude", run)
+    assert store.get(f"inbox/{qid}")["error"] == "Not logged in · Please run /login"

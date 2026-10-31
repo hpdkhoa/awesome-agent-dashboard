@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { startRun, stopRun, type Machine, type Run } from "./data";
+import { sendMessage, startRun, stopRun, type Machine, type Run, type Session } from "./data";
 import { usd } from "./Dashboard";
 
-const LIVE = new Set(["new", "running", "stopping"]);
+const LIVE = new Set(["new", "waiting", "running", "stopping"]);
 
 function ago(iso?: string) {
   if (!iso) return "";
@@ -64,16 +64,60 @@ export function StartForm({ machines }: { machines: Machine[] }) {
   );
 }
 
-export function RunList({ runs }: { runs: Run[] }) {
-  const starts = runs.filter((r) => r.action === "start");
+export function MessageBox({ s, runs }: { s: Session; runs: Run[] }) {
+  const [text, setText] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const mine = runs.filter((r) => r.action === "message" && r.sessionId === s.id);
+
+  async function send() {
+    if (!text.trim()) return setError("Write a message first.");
+    setBusy(true);
+    try {
+      await sendMessage(s.machine, s.id, s.cwd, text.trim());
+      setText("");
+    } catch (e) {
+      setError(String((e as { code?: string }).code ?? e));
+    }
+    setBusy(false);
+  }
+
   return (
     <section>
-      <h2>Runs from the dashboard</h2>
+      <h2>Send a message to this session</h2>
+      <textarea
+        rows={3}
+        value={text}
+        placeholder="What should the session do next?"
+        onChange={(e) => {
+          setText(e.target.value);
+          setError("");
+        }}
+      />
+      {error && <p className="bad small">{error}</p>}
+      <p className="muted small">
+        The bridge resumes the session with your message once it is closed. If it is open in a terminal or the desktop app,
+        the message waits; close that window to let it through.
+      </p>
+      <button className="primary" disabled={busy} onClick={send}>
+        Send
+      </button>
+      {mine.length > 0 && <RunList runs={mine} title="Messages to this session" />}
+    </section>
+  );
+}
+
+export function RunList({ runs, title = "Runs from the dashboard" }: { runs: Run[]; title?: string }) {
+  const starts = runs.filter((r) => r.action === "start" || r.action === "message");
+  return (
+    <section>
+      <h2>{title}</h2>
       {starts.length === 0 && <p className="muted small">None yet.</p>}
       {starts.map((r) => (
         <div key={r.id} className="run">
           <div className="small">
-            <span className={LIVE.has(r.status) ? "dot live" : "dot"} /> <strong>{r.status}</strong> · {r.workType ?? ""} ·{" "}
+            <span className={LIVE.has(r.status) ? "dot live" : "dot"} /> <strong>{r.status === "waiting" ? "waiting for the session to close" : r.status}</strong> ·{" "}
+            {r.action === "message" ? "message" : "new session"} · {r.workType ?? ""} ·{" "}
             {r.machine} · {ago(r.startedAt ?? r.createdAt)}
             {r.costUsd != null && <> · {usd(r.costUsd)}</>}
           </div>

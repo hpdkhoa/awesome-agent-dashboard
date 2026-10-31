@@ -64,7 +64,7 @@ def main(argv: list[str] | None = None) -> None:
     claude = find_claude(cfg.claude_bin)
     runs = None
     if store is not None and a.cmd == "watch":
-        runs = Runs(store, cfg.machine, cfg.roots, claude, data_dir() / "runs")
+        runs = Runs(store, cfg.machine, cfg.roots, claude, data_dir() / "runs", logs=cfg.logs)
         runs.forget_lost()
     stamp = lambda: time.strftime("%Y-%m-%d %H:%M:%S")
     next_sync = 0.0

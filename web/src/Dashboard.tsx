@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
 import { signOut } from "firebase/auth";
 import { auth } from "./firebase";
-import { useInbox, useMachines, useRuns, useSessions, useUsage, useWorkTypes, type Session, type Tokens } from "./data";
-import { RunList, StartForm } from "./Runs";
+import { useInbox, useMachines, useRuns, useSessions, useUsage, useWorkTypes, type Run, type Session, type Tokens } from "./data";
+import { MessageBox, RunList, StartForm } from "./Runs";
 import { InboxList, InboxView, isWaiting } from "./Inbox";
 
 const ACTIVE_MS = 5 * 60 * 1000;
@@ -131,7 +131,7 @@ export function Dashboard() {
             <p className="muted">The inbox is empty.</p>
           )
         ) : current ? (
-          <SessionView s={current} />
+          <SessionView s={current} runs={runs ?? []} />
         ) : (
           <p className="muted">Pick a session.</p>
         )}
@@ -200,7 +200,7 @@ function TokenTable({ t }: { t: Tokens }) {
   );
 }
 
-function SessionView({ s }: { s: Session }) {
+function SessionView({ s, runs }: { s: Session; runs: Run[] }) {
   return (
     <article>
       <h1>{s.title}</h1>
@@ -210,6 +210,7 @@ function SessionView({ s }: { s: Session }) {
         started {new Date(s.startedAt).toLocaleString()} · last {ago(s.lastAt)} · {s.prompts} prompts · {s.messages} replies ·{" "}
         {s.subagents} subagents · {Object.keys(s.models).join(", ")}
       </p>
+      <MessageBox key={s.id} s={s} runs={runs} />
       <h2>Last prompt</h2>
       <p className="quote">{s.lastPrompt || "none"}</p>
       <h2>Last reply</h2>
