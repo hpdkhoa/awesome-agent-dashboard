@@ -85,7 +85,7 @@ def build(
             "machine": machine,
             "workType": wt,
             "cwd": main.cwd,
-            "title": main.title or main.first_prompt or sid[:8],
+            "title": (main.title or main.first_prompt.split("\n")[0][:120] or sid[:8]),
             "firstPrompt": main.first_prompt,
             "lastPrompt": main.last_prompt,
             "lastReply": last_reply,

@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { sendMessage, startRun, stopRun, type Machine, type Run, type Session } from "./data";
 import { usd } from "./Dashboard";
+import { Md } from "./Markdown";
+import { Section } from "./Section";
 
 const LIVE = new Set(["new", "waiting", "running", "stopping"]);
 
@@ -35,8 +37,7 @@ export function StartForm({ machines }: { machines: Machine[] }) {
   }
 
   return (
-    <section>
-      <h2>Start a session</h2>
+    <Section id="runs.start" title="Start a session">
       <select value={pick} onChange={(e) => setPick(Number(e.target.value))}>
         {folders.map((f, n) => (
           <option key={n} value={n}>
@@ -60,7 +61,7 @@ export function StartForm({ machines }: { machines: Machine[] }) {
       <button className="primary" disabled={busy} onClick={start}>
         Start
       </button>
-    </section>
+    </Section>
   );
 }
 
@@ -83,12 +84,11 @@ export function MessageBox({ s, runs }: { s: Session; runs: Run[] }) {
   }
 
   return (
-    <section>
-      <h2>Send a message to this session</h2>
+    <Section id="session.message" title="Send a message to this session" extra={mine.length ? `${mine.length} sent` : ""}>
       <textarea
         rows={3}
         value={text}
-        placeholder="What should the session do next?"
+        placeholder="What should the session do next? (markdown works)"
         onChange={(e) => {
           setText(e.target.value);
           setError("");
@@ -103,32 +103,51 @@ export function MessageBox({ s, runs }: { s: Session; runs: Run[] }) {
         Send
       </button>
       {mine.length > 0 && <RunList runs={mine} title="Messages to this session" />}
-    </section>
+    </Section>
   );
 }
 
 export function RunList({ runs, title = "Runs from the dashboard" }: { runs: Run[]; title?: string }) {
-  const starts = runs.filter((r) => r.action === "start" || r.action === "message");
+  const shown = runs.filter((r) => r.action === "start" || r.action === "message");
   return (
-    <section>
-      <h2>{title}</h2>
-      {starts.length === 0 && <p className="muted small">None yet.</p>}
-      {starts.map((r) => (
-        <div key={r.id} className="run">
-          <div className="small">
-            <span className={LIVE.has(r.status) ? "dot live" : "dot"} /> <strong>{r.status === "waiting" ? "waiting for the session to close" : r.status}</strong> ·{" "}
-            {r.action === "message" ? "message" : "new session"} · {r.workType ?? ""} ·{" "}
-            {r.machine} · {ago(r.startedAt ?? r.createdAt)}
-            {r.costUsd != null && <> · {usd(r.costUsd)}</>}
-          </div>
-          <p className="quote small">{r.prompt}</p>
-          {r.result && <p className="quote small">{r.result}</p>}
+    <div>
+      <h2 className="label">{title}</h2>
+      {shown.length === 0 && <p className="muted small">None yet.</p>}
+      {shown.map((r) => (
+        <Section
+          key={r.id}
+          id={"run." + r.id}
+          open={LIVE.has(r.status)}
+          title={
+            <span className="run-head">
+              <span className={"status " + r.status}>{r.status === "waiting" ? "waiting for the session to close" : r.status}</span>
+              <span>{(r.prompt ?? "").split("\n")[0].slice(0, 90)}</span>
+            </span>
+          }
+          extra={
+            <>
+              {r.action === "message" ? "message" : "new session"} · {r.workType ?? ""} · {r.machine} ·{" "}
+              {ago(r.startedAt ?? r.createdAt)}
+              {r.costUsd != null && <> · {usd(r.costUsd)}</>}
+            </>
+          }
+        >
+          <p className="label">Prompt</p>
+          <Md text={r.prompt} />
+          {r.result && (
+            <>
+              <p className="label">Result</p>
+              <Md text={r.result} />
+            </>
+          )}
           {r.error && <p className="bad small">{r.error}</p>}
           {r.status === "running" && (
-            <button onClick={() => stopRun(r.machine, r.id)}>Stop</button>
+            <div className="actions">
+              <button onClick={() => stopRun(r.machine, r.id)}>Stop</button>
+            </div>
           )}
-        </div>
+        </Section>
       ))}
-    </section>
+    </div>
   );
 }

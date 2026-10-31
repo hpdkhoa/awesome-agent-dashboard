@@ -114,3 +114,8 @@ def test_synthetic_messages_are_skipped(tmp_path):
     p = tmp_path / "proj" / "s1.jsonl"
     write(p, [assistant("m1", T2, model="<synthetic>"), assistant("m2", T2)])
     assert list(read_lines(p, FileState()).msgs) == ["m2"]
+
+
+def test_redact_keeps_markdown_shape():
+    text = "# Title\r\n\r\n\r\n\r\n- a  \n- b\n\n```\n    indented\n```"
+    assert redact(text, 500) == "# Title\n\n- a\n- b\n\n```\n    indented\n```"

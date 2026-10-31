@@ -5,6 +5,7 @@ import { auth, google } from "./firebase";
 import { checkOwner } from "./owner";
 import { Dashboard } from "./Dashboard";
 import "./styles.css";
+import "./ui.css";
 
 type State = { kind: "loading" } | { kind: "out"; refused: boolean; error?: string } | { kind: "in"; user: User };
 

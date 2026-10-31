@@ -16,15 +16,19 @@ from .logs import FileState, read_lines, session_files
 class State:
     """Per log file: how far it was read and what it held; per document: the hash last written. Kept outside the repo."""
 
+    VERSION = 2  # 2: text keeps its line breaks; an older state is read again from the logs
+
     def __init__(self, path: Path):
         self.path = path
         raw = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        if raw.get("version") != self.VERSION:
+            raw = {}
         self.files: dict[str, dict] = raw.get("files", {})
         self.written: dict[str, str] = raw.get("written", {})
 
     def save(self) -> None:
         tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"files": self.files, "written": self.written}), encoding="utf-8")
+        tmp.write_text(json.dumps({"version": self.VERSION, "files": self.files, "written": self.written}), encoding="utf-8")
         os.replace(tmp, self.path)
 
 

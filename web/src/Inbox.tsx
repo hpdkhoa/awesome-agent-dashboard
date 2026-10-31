@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { answerItem, type InboxItem, type Session } from "./data";
+import { Md } from "./Markdown";
+import { Section } from "./Section";
 
 const KIND = { question: "Question", suggestion: "Suggestion", result: "Result to review", approval: "Approval" };
 const STATUS = {
@@ -63,19 +65,22 @@ export function InboxView({ item, session }: { item: InboxItem; session?: Sessio
   }
 
   const open = item.status === "open";
+  const body = item.kind === "approval" ? "```json\n" + item.text + "\n```" : item.text;
   return (
     <article>
-      <p className="muted small">
+      <h1>{item.title}</h1>
+      <p className="meta">
         {KIND[item.kind]} · {item.workType} · {item.machine} · {ago(item.createdAt)} · {STATUS[item.status]}
         <br />
         from session: {session?.title ?? item.sessionId}
       </p>
-      <h1>{item.title}</h1>
-      <p className={item.kind === "approval" ? "quote mono" : "quote"}>{item.text}</p>
+
+      <Section id="inbox.text" title={item.kind === "approval" ? "The call" : "Details"}>
+        <Md text={body} />
+      </Section>
 
       {item.files.length > 0 && (
-        <>
-          <h2>Files</h2>
+        <Section id="inbox.files" title="Files" extra={item.files.length}>
           <ul className="small">
             {item.files.map((f) => (
               <li key={f}>
@@ -83,12 +88,11 @@ export function InboxView({ item, session }: { item: InboxItem; session?: Sessio
               </li>
             ))}
           </ul>
-        </>
+        </Section>
       )}
 
       {item.options.length > 0 && item.kind !== "approval" && (
-        <>
-          <h2>Options</h2>
+        <Section id="inbox.options" title="Options" extra={item.options.length}>
           <div className="options">
             {item.options.map((o, n) => {
               const on = (open ? choice : item.answer?.choice) === o.label;
@@ -111,16 +115,15 @@ export function InboxView({ item, session }: { item: InboxItem; session?: Sessio
               );
             })}
           </div>
-        </>
+        </Section>
       )}
 
       {open ? (
-        <>
-          <h2>{item.kind === "result" ? "Review note (optional)" : "Your answer"}</h2>
+        <Section id="inbox.answer" title={item.kind === "result" ? "Review note (optional)" : "Your answer"}>
           <textarea
             value={text}
             rows={3}
-            placeholder={item.kind === "question" ? "Free-text answer, or a note with your choice" : "Optional note"}
+            placeholder={item.kind === "question" ? "Free-text answer, or a note with your choice (markdown works)" : "Optional note"}
             onChange={(e) => {
               setText(e.target.value);
               setError("");
@@ -159,26 +162,20 @@ export function InboxView({ item, session }: { item: InboxItem; session?: Sessio
               </button>
             )}
           </div>
-        </>
+        </Section>
       ) : (
-        <>
-          <h2>Answer</h2>
-          <p className="quote">
-            {[item.answer?.choice, item.answer?.text].filter(Boolean).join(" · ") || "Reviewed, no note"}
-          </p>
-          {item.deliveredVia && (
-            <p className="muted small">
-              Delivered {item.deliveredVia === "live" ? "to the open session" : "by resuming the closed session"}
-              {item.deliveredAt ? " " + ago(item.deliveredAt) : ""}.
-            </p>
-          )}
-          {item.followUp && (
-            <>
-              <h2>The session's reply</h2>
-              <p className="quote">{item.followUp}</p>
-            </>
-          )}
-        </>
+        <Section
+          id="inbox.answered"
+          title="Your answer"
+          extra={item.deliveredVia ? (item.deliveredVia === "live" ? "delivered to the open session" : "delivered by resume") : ""}
+        >
+          <Md text={[item.answer?.choice && `**${item.answer.choice}**`, item.answer?.text].filter(Boolean).join("\n\n") || "Reviewed, no note"} />
+        </Section>
+      )}
+      {item.followUp && (
+        <Section id="inbox.followup" title="The session's reply">
+          <Md text={item.followUp} />
+        </Section>
       )}
       {item.error && <p className="bad small">Delivery problem: {item.error}</p>}
     </article>

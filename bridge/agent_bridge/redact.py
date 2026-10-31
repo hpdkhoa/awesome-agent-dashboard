@@ -17,5 +17,7 @@ def redact(text: str, limit: int) -> str:
     """Secrets replaced by [redacted], then cut to limit characters."""
     for p in PATTERNS:
         text = p.sub("[redacted]", text)
-    text = " ".join(text.split())
+    # keep line breaks and indentation (prompts and replies are markdown); drop trailing spaces and extra blank lines
+    text = re.sub(r"[ \t]+$", "", text.replace("\r\n", "\n"), flags=re.M).strip()
+    text = re.sub(r"\n{3,}", "\n\n", text)
     return text if len(text) <= limit else text[: limit - 1] + "…"

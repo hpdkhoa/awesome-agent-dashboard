@@ -3,6 +3,8 @@ import { signOut } from "firebase/auth";
 import { auth } from "./firebase";
 import { useInbox, useMachines, useRuns, useSessions, useUsage, useWorkTypes, type Run, type Session, type Tokens } from "./data";
 import { MessageBox, RunList, StartForm } from "./Runs";
+import { Md } from "./Markdown";
+import { Section } from "./Section";
 import { InboxList, InboxView, isWaiting } from "./Inbox";
 
 const ACTIVE_MS = 5 * 60 * 1000;
@@ -138,9 +140,10 @@ export function Dashboard() {
       </main>
 
       <section className="usage">
-        <h2>Spend by day</h2>
-        <Bars days={[...usage].reverse().slice(-14)} />
-        <h2>By work type, last {usage.length} days</h2>
+        <Section id="usage.days" title="Spend by day" extra="last 14 days">
+          <Bars days={[...usage].reverse().slice(-14)} />
+        </Section>
+        <Section id="usage.workTypes" title="By work type" extra={`last ${usage.length} days`}>
         <table>
           <tbody>
             {byWorkType.map(([w, t]) => (
@@ -152,6 +155,7 @@ export function Dashboard() {
             ))}
           </tbody>
         </table>
+        </Section>
         <p className="muted small">Dollars are list-price estimates from token counts. Your plan is a subscription.</p>
       </section>
     </div>
@@ -204,24 +208,26 @@ function SessionView({ s, runs }: { s: Session; runs: Run[] }) {
   return (
     <article>
       <h1>{s.title}</h1>
-      <p className="muted small">
+      <p className="meta">
         {s.workType} · {s.machine} · {s.cwd}
         <br />
         started {new Date(s.startedAt).toLocaleString()} · last {ago(s.lastAt)} · {s.prompts} prompts · {s.messages} replies ·{" "}
         {s.subagents} subagents · {Object.keys(s.models).join(", ")}
       </p>
       <MessageBox key={s.id} s={s} runs={runs} />
-      <h2>Last prompt</h2>
-      <p className="quote">{s.lastPrompt || "none"}</p>
-      <h2>Last reply</h2>
-      <p className="quote">{s.lastReply || "none"}</p>
-      <h2>Tokens</h2>
-      <TokenTable t={s.tokens} />
+      <Section id="session.lastPrompt" title="Last prompt">
+        <Md text={s.lastPrompt} />
+      </Section>
+      <Section id="session.lastReply" title="Last reply">
+        <Md text={s.lastReply} />
+      </Section>
+      <Section id="session.tokens" title="Tokens" extra={`${num(s.tokens.total)} · ${usd(s.tokens.costUsd)} est.`} open={false}>
+        <TokenTable t={s.tokens} />
+      </Section>
       {s.firstPrompt && s.firstPrompt !== s.title && (
-        <>
-          <h2>First prompt</h2>
-          <p className="quote">{s.firstPrompt}</p>
-        </>
+        <Section id="session.firstPrompt" title="First prompt" open={false}>
+          <Md text={s.firstPrompt} />
+        </Section>
       )}
     </article>
   );

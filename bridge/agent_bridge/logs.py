@@ -92,9 +92,9 @@ def _fold(d: dict, st: FileState) -> None:
         text = _text_of((d.get("message") or {}).get("content"))
         if text.strip():
             st.prompts += 1
-            st.last_prompt = redact(text, 300)
+            st.last_prompt = redact(text, 1500)
             if not st.first_prompt:
-                st.first_prompt = redact(text, 120)
+                st.first_prompt = redact(text, 1500)
     elif kind == "assistant":
         m = d.get("message") or {}
         u = m.get("usage") or {}
@@ -119,7 +119,7 @@ def _fold(d: dict, st: FileState) -> None:
             st.msgs[mid] = new if old is None else old[:3] + [max(a, b) for a, b in zip(old[3:], new[3:])]
         text = _text_of(m.get("content"))
         if text.strip():
-            st.last_reply = redact(text, 500)
+            st.last_reply = redact(text, 3000)
 
 
 def session_files(logs: Path, max_age_days: float | None = None) -> dict[str, list[Path]]:
