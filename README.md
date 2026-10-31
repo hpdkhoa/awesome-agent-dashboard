@@ -17,8 +17,9 @@ Status: P0 (sign-in and the lock).
 2. Copy `.env.example` to `.env` and fill it in. `.env` is never committed.
 3. Deploy the lock: `npm run rules:deploy`. It writes `firestore.rules` from the template with your email, on your
    machine only, and sends it to your Firebase project.
-4. Cloudflare Pages: build command `npm run build`, output folder `dist`, and the `VITE_FIREBASE_*` values from your
-   `.env` as the project's environment variables. Your email is not one of them.
+4. Cloudflare (Workers with static assets, set in `wrangler.jsonc`): build command `npm run build`, deploy command
+   `npx wrangler deploy`, and the `VITE_FIREBASE_*` values from your
+   `.env` as build variables. Your email is not one of them.
 
 ## Checks
 
