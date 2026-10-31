@@ -78,6 +78,8 @@ class Runs:
         self.out_dir = out_dir  # each run's output goes to files, so a long run never blocks on a full pipe
         self.out_dir.mkdir(parents=True, exist_ok=True)
         self.procs: dict[str, subprocess.Popen] = {}
+        # "new" commands already acted on: a listener snapshot can lag behind our own write, never act twice
+        self.acted: set[str] = set()
 
     def forget_lost(self) -> None:
         """On start: runs marked running by an earlier bridge on this machine can no longer be followed."""
@@ -86,12 +88,18 @@ class Runs:
                 self.store.update(f"commands/{c['id']}", {"status": "lost", "endedAt": now_iso(),
                                   "error": "The bridge restarted while this run was going; its result is in the session log."})
 
-    def step(self) -> list[str]:
+    def step(self, todo: list[dict] | None = None) -> list[str]:
+        """Acts on the commands still to do. `todo` comes from the listener (listen.py); without it, ask Firestore."""
         log = []
-        todo = self.store.where("commands", "status", "new") + self.store.where("commands", "status", "waiting")
+        if todo is None:
+            todo = self.store.where("commands", "status", "new") + self.store.where("commands", "status", "waiting")
         for c in todo:
             if c.get("machine") != self.machine:
                 continue
+            if c.get("status") == "new":
+                if c["id"] in self.acted:
+                    continue
+                self.acted.add(c["id"])
             action = c.get("action")
             line = (self._start(c) if action == "start" else self._message(c) if action == "message"
                     else self._stop(c) if action == "stop" else self._unknown(c))

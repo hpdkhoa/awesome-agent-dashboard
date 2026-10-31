@@ -32,7 +32,7 @@ function signedIn(email: string, verified = true, provider = "google.com") {
     .firestore();
 }
 
-const paths = ["meta/owner", "work/labs", "work/labs/sessions/s1/items/q1"];
+const paths = ["meta/owner", "work/labs", "work/labs/sessions/s1/items/q1", "moneyEntries/e1", "fxRates/r1", "goldPrices/g1"];
 
 describe("the owner", () => {
   for (const p of paths)

@@ -6,6 +6,9 @@ import { MessageBox, RunList, StartForm } from "./Runs";
 import { Md } from "./Markdown";
 import { Section } from "./Section";
 import { InboxList, InboxView, isWaiting } from "./Inbox";
+import { useEntries, useFx, useGold } from "./moneyData";
+import { EntryForm, MoneyView } from "./Money";
+import { RatesReport, RatesSide } from "./Rates";
 
 const ACTIVE_MS = 5 * 60 * 1000;
 
@@ -33,8 +36,12 @@ export function Dashboard() {
   const runs = useRuns();
   const [wt, setWt] = useState<string>("all");
   const [picked, setPicked] = useState<string | null>(null);
-  const [tab, setTab] = useState<"inbox" | "sessions" | "runs">("inbox");
+  const [tab, setTab] = useState<"inbox" | "sessions" | "runs" | "money" | "rates">("inbox");
   const [pickedItem, setPickedItem] = useState<string | null>(null);
+  // Money data loads only while the Money or Rates tab is open.
+  const entries = useEntries(tab === "money");
+  const fx = useFx(tab === "money" || tab === "rates");
+  const gold = useGold(tab === "money" || tab === "rates");
 
   const shown = useMemo(() => (sessions ?? []).filter((s) => wt === "all" || s.workType === wt), [sessions, wt]);
   const current = shown.find((s) => s.id === picked) ?? shown[0];
@@ -98,8 +105,18 @@ export function Dashboard() {
           <button className={tab === "runs" ? "tab on" : "tab"} onClick={() => setTab("runs")}>
             Runs {(runs ?? []).some((r) => r.status === "running") && <span className="dot live inline" />}
           </button>
+          <button className={tab === "money" ? "tab on" : "tab"} onClick={() => setTab("money")}>
+            Money
+          </button>
+          <button className={tab === "rates" ? "tab on" : "tab"} onClick={() => setTab("rates")}>
+            Rates
+          </button>
         </div>
-        {tab === "runs" ? (
+        {tab === "money" ? (
+          <EntryForm />
+        ) : tab === "rates" ? (
+          <RatesSide fx={fx} />
+        ) : tab === "runs" ? (
           <div className="pad">
             <StartForm machines={machines ?? []} />
           </div>
@@ -124,7 +141,11 @@ export function Dashboard() {
       </aside>
 
       <main className="main">
-        {tab === "runs" ? (
+        {tab === "money" ? (
+          entries && fx && gold ? <MoneyView entries={entries} fx={fx[0]} gold={gold[0]} /> : <p className="muted">Loading</p>
+        ) : tab === "rates" ? (
+          fx && gold ? <RatesReport fx={fx} gold={gold} /> : <p className="muted">Loading</p>
+        ) : tab === "runs" ? (
           <RunList runs={runs ?? []} />
         ) : tab === "inbox" ? (
           item ? (

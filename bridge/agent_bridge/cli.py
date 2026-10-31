@@ -19,7 +19,7 @@ from .deliver import deliver, find_claude
 from .runs import Runs
 from .sync import run
 
-COMMAND_SECONDS = 5  # how often watch looks for start and stop commands from the page
+COMMAND_SECONDS = 5  # how often watch acts on the commands the listener holds and checks its runs
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -66,6 +66,13 @@ def main(argv: list[str] | None = None) -> None:
     if store is not None and a.cmd == "watch":
         runs = Runs(store, cfg.machine, cfg.roots, claude, data_dir() / "runs", logs=cfg.logs)
         runs.forget_lost()
+        feed = None
+        try:
+            from .listen import CommandFeed, firestore_client
+
+            feed = CommandFeed(firestore_client(store.s))
+        except ImportError:
+            print("google-cloud-firestore is not installed: asking for commands every 5 s instead of listening", flush=True)
     stamp = lambda: time.strftime("%Y-%m-%d %H:%M:%S")
     next_sync = 0.0
     while True:
@@ -83,7 +90,7 @@ def main(argv: list[str] | None = None) -> None:
                     for line in deliver(store, cfg.machine, claude):
                         print(f"{stamp()} inbox {line}", flush=True)
             if runs is not None:
-                for line in runs.step():
+                for line in runs.step(feed.current() if feed is not None else None):
                     print(f"{stamp()} run {line}", flush=True)
         except (Exception, SystemExit) as e:
             if a.cmd == "sync":
