@@ -4,15 +4,19 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 import time
 
 from .auth import Session, sign_in
-from .config import Config
+from .config import Config, data_dir
 from .firestore import Firestore
 from .sync import run
 
 
 def main(argv: list[str] | None = None) -> None:
+    if sys.stdout is None:
+        # Started without a console (pythonw, a scheduled task): write to a log file next to the bridge's state.
+        sys.stdout = sys.stderr = open(data_dir() / "bridge.log", "a", encoding="utf-8", buffering=1)
     p = argparse.ArgumentParser(prog="agent-bridge")
     sub = p.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("signin", help="sign in once with your Google account")
@@ -42,12 +46,19 @@ def main(argv: list[str] | None = None) -> None:
         store = Firestore(Session(cfg))
         store.check_owner()
     while True:
-        r = run(cfg, a.days, store, dry_run=a.dry_run)
-        print(
-            f"{time.strftime('%H:%M:%S')} sessions {r['sessions']}, tokens {r['tokens']:,}, "
-            f"list-price estimate ${r['costUsd']:,}, documents {'to write' if a.dry_run else 'written'} "
-            f"{r['toWrite'] if a.dry_run else r['written']}"
-        )
+        try:
+            r = run(cfg, a.days, store, dry_run=a.dry_run)
+            print(
+                f"{time.strftime('%Y-%m-%d %H:%M:%S')} sessions {r['sessions']}, tokens {r['tokens']:,}, "
+                f"list-price estimate ${r['costUsd']:,}, documents {'to write' if a.dry_run else 'written'} "
+                f"{r['toWrite'] if a.dry_run else r['written']}",
+                flush=True,
+            )
+        except (Exception, SystemExit) as e:
+            if a.cmd == "sync":
+                raise
+            # watch keeps going through a network drop or a refused write, and tries again next round
+            print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} sync failed, retrying in {a.every:.0f}s: {e}", flush=True)
         if a.cmd == "sync":
             return
         time.sleep(a.every)

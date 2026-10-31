@@ -35,6 +35,15 @@ python -m agent_bridge sync --dry-run   # count only, write nothing
 python -m agent_bridge watch         # sync every minute
 ```
 
+To keep it running in the background and start it at log on:
+
+```bash
+powershell -ExecutionPolicy Bypass -File bridge/install-task.ps1
+```
+
+On Linux: `sh bridge/install-service.sh` (a systemd user service). Both take an uninstall flag
+(`-Uninstall`, `--uninstall`).
+
 The sign-in keeps a Firebase refresh token in the OS key store (or a user-only file on a machine without one). Over
 ssh, run `signin --port 8790 --no-browser` with `ssh -L 8790:localhost:8790` and open the printed link locally.
 
