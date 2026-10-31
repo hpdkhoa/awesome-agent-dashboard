@@ -8,7 +8,7 @@ A one-owner web portal over your own Claude Code: display, summarize, Q&A and ex
 - Every install is one owner: another person runs their own install, with their own `.env`, Firebase project and
   machine.
 
-Status: P0 (sign-in and the lock).
+Status: P1 (sessions and token spend, read-only).
 
 ## Set up your own install
 
@@ -21,11 +21,30 @@ Status: P0 (sign-in and the lock).
    `npx wrangler deploy`, and the `VITE_FIREBASE_*` values from your
    `.env` as build variables. Your email is not one of them.
 
+## The bridge (P1)
+
+The bridge runs on each machine that runs Claude Code. It reads Claude Code's own session logs and sends each
+session's title, last prompt and reply (secrets removed, cut short), and its token counts to your Firestore. It never
+runs `claude` in P1.
+
+```bash
+cd bridge
+pip install -e .
+python -m agent_bridge signin        # once: sign in with your Google account in the browser
+python -m agent_bridge sync --dry-run   # count only, write nothing
+python -m agent_bridge watch         # sync every minute
+```
+
+The sign-in keeps a Firebase refresh token in the OS key store (or a user-only file on a machine without one). Over
+ssh, run `signin --port 8790 --no-browser` with `ssh -L 8790:localhost:8790` and open the printed link locally.
+
 ## Checks
 
 - `npm test` runs the rules against the Firestore emulator (needs Java 11 or newer): the owner reads and writes;
   another Google account, an unverified email, a password or anonymous sign-in with the owner's email, and no sign-in
   are all refused. It also tests the secret check.
+- `cd bridge && python -m pytest` tests the log reading: one count per message, resumed sessions not counted twice,
+  subagents counted, prices, redaction.
 - `npm run check:secrets` fails on any email (other than `example.com` and GitHub no-reply), key, token or env file
   that git would commit. The pre-commit hook runs it: `git config core.hooksPath .githooks`. CI runs it and gitleaks.
 

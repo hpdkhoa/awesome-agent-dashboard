@@ -1,0 +1,15 @@
+[project]
+name = "agent-bridge"
+version = "0.1.0"
+description = "Reads your own Claude Code session logs and sends sessions and token spend to your dashboard. Read-only: it never runs claude in P1."
+requires-python = ">=3.10"
+dependencies = ["keyring>=24"]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[project.scripts]
+agent-bridge = "agent_bridge.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
