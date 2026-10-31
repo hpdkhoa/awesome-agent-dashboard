@@ -9,6 +9,21 @@ import urllib.request
 from .auth import Session
 
 
+def from_value(v: dict):
+    if "nullValue" in v:
+        return None
+    for k in ("booleanValue", "stringValue", "doubleValue", "timestampValue"):
+        if k in v:
+            return v[k]
+    if "integerValue" in v:
+        return int(v["integerValue"])
+    if "mapValue" in v:
+        return {k: from_value(x) for k, x in v["mapValue"].get("fields", {}).items()}
+    if "arrayValue" in v:
+        return [from_value(x) for x in v["arrayValue"].get("values", [])]
+    return None
+
+
 def to_value(v) -> dict:
     if v is None:
         return {"nullValue": None}
@@ -33,9 +48,10 @@ class Firestore:
         self.root = f"projects/{session.cfg.project_id}/databases/(default)/documents"
         self.base = f"https://firestore.googleapis.com/v1/{self.root}"
 
-    def _call(self, url: str, body: dict | None = None) -> dict:
+    def _call(self, url: str, body: dict | None = None, method: str | None = None) -> dict:
         req = urllib.request.Request(
             url,
+            method=method,
             data=None if body is None else json.dumps(body).encode(),
             headers={"Authorization": f"Bearer {self.s.token()}", "Content-Type": "application/json"},
         )
@@ -52,6 +68,29 @@ class Firestore:
         except SystemExit as e:
             if "(404)" not in str(e):
                 raise
+
+    def get(self, path: str) -> dict | None:
+        try:
+            d = self._call(f"{self.base}/{path}")
+        except SystemExit as e:
+            if "(404)" in str(e):
+                return None
+            raise
+        return {k: from_value(v) for k, v in d.get("fields", {}).items()}
+
+    def update(self, path: str, fields: dict) -> None:
+        """Sets only the given top-level fields of one document, leaving the rest as they are."""
+        mask = "&".join(f"updateMask.fieldPaths={k}" for k in fields)
+        body = {"fields": to_value(fields)["mapValue"]["fields"]}
+        req_url = f"{self.base}/{path}?{mask}"
+        self._call(req_url, body, method="PATCH")
+
+    def where(self, collection: str, field: str, value) -> list[dict]:
+        """Documents of one collection whose field equals value."""
+        q = {"structuredQuery": {"from": [{"collectionId": collection}], "where": {"fieldFilter": {
+            "field": {"fieldPath": field}, "op": "EQUAL", "value": to_value(value)}}}}
+        rows = self._call(f"{self.base}:runQuery", q)
+        return [{k: from_value(v) for k, v in r["document"].get("fields", {}).items()} for r in rows if "document" in r]
 
     def put_many(self, docs: dict[str, dict]) -> int:
         """Replaces each document (path -> fields), 400 per commit. Returns how many were written."""

@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { signOut } from "firebase/auth";
 import { auth } from "./firebase";
-import { useMachines, useSessions, useUsage, useWorkTypes, type Session, type Tokens } from "./data";
+import { useInbox, useMachines, useSessions, useUsage, useWorkTypes, type Session, type Tokens } from "./data";
+import { InboxList, InboxView, isWaiting } from "./Inbox";
 
 const ACTIVE_MS = 5 * 60 * 1000;
 
@@ -25,11 +26,17 @@ export function Dashboard() {
   const usage = useUsage();
   const workTypes = useWorkTypes();
   const machines = useMachines();
+  const inbox = useInbox();
   const [wt, setWt] = useState<string>("all");
   const [picked, setPicked] = useState<string | null>(null);
+  const [tab, setTab] = useState<"inbox" | "sessions">("inbox");
+  const [pickedItem, setPickedItem] = useState<string | null>(null);
 
   const shown = useMemo(() => (sessions ?? []).filter((s) => wt === "all" || s.workType === wt), [sessions, wt]);
   const current = shown.find((s) => s.id === picked) ?? shown[0];
+  const items = (inbox ?? []).filter((i) => wt === "all" || i.workType === wt);
+  const waiting = (inbox ?? []).filter(isWaiting).length;
+  const item = items.find((i) => i.id === pickedItem) ?? items.find(isWaiting) ?? items[0];
   const todayUse = usage?.find((u) => u.day === today());
   const month = (usage ?? []).reduce((a, u) => ({ tokens: a.tokens + u.total, cost: a.cost + u.costUsd }), { tokens: 0, cost: 0 });
   const lastSync = (machines ?? []).map((m) => m.syncedAt).sort().at(-1);
@@ -45,12 +52,15 @@ export function Dashboard() {
     }, {}),
   ).sort((a, b) => b[1].costUsd - a[1].costUsd);
 
-  if (!sessions || !usage || !workTypes) return <main className="card">Loading</main>;
+  if (!sessions || !usage || !workTypes || !inbox) return <main className="card">Loading</main>;
 
   return (
     <div className="app">
       <header className="top">
         <strong>Agent dashboard</strong>
+        <button className={waiting ? "pill wait" : "pill"} onClick={() => setTab("inbox")}>
+          {waiting} waiting for you
+        </button>
         <span className="stat">
           {sessions.filter(isActive).length} active
         </span>
@@ -74,6 +84,17 @@ export function Dashboard() {
             </button>
           ))}
         </div>
+        <div className="tabs">
+          <button className={tab === "inbox" ? "tab on" : "tab"} onClick={() => setTab("inbox")}>
+            Inbox {waiting > 0 && <span className="count">{waiting}</span>}
+          </button>
+          <button className={tab === "sessions" ? "tab on" : "tab"} onClick={() => setTab("sessions")}>
+            Sessions
+          </button>
+        </div>
+        {tab === "inbox" ? (
+          <InboxList items={items} picked={item?.id} onPick={setPickedItem} />
+        ) : (
         <ul className="list">
           {shown.map((s) => (
             <li key={s.id} className={s.id === current?.id ? "row on" : "row"} onClick={() => setPicked(s.id)}>
@@ -88,9 +109,22 @@ export function Dashboard() {
           ))}
           {shown.length === 0 && <li className="muted">No sessions yet. Run the bridge: agent-bridge sync</li>}
         </ul>
+        )}
       </aside>
 
-      <main className="main">{current ? <SessionView s={current} /> : <p className="muted">Pick a session.</p>}</main>
+      <main className="main">
+        {tab === "inbox" ? (
+          item ? (
+            <InboxView key={item.id} item={item} session={sessions.find((s) => s.id === item.sessionId)} />
+          ) : (
+            <p className="muted">The inbox is empty.</p>
+          )
+        ) : current ? (
+          <SessionView s={current} />
+        ) : (
+          <p className="muted">Pick a session.</p>
+        )}
+      </main>
 
       <section className="usage">
         <h2>Spend by day</h2>

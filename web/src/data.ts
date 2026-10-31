@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { collection, limit, onSnapshot, orderBy, query, type QueryConstraint } from "firebase/firestore";
+import { collection, doc, limit, onSnapshot, orderBy, query, updateDoc, type QueryConstraint } from "firebase/firestore";
 import { db } from "./firebase";
 
 // The shapes the bridge writes (bridge/agent_bridge/aggregate.py).
@@ -36,6 +36,27 @@ export type Session = {
 
 export type Usage = Tokens & { day: string; byWorkType: Record<string, Tokens>; byModel: Record<string, Tokens>; sessionCount: number };
 export type WorkType = Tokens & { id: string; sessions: number; lastAt: string };
+export type InboxItem = {
+  id: string;
+  kind: "question" | "suggestion" | "result";
+  sessionId: string;
+  machine: string;
+  cwd: string;
+  workType: string;
+  title: string;
+  text: string;
+  options: { label: string; detail: string }[];
+  recommended: number | null;
+  files: string[];
+  status: "open" | "answered" | "delivering" | "delivered" | "closed";
+  createdAt: string;
+  answer: { choice: string; text: string; at: string } | null;
+  deliveredAt?: string;
+  deliveredVia?: "live" | "resume";
+  followUp?: string;
+  error?: string | null;
+};
+
 export type Machine = { name: string; windowDays: number; sessions: number; syncedAt: string };
 
 function useCollection<T>(name: string, ...constraints: QueryConstraint[]): T[] | null {
@@ -51,3 +72,8 @@ export const useSessions = () => useCollection<Session>("sessions", orderBy("las
 export const useUsage = () => useCollection<Usage>("usage", orderBy("day", "desc"), limit(30));
 export const useWorkTypes = () => useCollection<WorkType>("workTypes");
 export const useMachines = () => useCollection<Machine>("machines");
+export const useInbox = () => useCollection<InboxItem>("inbox", orderBy("createdAt", "desc"), limit(200));
+
+// The owner's answer. The session picks it up live, or the bridge resumes the session if it has closed.
+export const answerItem = (id: string, choice: string, text: string) =>
+  updateDoc(doc(db, "inbox", id), { status: "answered", answer: { choice, text, at: new Date().toISOString() }, error: null });

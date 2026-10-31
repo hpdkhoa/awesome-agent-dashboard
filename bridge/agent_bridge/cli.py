@@ -1,4 +1,8 @@
-"""agent-bridge signin | sync | watch. Read-only on Claude Code: it reads the logs and never runs claude."""
+"""agent-bridge signin | sync | watch | inbox.
+
+sync and watch read Claude Code's logs. watch also delivers the owner's answers to closed sessions by resuming them
+(deliver.py); that is the only time it runs claude. inbox is the MCP server each session starts.
+"""
 
 from __future__ import annotations
 
@@ -10,6 +14,7 @@ import time
 from .auth import Session, sign_in
 from .config import Config, data_dir
 from .firestore import Firestore
+from .deliver import deliver, find_claude
 from .sync import run
 
 
@@ -28,7 +33,14 @@ def main(argv: list[str] | None = None) -> None:
         c.add_argument("--dry-run", action="store_true", help="read and count, write nothing")
         if name == "watch":
             c.add_argument("--every", type=float, default=60)
+    sub.add_parser("inbox", help="the inbox MCP server (started by Claude Code, not by hand)")
     a = p.parse_args(argv)
+
+    if a.cmd == "inbox":
+        from .inbox import server
+
+        server()
+        return
 
     if os.environ.get("ANTHROPIC_API_KEY"):
         # Terms T7: the bridge must never make Claude Code bill an API account by mistake.
@@ -54,6 +66,9 @@ def main(argv: list[str] | None = None) -> None:
                 f"{r['toWrite'] if a.dry_run else r['written']}",
                 flush=True,
             )
+            if store is not None:
+                for line in deliver(store, cfg.machine, find_claude(cfg.claude_bin)):
+                    print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} inbox {line}", flush=True)
         except (Exception, SystemExit) as e:
             if a.cmd == "sync":
                 raise

@@ -8,7 +8,7 @@ A one-owner web portal over your own Claude Code: display, summarize, Q&A and ex
 - Every install is one owner: another person runs their own install, with their own `.env`, Firebase project and
   machine.
 
-Status: P1 (sessions and token spend, read-only).
+Status: P2 (inbox: questions, suggestions and results; answers go back to the session).
 
 ## Set up your own install
 
@@ -46,6 +46,28 @@ On Linux: `sh bridge/install-service.sh` (a systemd user service). Both take an 
 
 The sign-in keeps a Firebase refresh token in the OS key store (or a user-only file on a machine without one). Over
 ssh, run `signin --port 8790 --no-browser` with `ssh -L 8790:localhost:8790` and open the printed link locally.
+
+## The inbox (P2)
+
+Each Claude Code session gets four tools from a small MCP server:
+
+| Tool | Does |
+|---|---|
+| `inbox_ask` | posts a question with options (one marked recommended) and waits up to 25 minutes for your answer, which comes back as the tool result |
+| `inbox_wait` | keeps waiting on an earlier question |
+| `inbox_suggest` | posts a suggestion to accept or decline |
+| `inbox_result` | posts a result to review |
+
+Register it once for all sessions (user scope):
+
+```bash
+claude mcp add --scope user agent-inbox -- python -m agent_bridge inbox
+```
+
+An answer to a session that has closed is delivered by `watch`, which resumes that session with
+`claude -p --resume <session>`. It needs the Claude Code CLI on this machine, signed in through Anthropic's own sign-in
+(or `CLAUDE_BIN` in `.env` pointing to it). The bridge never resumes a session that is still open: each open session's
+inbox server sends a heartbeat every minute.
 
 ## Checks
 

@@ -9,6 +9,8 @@
   --accent-bg: #e6f1fb;
   --live: #3b6d11;
   --bad: #a32d2d;
+  --wait: #faeeda;
+  --wait-fg: #854f0b;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -21,6 +23,8 @@
     --accent-bg: #0c447c;
     --live: #97c459;
     --bad: #f09595;
+    --wait: #633806;
+    --wait-fg: #fac775;
   }
 }
 * { box-sizing: border-box; }
@@ -64,6 +68,23 @@ td { padding: 4px 0; border-bottom: 1px solid var(--line); }
 .bars { display: flex; align-items: flex-end; gap: 4px; height: 120px; }
 .bar { flex: 1; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; }
 .fill { width: 100%; background: var(--accent); border-radius: 3px 3px 0 0; min-height: 1px; }
+
+.tabs { display: flex; border-bottom: 1px solid var(--line); }
+.tab { flex: 1; border: none; border-radius: 0; padding: 10px; border-bottom: 2px solid transparent; }
+.tab.on { border-bottom-color: var(--accent); }
+.count { background: var(--wait); color: var(--wait-fg); border-radius: 999px; padding: 0 7px; font-size: 12px; margin-left: 4px; }
+.pill { padding: 2px 10px; border-radius: 999px; font-size: 13px; }
+.pill.wait { background: var(--wait); color: var(--wait-fg); border-color: var(--wait); }
+.dot.wait { background: var(--wait); border-color: var(--wait); }
+.options { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.option { display: flex; flex-direction: column; gap: 4px; text-align: left; padding: 10px 12px; background: var(--card); }
+.option.on { border-color: var(--accent); background: var(--accent-bg); }
+.option:disabled { cursor: default; }
+.tag { margin-left: 8px; font-size: 11px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--live); color: var(--live); }
+textarea { width: 100%; font: inherit; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: inherit; }
+.actions { display: flex; gap: 8px; margin-top: 10px; }
+.primary { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+code { font-size: 12px; }
 
 @media (max-width: 900px) {
   .app { grid-template-columns: 1fr; grid-template-areas: "top" "side" "main" "usage"; height: auto; }

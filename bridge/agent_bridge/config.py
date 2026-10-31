@@ -36,6 +36,7 @@ class Config:
     machine: str
     logs: Path
     roots: list[tuple[str, str]]
+    claude_bin: str = ""
 
     @classmethod
     def load(cls, env_path: Path | None = None) -> Config:
@@ -50,4 +51,5 @@ class Config:
                 name, root = part.split("=", 1)
                 roots.append((name.strip(), root.strip()))
         logs = Path(env.get("CLAUDE_LOGS") or Path.home() / ".claude" / "projects")
-        return cls(project, key, env.get("MACHINE_NAME") or socket.gethostname(), logs, roots)
+        machine = env.get("MACHINE_NAME") or socket.gethostname()
+        return cls(project, key, machine, logs, roots, env.get("CLAUDE_BIN", ""))
