@@ -60,7 +60,8 @@ export async function syncRates(latest: FxSnapshot | undefined): Promise<string>
     const wait = MIN_GAP_MS - (Date.now() - Date.parse(latest.savedAt));
     if (wait > 0) return `Wait ${Math.ceil(wait / 60000)} min: Vietcombank allows one request every 5 minutes.`;
   }
-  const res = await fetch("/api/fx/vcb");
+  // no-store: the site's edge may tell browsers to keep the answer for hours; the Worker's 5-minute cache is the only one.
+  const res = await fetch("/api/fx/vcb", { cache: "no-store" });
   const body = await res.json();
   if (!res.ok) throw new Error(body.error ?? `sync failed (${res.status})`);
   // The feed's time moves on every few minutes even when no rate changed, so compare the rates themselves.
