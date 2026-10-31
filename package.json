@@ -1,0 +1,30 @@
+{
+  "name": "awesome-agent-dashboard",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "A one-owner portal over your own Claude Code: display, summarize, Q&A and explore.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "check:secrets": "node scripts/check-secrets.mjs",
+    "test": "firebase emulators:exec --config firebase.emulator.json --project demo-agent-dashboard --only firestore \"vitest run\"",
+    "rules:build": "node scripts/build-rules.mjs",
+    "rules:deploy": "node scripts/build-rules.mjs && node scripts/deploy-rules.mjs"
+  },
+  "dependencies": {
+    "firebase": "^11.10.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^4.0.1",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "firebase-tools": "^13.35.1",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11",
+    "vitest": "^2.1.8"
+  }
+}

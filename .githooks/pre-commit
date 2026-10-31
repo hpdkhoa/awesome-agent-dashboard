@@ -1,0 +1,6 @@
+#!/bin/sh
+# Blocks a commit that would carry an email, a key, a token or an env file.
+node scripts/check-secrets.mjs || exit 1
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks protect --staged --redact || exit 1
+fi

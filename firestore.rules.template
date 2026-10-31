@@ -1,0 +1,18 @@
+rules_version = '2';
+
+// The one lock of the portal. Only the owner's Google account reads or writes anything.
+// __OWNER_EMAIL__ is filled in on the owner's machine by scripts/build-rules.mjs; the result is never committed.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isOwner() {
+      return request.auth != null
+        && request.auth.token.email == "__OWNER_EMAIL__"
+        && request.auth.token.email_verified == true
+        && request.auth.token.firebase.sign_in_provider == "google.com";
+    }
+
+    match /{document=**} {
+      allow read, write: if isOwner();
+    }
+  }
+}

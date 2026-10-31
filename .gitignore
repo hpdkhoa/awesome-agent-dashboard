@@ -1,0 +1,23 @@
+# Environment: only .env.example is tracked
+.env
+.env.*
+!.env.example
+
+# Tokens and credentials, never tracked
+*token*
+*credential*
+*.key
+*.pem
+service-account*.json
+
+# Built from firestore.rules.template at deploy time (holds the owner's email)
+firestore.rules
+
+# Build and tools
+node_modules/
+dist/
+.firebase/
+*-debug.log
+.vite/
+__pycache__/
+.venv/
