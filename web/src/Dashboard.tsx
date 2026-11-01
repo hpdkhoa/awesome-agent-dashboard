@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { signOut } from "firebase/auth";
 import { auth } from "./firebase";
-import { useInbox, useMachines, usePlans, useRuns, useSessions, useUsage, useWorkTypes, type Run, type Session, type Tokens } from "./data";
+import { RECENT_DAYS, useInbox, useMachines, usePlans, useRuns, useSessions, useUsage, useWorkTypes, type Run, type Session, type Tokens } from "./data";
 import { MessageBox, RunList, StartForm } from "./Runs";
 import { PlanList, PlanView } from "./Plans";
 import { usePush, type PushState } from "./notify";
@@ -45,7 +45,8 @@ const isActive = (s: Session) => Date.now() - Date.parse(s.lastAt) < ACTIVE_MS;
 const today = () => new Date().toLocaleDateString("en-CA");
 
 export function Dashboard() {
-  const sessions = useSessions();
+  const [older, setOlder] = useState(false);
+  const sessions = useSessions(older);
   const usage = useUsage();
   const workTypes = useWorkTypes();
   const machines = useMachines();
@@ -175,7 +176,10 @@ export function Dashboard() {
               </div>
             </li>
           ))}
-          {shown.length === 0 && <li className="muted">No sessions yet. Run the bridge: agent-bridge sync</li>}
+          {shown.length === 0 && <li className="muted">No sessions in the last {RECENT_DAYS} days.</li>}
+          <li className="row muted small" onClick={() => setOlder(!older)}>
+            {older ? `Hide sessions older than ${RECENT_DAYS} days` : `Show sessions older than ${RECENT_DAYS} days`}
+          </li>
         </ul>
         )}
       </aside>

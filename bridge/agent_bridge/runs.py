@@ -6,9 +6,15 @@ existing session) or "stop" (a run to end). The bridge on the named machine runs
     start:    claude -p <prompt> --output-format json --session-id <new id> --permission-prompt-tool <inbox approve>
     message:  claude -p <message> --output-format json --resume <session> --permission-prompt-tool <inbox approve>
 
-A message to a session that is still open waits ("waiting") until it closes: the session counts as open while its
-inbox heartbeat is fresh, a run of this bridge works in it, or its log file changed in the last 3 minutes. A session
-open but idle in a window shows none of these, so the page tells the owner to close that window first.
+A session's state comes from its messages, not from a heartbeat (the owner's model, 2026-11-01: "the session not
+sent or completed just count as closed ... when I start the message send then that session become open and wait til
+EOB or the done token then the state become closed again"). A message waits ("waiting") while:
+
+- a turn is running in the session: a run of this bridge works in it, or its log has no turn end yet (waitReason
+  "turn"); it goes once the turn ends;
+- the session's last turn came from the app or a terminal (waitReason "app"): that window may still be open, and a
+  second process would split the conversation, so the page points to Remote Control (the owner's choice "do 1 and 3").
+  The owner can send it anyway (force) or cancel it on the page ("do 2 and 3"); a running turn always waits.
 
 Rules from the plan: only folders registered in WORK_ROOTS, a fixed list of actions, the prompt goes to claude as one
 argument (never through a shell), permissions stay on and every approval goes to the owner's inbox (no bypass mode),
@@ -21,16 +27,66 @@ import json
 import os
 import signal
 import subprocess
-import time
 import uuid
 from pathlib import Path
 
 from .aggregate import work_type_of
-from .inbox import LIVE_SECONDS, is_live, now_iso
+from .inbox import now_iso
 from .redact import redact
 
 APPROVAL_TOOL = "mcp__agent-inbox__inbox_approve"
 NO_CLI = "No signed-in claude CLI on this machine. Install Claude Code and sign in, or set CLAUDE_BIN."
+TAIL_BYTES = 256 * 1024  # the end of a session log: enough for its last turn's closing lines
+SKIP = {"queue-operation", "frame-link", "api-request", "api-request-shape", "api-request-blob", "attachment",
+        "file-history-snapshot", "summary", "custom-title", "last-prompt"}  # lines that are not conversation turns
+
+
+def last_turn(path: Path) -> tuple[bool, str]:
+    """(a turn is still running, the entrypoint of the last turn) from the end of a session log. A turn ends with the
+    assistant's end_turn, the stop hooks' summary, an interrupt, or a slash command's output."""
+    with open(path, "rb") as f:
+        f.seek(max(0, f.seek(0, 2) - TAIL_BYTES))
+        lines = f.read().decode("utf-8", errors="replace").splitlines()
+    for line in reversed(lines):
+        try:
+            d = json.loads(line)
+        except ValueError:
+            continue  # the cut first line, or a line still being written
+        kind = d.get("type")
+        if kind in SKIP or kind not in ("user", "assistant", "system"):
+            continue
+        entry = d.get("entrypoint") or ""
+        msg = d.get("message") or {}
+        if kind == "system":
+            if d.get("subtype") in ("stop_hook_summary", "turn_duration"):
+                return False, entry
+            continue
+        if kind == "assistant":
+            return msg.get("stop_reason") not in ("end_turn", "stop_sequence", "max_tokens", "refusal"), entry
+        content = msg.get("content")
+        text = content if isinstance(content, str) else " ".join(
+            c.get("text", "") for c in content or [] if isinstance(c, dict))
+        # an interrupt ends the turn; a slash command (/login, /model) writes lines but runs no turn
+        return not text.lstrip().startswith(("[Request interrupted", "<local-command", "<command-")), entry
+    return False, ""
+
+
+def from_window(entry: str) -> bool:
+    """The app, a terminal or an IDE; the bridge's own runs and SDK runs are sdk-*."""
+    return bool(entry) and not entry.startswith("sdk")
+
+
+def log_wait_reason(logs: Path | None, session_id: str, force: bool = False) -> str | None:
+    """"turn" while a turn runs in the session, "app" when its last turn came from a window (unless forced), else None.
+    Used for messages (Runs) and for inbox answers (deliver.py)."""
+    if logs and logs.is_dir():
+        for f in logs.glob(f"*/{session_id}.jsonl"):
+            running, entry = last_turn(f)
+            if running:
+                return "turn"
+            if from_window(entry) and not force:
+                return "app"
+    return None
 
 
 def start_command(claude: str, prompt: str, session_id: str) -> list[str]:
@@ -144,17 +200,12 @@ class Runs:
         self.store.update(path, {"status": "running", "sessionId": sid, "workType": wt, "pid": p.pid, "startedAt": now_iso()})
         return f"{c['id']}: started session {sid} in {c['folder']}"
 
-    def session_open(self, session_id: str) -> bool:
-        if is_live(self.store, session_id):
-            return True
+    def wait_reason(self, session_id: str, force: bool = False) -> str | None:
+        """"turn", "app", or None when the message can go now."""
         for k in self.procs:
             if (self.store.get(f"commands/{k}") or {}).get("sessionId") == session_id:
-                return True  # a run of this bridge is working in it
-        if self.logs and self.logs.is_dir():
-            for f in self.logs.glob(f"*/{session_id}.jsonl"):
-                if time.time() - f.stat().st_mtime < LIVE_SECONDS:
-                    return True
-        return False
+                return "turn"  # a run of this bridge is working in it
+        return log_wait_reason(self.logs, session_id, force)
 
     def _message(self, c: dict) -> str | None:
         path = f"commands/{c['id']}"
@@ -170,10 +221,11 @@ class Runs:
         if not self.claude:
             self.store.update(path, {"status": "failed", "error": NO_CLI})
             return f"{c['id']}: no claude CLI"
-        if self.session_open(sid):
-            if c.get("status") != "waiting":
-                self.store.update(path, {"status": "waiting", "workType": wt})
-                return f"{c['id']}: session {sid} is open, the message waits"
+        why = self.wait_reason(sid, bool(c.get("force")))
+        if why:
+            if c.get("status") != "waiting" or c.get("waitReason") != why:
+                self.store.update(path, {"status": "waiting", "waitReason": why, "workType": wt})
+                return f"{c['id']}: session {sid} {'is in a turn' if why == 'turn' else 'was last used in a window'}, the message waits"
             return None
         p = self._spawn(c["id"], message_command(self.claude, text, sid), cwd)
         self.store.update(path, {"status": "running", "workType": wt, "pid": p.pid, "startedAt": now_iso()})

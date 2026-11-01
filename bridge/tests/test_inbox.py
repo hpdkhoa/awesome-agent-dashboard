@@ -196,3 +196,22 @@ def test_reopened_answer_branches_and_old_branch_keeps_its_answer():
     assert v4["parent"] == 1 and v4["madeBy"][0]["choice"] == "Graph"
     assert store.docs[f"planVersions/{pid}_v2"]["madeBy"][0]["choice"] == "List"
     assert store.docs[f"plans/{pid}"]["chosen"] == 4
+
+
+def test_answer_waits_like_a_message(tmp_path):
+    import json
+
+    logs = tmp_path / "logs"
+    (logs / "proj").mkdir(parents=True)
+    log = logs / "proj" / "s1.jsonl"
+    store = FakeStore()
+    qid = make(store).post("question", "q", "q")
+    owner_answers(store, qid, "A")
+    run = Runner()
+    log.write_text(json.dumps({"type": "user", "entrypoint": "sdk-cli", "message": {"content": "work"}}))
+    assert deliver(store, "PC", "claude", run, logs=logs) == [f"{qid}: waits (turn)"] and run.calls == []
+    log.write_text(json.dumps({"type": "assistant", "entrypoint": "claude-desktop", "message": {"stop_reason": "end_turn"}}))
+    assert deliver(store, "PC", "claude", run, logs=logs) == [f"{qid}: waits (app)"] and run.calls == []
+    assert store.get(f"inbox/{qid}")["waitReason"] == "app"
+    store.update(f"inbox/{qid}", {"force": True})  # the owner taps Send anyway
+    assert deliver(store, "PC", "claude", run, logs=logs) == [f"{qid}: delivered by resume"] and len(run.calls) == 1

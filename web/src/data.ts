@@ -54,6 +54,8 @@ export type InboxItem = {
   answer: { choice: string; text: string; at: string } | null;
   deliveredAt?: string;
   deliveredVia?: "live" | "resume";
+  waitReason?: "turn" | "app" | null; // why an answer has not reached the session yet (bridge deliver.py)
+  force?: boolean;
   followUp?: string;
   error?: string | null;
   via?: "hook"; // posted by the question hook from Claude Code's own question box
@@ -93,7 +95,9 @@ export type Run = {
   prompt?: string;
   target?: string;
   cwd?: string;
-  status: "new" | "waiting" | "running" | "stopping" | "done" | "stopped" | "failed" | "lost";
+  status: "new" | "waiting" | "running" | "stopping" | "done" | "stopped" | "failed" | "lost" | "cancelled";
+  waitReason?: "turn" | "app";
+  force?: boolean;
   createdAt: string;
   sessionId?: string;
   workType?: string;
@@ -113,7 +117,21 @@ function useCollection<T>(name: string, ...constraints: QueryConstraint[]): T[] 
   return rows;
 }
 
-export const useSessions = () => useCollection<Session>("sessions", orderBy("lastAt", "desc"), limit(300));
+// Sessions active in the last 5 days only, unless the owner asks for older ones: older threads cost no reads until then
+// (the owner's words, 2026-11-01: "the thread with no active message more than 5 days need a collapse or hide state so
+// no read consume in there").
+export const RECENT_DAYS = 5;
+export function useSessions(older: boolean): Session[] | null {
+  const [rows, setRows] = useState<Session[] | null>(null);
+  useEffect(() => {
+    const since = new Date(Date.now() - RECENT_DAYS * 86400000).toISOString();
+    const q = older
+      ? query(collection(db, "sessions"), orderBy("lastAt", "desc"), limit(300))
+      : query(collection(db, "sessions"), where("lastAt", ">=", since), orderBy("lastAt", "desc"));
+    return onSnapshot(q, (s) => setRows(s.docs.map((d) => d.data() as Session)));
+  }, [older]);
+  return rows;
+}
 export const useUsage = () => useCollection<Usage>("usage", orderBy("day", "desc"), limit(30));
 export const useWorkTypes = () => useCollection<WorkType>("workTypes");
 export const useMachines = () => useCollection<Machine>("machines");
@@ -161,6 +179,13 @@ export const sendMessage = (machine: string, sessionId: string, cwd: string, pro
     id, action: "message", machine, sessionId, cwd, prompt, status: "new", createdAt: new Date().toISOString(),
   });
 };
+// A message or an answer that waits on a session last used in the app or a terminal: cancel it, or send it anyway
+// (the bridge resumes the session in a second process; the conversation splits). A running turn always waits.
+export const cancelMessage = (id: string) => updateDoc(doc(db, "commands", id), { status: "cancelled", endedAt: new Date().toISOString() });
+export const forceMessage = (id: string) => updateDoc(doc(db, "commands", id), { force: true });
+export const cancelAnswer = (id: string) => updateDoc(doc(db, "inbox", id), { status: "closed", cancelledAt: new Date().toISOString() });
+export const forceAnswer = (id: string) => updateDoc(doc(db, "inbox", id), { force: true });
+
 export const stopRun = (machine: string, target: string) => {
   const id = newId();
   return setDoc(doc(db, "commands", id), { id, action: "stop", machine, target, status: "new", createdAt: new Date().toISOString() });

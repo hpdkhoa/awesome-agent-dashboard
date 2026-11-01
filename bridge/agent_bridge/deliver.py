@@ -1,7 +1,9 @@
 """Delivers the owner's answers to sessions that have closed, by resuming them with the owner's own `claude`.
 
-Only sessions of this machine, only when the session's heartbeat says it is closed, one try per item every 10
-minutes. The `claude` program must be the unmodified CLI, signed in through Anthropic's own flow (terms T5, T6);
+Only sessions of this machine, one try per item every 10 minutes. An answer waits like a message does (runs.py, the
+owner's choice 2026-11-01 "do 2 and 3"): while the session's own inbox server is alive it takes the answer itself;
+while a turn runs it waits for the turn to end; when the last turn came from the app or a terminal it waits, unless the
+owner sends it anyway (force) on the page. The `claude` program must be the unmodified CLI, signed in through Anthropic's own flow (terms T5, T6);
 ANTHROPIC_API_KEY is removed from its environment so it always uses the plan (T7).
 """
 
@@ -14,7 +16,7 @@ from datetime import datetime, timezone
 
 from .inbox import answer_text, is_live, now_iso
 from .redact import redact
-from .runs import parse_result
+from .runs import log_wait_reason, parse_result
 
 RETRY_SECONDS = 600
 
@@ -29,7 +31,7 @@ def resume_command(claude: str, session_id: str, message: str) -> list[str]:
     return [claude, "-p", message, "--resume", session_id, "--output-format", "json"]
 
 
-def deliver(store, machine: str, claude: str | None, run=subprocess.run) -> list[str]:
+def deliver(store, machine: str, claude: str | None, run=subprocess.run, logs=None) -> list[str]:
     """Resumes closed sessions with their answers. Returns one line per item acted on."""
     log = []
     for item in store.where("inbox", "status", "answered"):
@@ -39,6 +41,12 @@ def deliver(store, machine: str, claude: str | None, run=subprocess.run) -> list
             continue
         if is_live(store, item["sessionId"]):
             continue  # the open session picks the answer up itself
+        why = log_wait_reason(logs, item["sessionId"], bool(item.get("force")))
+        if why:
+            if item.get("waitReason") != why:
+                store.update(f"inbox/{item['id']}", {"waitReason": why})
+                log.append(f"{item['id']}: waits ({why})")
+            continue
         a = item.get("answer") or {}
         if item.get("kind") == "result" and not a.get("text") and not a.get("choice"):
             store.update(f"inbox/{item['id']}", {"status": "closed", "deliveredAt": now_iso()})
@@ -52,7 +60,7 @@ def deliver(store, machine: str, claude: str | None, run=subprocess.run) -> list
                          "error": "No signed-in claude CLI on this machine. Install Claude Code and sign in, or set CLAUDE_BIN."})
             log.append(f"{item['id']}: no claude CLI")
             continue
-        store.update(f"inbox/{item['id']}", {"status": "delivering", "lastTryAt": now_iso()})
+        store.update(f"inbox/{item['id']}", {"status": "delivering", "lastTryAt": now_iso(), "waitReason": None})
         env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
         cwd = item.get("cwd") if item.get("cwd") and os.path.isdir(item["cwd"]) else None
         try:

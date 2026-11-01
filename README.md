@@ -143,6 +143,12 @@ with no answer in 25 minutes is denied. The prompt is passed to `claude` as one 
 needs the Claude Code CLI on that machine, signed in through Anthropic's own sign-in. Open terminal or desktop-app
 sessions cannot be started or stopped from the page.
 
+The message box on a session page sends a message the same way (`claude -p --resume`). A session counts as closed
+unless a turn is running in it, read from the end of its log. A message waits while a turn runs and goes when it
+ends. A session whose last turn came from the app or a terminal may still be open there, and a second process would
+split its conversation, so the message waits and the page points to Remote Control. The session list shows the last
+5 days; older sessions load only when asked.
+
 ## Checks
 
 - `npm test` runs the rules against the Firestore emulator (needs Java 11 or newer): the owner reads and writes;

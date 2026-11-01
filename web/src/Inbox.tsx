@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { answerItem, type InboxItem, type Plan, type Session } from "./data";
+import { answerItem, cancelAnswer, forceAnswer, type InboxItem, type Plan, type Session } from "./data";
 import { Md } from "./Markdown";
 import { openFile } from "./FileView";
 import { Section } from "./Section";
@@ -204,6 +204,21 @@ export function InboxView({ item, session, plan, onOpenPlan }: {
         <Section id="inbox.followup" title="The session's reply">
           <Md text={item.followUp} cwd={item.cwd} />
         </Section>
+      )}
+      {item.status === "answered" && item.waitReason && (
+        <div className="actions">
+          <p className="small">
+            {item.waitReason === "turn"
+              ? "The session is in a turn: your answer goes when it ends."
+              : "The session was last used in the app or a terminal and may still be open there: tell it through Remote Control, or send it anyway."}
+          </p>
+          <button onClick={() => cancelAnswer(item.id)}>Cancel</button>
+          {item.waitReason === "app" && (
+            <button onClick={() => forceAnswer(item.id)} disabled={item.force}>
+              {item.force ? "Sending anyway" : "Send anyway (a second process: the open window won't see it)"}
+            </button>
+          )}
+        </div>
       )}
       {item.error && <p className="bad small">Delivery problem: {item.error}</p>}
     </article>

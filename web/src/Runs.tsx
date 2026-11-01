@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { sendMessage, startRun, stopRun, type Machine, type Run, type Session } from "./data";
+import { cancelMessage, forceMessage, sendMessage, startRun, stopRun, type Machine, type Run, type Session } from "./data";
 import { usd } from "./Dashboard";
 import { Md } from "./Markdown";
 import { Section } from "./Section";
@@ -66,6 +66,12 @@ export function StartForm({ machines }: { machines: Machine[] }) {
 }
 
 // claude.ai names a Remote Control session "session_..."; the log names the same id "cse_...".
+// Why a message waits (bridge/agent_bridge/runs.py wait_reason).
+const WAIT_LABEL: Record<string, string> = {
+  turn: "waiting for the session's turn to end",
+  app: "waiting: last used in the app or a terminal, send it with Remote Control",
+};
+
 export const remoteUrl = (id: string) => `https://claude.ai/code/${id.replace(/^cse_/, "session_")}`;
 
 export function MessageBox({ s, runs }: { s: Session; runs: Run[] }) {
@@ -108,9 +114,9 @@ export function MessageBox({ s, runs }: { s: Session; runs: Run[] }) {
         </p>
       )}
       <p className="muted small">
-        Send here runs in the background: the bridge resumes the session with your message once it is closed, and the
-        reply shows only on this page. If it is open in a terminal or the desktop app, the message waits; close that window
-        to let it through.
+        Send here runs in the background and the reply shows on this page. The message waits while the session is in a
+        turn, and goes when the turn ends. A session last used in the app or a terminal may still be open there, so a
+        message to it waits: use Remote Control above instead.
       </p>
       <button className="primary" disabled={busy} onClick={send}>
         Send
@@ -133,7 +139,7 @@ export function RunList({ runs, title = "Runs from the dashboard" }: { runs: Run
           open={LIVE.has(r.status)}
           title={
             <span className="run-head">
-              <span className={"status " + r.status}>{r.status === "waiting" ? "waiting for the session to close" : r.status}</span>
+              <span className={"status " + r.status}>{r.status === "waiting" ? WAIT_LABEL[r.waitReason ?? "turn"] : r.status}</span>
               <span>{(r.prompt ?? "").split("\n")[0].slice(0, 90)}</span>
             </span>
           }
@@ -157,6 +163,16 @@ export function RunList({ runs, title = "Runs from the dashboard" }: { runs: Run
           {r.status === "running" && (
             <div className="actions">
               <button onClick={() => stopRun(r.machine, r.id)}>Stop</button>
+            </div>
+          )}
+          {r.status === "waiting" && (
+            <div className="actions">
+              <button onClick={() => cancelMessage(r.id)}>Cancel</button>
+              {r.waitReason === "app" && (
+                <button onClick={() => forceMessage(r.id)} disabled={r.force}>
+                  {r.force ? "Sending anyway" : "Send anyway (a second process: the open window won't see it)"}
+                </button>
+              )}
             </div>
           )}
         </Section>

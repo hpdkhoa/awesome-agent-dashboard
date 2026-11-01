@@ -150,19 +150,59 @@ def test_message_to_a_closed_session_resumes_it(tmp_path, monkeypatch):
     assert c["status"] == "done" and c["result"] == "did: carry on in sub resumed old-session"
 
 
-def test_message_to_an_open_session_waits_until_it_closes(tmp_path, monkeypatch):
-    import os
+def line(kind, entry="sdk-cli", **kw):
+    return json.dumps({"type": kind, "entrypoint": entry, **kw})
 
+
+def test_last_turn_reads_the_log_end(tmp_path):
+    from agent_bridge.runs import last_turn
+
+    f = tmp_path / "s.jsonl"
+    asked = line("user", "claude-desktop", message={"content": "do it"})
+    tool = line("assistant", "claude-desktop", message={"stop_reason": "tool_use"})
+    done = line("assistant", "claude-desktop", message={"stop_reason": "end_turn"})
+    hook = line("system", "claude-desktop", subtype="stop_hook_summary")
+    stop = line("user", "claude-desktop", message={"content": [{"type": "text", "text": "[Request interrupted by user]"}]})
+    for rows, want in (([asked], (True, "claude-desktop")), ([asked, tool], (True, "claude-desktop")),
+                       ([asked, done, hook, '{"type": "queue-operation"}'], (False, "claude-desktop")),
+                       ([asked, stop], (False, "claude-desktop")), ([], (False, "")),
+                       ([line("user", "cli", message={"content": "<local-command-stdout>Login successful</local-command-stdout>"})],
+                        (False, "cli"))):
+        f.write_text(chr(10).join(rows))
+        assert last_turn(f) == want
+
+
+def test_message_waits_for_the_turn_to_end_then_goes(tmp_path, monkeypatch):
     store, runs, work = setup(tmp_path, monkeypatch)
     log = tmp_path / "logs" / "proj" / "busy.jsonl"
-    log.write_text("{}")
+    log.write_text(line("user", message={"content": "work"}))  # a turn is running
     cmd(store, "m1", action="message", sessionId="busy", cwd=str(work), prompt="later")
     runs.step()
-    assert store.get("commands/m1")["status"] == "waiting" and runs.procs == {}
-    runs.step()
-    assert store.get("commands/m1")["status"] == "waiting"
-    os.utime(log, (log.stat().st_atime - 600, log.stat().st_mtime - 600))  # the session went quiet: closed
+    c = store.get("commands/m1")
+    assert c["status"] == "waiting" and c["waitReason"] == "turn" and runs.procs == {}
+    log.write_text(log.read_text() + chr(10) + line("assistant", message={"stop_reason": "end_turn"}))  # the turn ended
     assert wait_done(runs, "m1", store)["status"] == "done"
+
+
+def test_message_to_a_session_last_used_in_a_window_waits(tmp_path, monkeypatch):
+    store, runs, work = setup(tmp_path, monkeypatch)
+    log = tmp_path / "logs" / "proj" / "app.jsonl"
+    log.write_text(line("assistant", "claude-desktop", message={"stop_reason": "end_turn"}))
+    cmd(store, "m1", action="message", sessionId="app", cwd=str(work), prompt="hi")
+    runs.step()
+    runs.step()
+    c = store.get("commands/m1")
+    assert c["status"] == "waiting" and c["waitReason"] == "app" and runs.procs == {}
+    store.update("commands/m1", {"force": True})  # the owner taps Send anyway
+    assert wait_done(runs, "m1", store)["status"] == "done"
+
+
+def test_send_anyway_never_jumps_a_running_turn(tmp_path, monkeypatch):
+    store, runs, work = setup(tmp_path, monkeypatch)
+    (tmp_path / "logs" / "proj" / "busy.jsonl").write_text(line("user", "claude-desktop", message={"content": "work"}))
+    cmd(store, "m1", action="message", sessionId="busy", cwd=str(work), prompt="hi", force=True)
+    runs.step()
+    assert store.get("commands/m1")["waitReason"] == "turn" and runs.procs == {}
 
 
 def test_message_outside_registered_folders_is_refused(tmp_path, monkeypatch):
