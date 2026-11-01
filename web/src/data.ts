@@ -54,7 +54,8 @@ export type InboxItem = {
   answer: { choice: string; text: string; at: string } | null;
   deliveredAt?: string;
   deliveredVia?: "live" | "resume";
-  waitReason?: "turn" | "app" | null; // why an answer has not reached the session yet (bridge deliver.py)
+  waitReason?: "turn" | "app" | null; // why an answer has not reached the session yet (bridge runs.py)
+  commandId?: string; // the message run that carries the answer to the session
   force?: boolean;
   followUp?: string;
   error?: string | null;
@@ -89,15 +90,17 @@ export type Machine = {
 
 export type Run = {
   id: string;
-  action: "start" | "stop" | "message";
   machine: string;
   folder?: string;
   prompt?: string;
   target?: string;
   cwd?: string;
   status: "new" | "waiting" | "running" | "stopping" | "done" | "stopped" | "failed" | "lost" | "cancelled";
+  action: "start" | "stop" | "message" | "check";
   waitReason?: "turn" | "app";
   force?: boolean;
+  // "Check now": what the bridge's wait rule saw for the session (bridge runs.py session_status)
+  check?: { turn: boolean; lastFrom: string; open: boolean | null; openSince: string | null; openIn: "app" | "terminal" | null };
   createdAt: string;
   sessionId?: string;
   workType?: string;
@@ -183,8 +186,21 @@ export const sendMessage = (machine: string, sessionId: string, cwd: string, pro
 // (the bridge resumes the session in a second process; the conversation splits). A running turn always waits.
 export const cancelMessage = (id: string) => updateDoc(doc(db, "commands", id), { status: "cancelled", endedAt: new Date().toISOString() });
 export const forceMessage = (id: string) => updateDoc(doc(db, "commands", id), { force: true });
-export const cancelAnswer = (id: string) => updateDoc(doc(db, "inbox", id), { status: "closed", cancelledAt: new Date().toISOString() });
-export const forceAnswer = (id: string) => updateDoc(doc(db, "inbox", id), { force: true });
+// An answer the session did not take live travels as a message command (bridge deliver.py): act on both.
+export const cancelAnswer = async (item: InboxItem) => {
+  if (item.commandId) await cancelMessage(item.commandId);
+  await updateDoc(doc(db, "inbox", item.id), { status: "closed", waitReason: null, cancelledAt: new Date().toISOString() });
+};
+export const forceAnswer = async (item: InboxItem) => {
+  if (item.commandId) await forceMessage(item.commandId);
+  await updateDoc(doc(db, "inbox", item.id), { force: true });
+};
+
+// "Check now" on a session page: one command, one write back from the bridge. Nothing is written until a tap.
+export const checkSession = (machine: string, sessionId: string) => {
+  const id = newId();
+  return setDoc(doc(db, "commands", id), { id, action: "check", machine, sessionId, status: "new", createdAt: new Date().toISOString() });
+};
 
 export const stopRun = (machine: string, target: string) => {
   const id = newId();

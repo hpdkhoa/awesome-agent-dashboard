@@ -1,22 +1,22 @@
-"""Delivers the owner's answers to sessions that have closed, by resuming them with the owner's own `claude`.
+"""Hands the owner's answers to sessions that did not take them live to the runs path (runs.py), as a message to the
+same session.
 
-Only sessions of this machine, one try per item every 10 minutes. An answer waits like a message does (runs.py, the
-owner's choice 2026-11-01 "do 2 and 3"): while the session's own inbox server is alive it takes the answer itself;
-while a turn runs it waits for the turn to end; when the last turn came from the app or a terminal it waits, unless the
-owner sends it anyway (force) on the page. The `claude` program must be the unmodified CLI, signed in through Anthropic's own flow (terms T5, T6);
-ANTHROPIC_API_KEY is removed from its environment so it always uses the plan (T7).
+The session itself takes an answer while its inbox_ask still waits (inbox.py). After that, the answer goes as a
+message with inboxId: the same `claude -p --resume <session>`, approvals in the inbox, the same wait rule (a running
+turn, a session open in the app), a push when it ends, and a row in Runs, without blocking the bridge (the owner's
+choice, 2026-11-02: "build the fix", so a plan stays one session). Runs writes the outcome back on the inbox item; a
+failed try goes again after 10 minutes. Only sessions of this machine. The `claude` program must be the unmodified CLI,
+signed in through Anthropic's own flow (terms T5, T6).
 """
 
 from __future__ import annotations
 
 import os
 import shutil
-import subprocess
+import uuid
 from datetime import datetime, timezone
 
 from .inbox import answer_text, is_live, now_iso
-from .redact import redact
-from .runs import claude_processes, log_wait_reason, parse_result
 
 RETRY_SECONDS = 600
 
@@ -27,26 +27,22 @@ def find_claude(env_value: str = "") -> str | None:
     return shutil.which("claude")
 
 
-def resume_command(claude: str, session_id: str, message: str) -> list[str]:
-    return [claude, "-p", message, "--resume", session_id, "--output-format", "json"]
-
-
-def deliver(store, machine: str, claude: str | None, run=subprocess.run, logs=None, procs=claude_processes) -> list[str]:
-    """Resumes closed sessions with their answers. Returns one line per item acted on."""
+def deliver(store, machine: str, claude: str | None) -> list[str]:
+    """Turns each answer still to deliver into a message command. Returns one line per item acted on."""
     log = []
+    for item in store.where("inbox", "status", "delivering"):
+        # an answer whose message the owner cancelled on the Runs tab
+        c = store.get(f"commands/{item.get('commandId')}") if item.get("commandId") else None
+        if item.get("machine") == machine and c and c.get("status") == "cancelled":
+            store.update(f"inbox/{item['id']}", {"status": "closed", "error": "Cancelled on the page.", "waitReason": None})
+            log.append(f"{item['id']}: cancelled")
     for item in store.where("inbox", "status", "answered"):
         if item.get("kind") == "approval":
             continue  # approvals are only ever answered live, inside the waiting run
         if item.get("machine") != machine or item.get("sessionId") in (None, "", "unknown"):
             continue
         if is_live(store, item["sessionId"]):
-            continue  # the open session picks the answer up itself
-        why = log_wait_reason(logs, item["sessionId"], bool(item.get("force")), procs)
-        if why:
-            if item.get("waitReason") != why:
-                store.update(f"inbox/{item['id']}", {"waitReason": why})
-                log.append(f"{item['id']}: waits ({why})")
-            continue
+            continue  # the session's inbox_ask is still waiting and takes the answer itself
         a = item.get("answer") or {}
         if item.get("kind") == "result" and not a.get("text") and not a.get("choice"):
             store.update(f"inbox/{item['id']}", {"status": "closed", "deliveredAt": now_iso()})
@@ -60,24 +56,12 @@ def deliver(store, machine: str, claude: str | None, run=subprocess.run, logs=No
                          "error": "No signed-in claude CLI on this machine. Install Claude Code and sign in, or set CLAUDE_BIN."})
             log.append(f"{item['id']}: no claude CLI")
             continue
-        store.update(f"inbox/{item['id']}", {"status": "delivering", "lastTryAt": now_iso(), "waitReason": None})
-        env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
-        cwd = item.get("cwd") if item.get("cwd") and os.path.isdir(item["cwd"]) else None
-        try:
-            p = run(resume_command(claude, item["sessionId"], answer_text(item)), cwd=cwd, env=env,
-                    capture_output=True, text=True, encoding="utf-8", timeout=1800)
-            out = parse_result(p.stdout)
-            ok = p.returncode == 0 and not out.get("is_error")
-            reply = str(out.get("result", "")) if out else (p.stdout or "")
-            if ok:
-                store.update(f"inbox/{item['id']}", {"status": "delivered", "deliveredAt": now_iso(),
-                             "deliveredVia": "resume", "followUp": redact(reply, 2000), "error": None})
-                log.append(f"{item['id']}: delivered by resume")
-            else:
-                store.update(f"inbox/{item['id']}", {"status": "answered",
-                             "error": redact(reply if out.get("is_error") else (p.stderr or p.stdout or "")[-600:], 600)})
-                log.append(f"{item['id']}: resume failed ({p.returncode})")
-        except (OSError, subprocess.TimeoutExpired) as e:
-            store.update(f"inbox/{item['id']}", {"status": "answered", "error": redact(str(e), 600)})
-            log.append(f"{item['id']}: resume failed ({type(e).__name__})")
+        cid = uuid.uuid4().hex[:20]
+        store.put_many({f"commands/{cid}": {
+            "id": cid, "action": "message", "machine": machine, "sessionId": item["sessionId"], "cwd": item.get("cwd", ""),
+            "prompt": answer_text(item), "inboxId": item["id"], "force": bool(item.get("force")), "status": "new",
+            "createdAt": now_iso(),
+        }})
+        store.update(f"inbox/{item['id']}", {"status": "delivering", "commandId": cid, "lastTryAt": now_iso(), "error": None})
+        log.append(f"{item['id']}: handed to run {cid}")
     return log

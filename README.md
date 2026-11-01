@@ -82,7 +82,8 @@ time, the session's own question box opens. Add it once to `~/.claude/settings.j
 
 ### Plans
 
-For planning with rounds of questions, a session opens a plan with `plan_start`, posts each new version with
+For planning with rounds of questions, a session opens a plan with `plan_start` (or the page starts one: "Start a
+plan" on the Plans tab runs one session with a folder and a topic), posts each new version with
 `plan_version` (the whole text and one line on what changed), and closes it with `plan_close`. Every question the
 session asks while the plan is open, with `inbox_ask` or its own question box, joins the round of the version it was
 asked on. The Plans tab shows each version, then its questions and your answers, in order (List), or as a tree
@@ -148,7 +149,10 @@ unless a turn is running in it, read from the end of its log. A message waits wh
 ends. A session open in the app or a terminal waits too, because a second process would split its conversation; the
 page points to Remote Control, and you can cancel the message or send it anyway. Open is read from the running
 processes: the desktop app runs one `claude` per open session with `--resume=<id>`; a terminal started with plain
-`claude` counts for the sessions last used in its folder. Inbox answers to closed sessions follow the same rule. The session list shows the last
+`claude` counts for the sessions last used in its folder; a log with no turn end and no process holding the session
+counts as closed. "Check now" on a session page shows what the rule sees: open where and since when, and whether a turn
+runs. An inbox answer the session did not take live goes the same way, as a message run to the same session, so a
+plan stays one session. The session list shows the last
 5 days; older sessions load only when asked.
 
 ## Checks

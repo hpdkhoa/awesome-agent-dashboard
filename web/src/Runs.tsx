@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { cancelMessage, forceMessage, sendMessage, startRun, stopRun, type Machine, type Run, type Session } from "./data";
+import { cancelMessage, checkSession, forceMessage, sendMessage, startRun, stopRun, type Machine, type Run, type Session } from "./data";
 import { usd } from "./Dashboard";
 import { Md } from "./Markdown";
 import { Section } from "./Section";
@@ -15,7 +15,15 @@ function ago(iso?: string) {
   return Math.floor(s / 86400) + "d ago";
 }
 
-export function StartForm({ machines }: { machines: Machine[] }) {
+// The prompt behind "Start a plan" (the owner's choice, 2026-11-02: "Do 1"): one session runs the whole plan.
+export const planPrompt = (topic: string) =>
+  `Plan this with the owner: ${topic}
+
+Open the plan with plan_start (a short title). Ask each round of questions with inbox_ask, with options and one marked
+recommended. After each round, post the whole plan with plan_version and one line on what changed. Keep asking until
+the owner agrees, then close it with plan_close. Keep the whole plan in this one session.`;
+
+export function StartForm({ machines, plan = false }: { machines: Machine[]; plan?: boolean }) {
   const folders = machines.flatMap((m) => (m.folders ?? []).map((f) => ({ ...f, machine: m.name })));
   const [pick, setPick] = useState(0);
   const [prompt, setPrompt] = useState("");
@@ -28,7 +36,7 @@ export function StartForm({ machines }: { machines: Machine[] }) {
     if (!prompt.trim()) return setError("Write what the session should do first.");
     setBusy(true);
     try {
-      await startRun(f.machine, f.path, prompt.trim());
+      await startRun(f.machine, f.path, plan ? planPrompt(prompt.trim()) : prompt.trim());
       setPrompt("");
     } catch (e) {
       setError(String((e as { code?: string }).code ?? e));
@@ -37,7 +45,7 @@ export function StartForm({ machines }: { machines: Machine[] }) {
   }
 
   return (
-    <Section id="runs.start" title="Start a session">
+    <Section id={plan ? "plans.start" : "runs.start"} title={plan ? "Start a plan" : "Start a session"}>
       <select value={pick} onChange={(e) => setPick(Number(e.target.value))}>
         {folders.map((f, n) => (
           <option key={n} value={n}>
@@ -48,7 +56,7 @@ export function StartForm({ machines }: { machines: Machine[] }) {
       <textarea
         rows={3}
         value={prompt}
-        placeholder="What should the session do?"
+        placeholder={plan ? "What should the plan be about?" : "What should the session do?"}
         onChange={(e) => {
           setPrompt(e.target.value);
           setError("");
@@ -56,7 +64,9 @@ export function StartForm({ machines }: { machines: Machine[] }) {
       />
       {error && <p className="bad small">{error}</p>}
       <p className="muted small">
-        Runs your own Claude Code on that machine. Every tool call that needs approval comes to the inbox.
+        {plan
+          ? "Starts one session on that machine that plans with you: its questions come to the inbox, its versions show here."
+          : "Runs your own Claude Code on that machine. Every tool call that needs approval comes to the inbox."}
       </p>
       <button className="primary" disabled={busy} onClick={start}>
         Start
@@ -72,6 +82,20 @@ const WAIT_LABEL: Record<string, string> = {
   app: "waiting: last used in the app or a terminal, send it with Remote Control",
 };
 
+// What the wait rule saw on the last "Check now" (the owner's choice, 2026-11-02: "do both").
+function StatusLine({ check }: { check?: Run }) {
+  const c = check?.check;
+  if (!check) return <span className="muted">Status: not checked yet.</span>;
+  if (!c) return <span className="muted">Status: asking the PC.</span>;
+  const when = `checked ${ago(check.endedAt)}`;
+  if (c.open === null) return <span>Status: the PC could not read its process list ({when}).</span>;
+  const turn = c.turn ? "a turn is running" : "no turn running";
+  const open = c.open
+    ? `open in ${c.openIn === "app" ? "the app" : "a terminal"} since ${new Date(c.openSince!).toLocaleTimeString()}: messages wait`
+    : "closed: messages go now";
+  return <span>Status: {open}, {turn} ({when}).</span>;
+}
+
 export const remoteUrl = (id: string) => `https://claude.ai/code/${id.replace(/^cse_/, "session_")}`;
 
 export function MessageBox({ s, runs }: { s: Session; runs: Run[] }) {
@@ -79,6 +103,7 @@ export function MessageBox({ s, runs }: { s: Session; runs: Run[] }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const mine = runs.filter((r) => r.action === "message" && r.sessionId === s.id);
+  const check = runs.find((r) => r.action === "check" && r.sessionId === s.id);
 
   async function send() {
     if (!text.trim()) return setError("Write a message first.");
@@ -104,6 +129,12 @@ export function MessageBox({ s, runs }: { s: Session; runs: Run[] }) {
         }}
       />
       {error && <p className="bad small">{error}</p>}
+      <p className="small">
+        <StatusLine check={check} />{" "}
+        <button onClick={() => checkSession(s.machine, s.id)} disabled={check?.status === "new"}>
+          {check?.status === "new" ? "Checking" : "Check now"}
+        </button>
+      </p>
       {s.remoteId && (
         <p className="small">
           <a href={remoteUrl(s.remoteId)} target="_blank" rel="noreferrer">

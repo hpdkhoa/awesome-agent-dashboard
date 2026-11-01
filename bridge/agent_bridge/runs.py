@@ -19,6 +19,10 @@ EOB or the done token then the state become closed again"). A message waits ("wa
   an id runs in its folder. When the process list can't be read, a session last used in a window counts as open.
   The owner can send it anyway (force) or cancel it on the page ("do 2 and 3"); a running turn always waits.
 
+An owner's answer that the session did not take live comes here too, as a message with inboxId (deliver.py): it gets
+the same wait rule, approvals in the inbox, a push when it ends, and a row in Runs; its outcome is written back on the
+inbox item (the owner's choice, 2026-11-02: "build the fix", so a plan stays one session).
+
 Rules from the plan: only folders registered in WORK_ROOTS, a fixed list of actions, the prompt goes to claude as one
 argument (never through a shell), permissions stay on and every approval goes to the owner's inbox (no bypass mode),
 ANTHROPIC_API_KEY is removed so the run uses the plan (terms T7).
@@ -30,6 +34,7 @@ import json
 import os
 import re
 import time
+from datetime import datetime, timezone
 import signal
 import subprocess
 import uuid
@@ -125,6 +130,55 @@ def claude_processes() -> list[tuple[str | None, str]] | None:
     return out
 
 
+def session_status(logs: Path | None, session_id: str) -> dict:
+    """What the wait rule sees for one session, for the page's "Check now" (the owner's choice, 2026-11-02: "do both"):
+    whether a turn runs, where the last turn came from, and since when the app or a terminal has it open."""
+    out = {"turn": False, "lastFrom": "", "open": False, "openSince": None, "openIn": None}
+    if logs and logs.is_dir():
+        for f in logs.glob(f"*/{session_id}.jsonl"):
+            out["turn"], out["lastFrom"], cwd = last_turn(f)
+            break
+        else:
+            cwd = ""
+    else:
+        cwd = ""
+    try:
+        import psutil
+
+        for p in psutil.process_iter(["name", "create_time"]):
+            if not (p.info["name"] or "").lower().startswith("claude"):
+                continue
+            try:
+                args = p.cmdline()
+            except psutil.Error:
+                continue
+            if any(a.startswith("--type") for a in args) or "-p" in args or "--print" in args:
+                continue
+            sid = next((m.group(1) or (args[i + 1] if i + 1 < len(args) else None)
+                        for i, a in enumerate(args) if (m := SESSION_ARG.match(a))), None)
+            if sid == session_id:
+                where = "app"
+            elif sid is None and from_window(out["lastFrom"]) and _same_folder(_cwd(p), cwd):
+                where = "terminal"
+            else:
+                continue
+            since = datetime.fromtimestamp(p.info["create_time"], timezone.utc).isoformat()
+            if not out["open"] or since < out["openSince"]:
+                out.update(open=True, openSince=since, openIn=where)
+    except Exception:
+        out["open"] = None  # the process list could not be read
+    if out["open"] is False:
+        out["turn"] = False  # no process holds the session: a log with no turn end is a turn cut off
+    return out
+
+
+def _cwd(p) -> str:
+    try:
+        return p.cwd()
+    except Exception:
+        return ""
+
+
 def _same_folder(a: str, b: str) -> bool:
     return bool(a and b) and os.path.normcase(os.path.normpath(a)) == os.path.normcase(os.path.normpath(b))
 
@@ -135,17 +189,17 @@ def log_wait_reason(logs: Path | None, session_id: str, force: bool = False, pro
     if logs and logs.is_dir():
         for f in logs.glob(f"*/{session_id}.jsonl"):
             running, entry, cwd = last_turn(f)
-            if running:
-                return "turn"
+            seen = procs()
+            held = seen is None or any(sid == session_id for sid, _ in seen) or (
+                from_window(entry) and any(sid is None and _same_folder(c, cwd) for sid, c in seen))
+            if running and held:
+                return "turn"  # a log with no turn end and no process holding the session is a turn cut off
             if force:
                 return None
-            seen = procs()
             if seen is None:
                 return "app" if from_window(entry) else None
-            if any(sid == session_id for sid, _ in seen):
-                return "app"
-            if from_window(entry) and any(sid is None and _same_folder(c, cwd) for sid, c in seen):
-                return "app"  # a terminal with no id in this session's folder may be this session
+            if held:
+                return "app"  # the app runs it, or a terminal with no id in this session's folder may be it
     return None
 
 
@@ -203,8 +257,14 @@ class Runs:
         """On start: runs marked running by an earlier bridge on this machine can no longer be followed."""
         for c in self.store.where("commands", "status", "running"):
             if c.get("machine") == self.machine and c["id"] not in self.procs:
-                self.store.update(f"commands/{c['id']}", {"status": "lost", "endedAt": now_iso(),
-                                  "error": "The bridge restarted while this run was going; its result is in the session log."})
+                error = "The bridge restarted while this run was going; its result is in the session log."
+                self.store.update(f"commands/{c['id']}", {"status": "lost", "endedAt": now_iso(), "error": error})
+                self._answer_back(c, {"status": "answered", "error": error})
+
+    def _answer_back(self, c: dict, fields: dict) -> None:
+        """Writes a delivered answer's outcome on its inbox item."""
+        if c.get("inboxId"):
+            self.store.update(f"inbox/{c['inboxId']}", fields)
 
     def step(self, todo: list[dict] | None = None) -> list[str]:
         """Acts on the commands still to do. `todo` comes from the listener (listen.py); without it, ask Firestore."""
@@ -220,7 +280,7 @@ class Runs:
                 self.acted.add(c["id"])
             action = c.get("action")
             line = (self._start(c) if action == "start" else self._message(c) if action == "message"
-                    else self._stop(c) if action == "stop" else self._unknown(c))
+                    else self._stop(c) if action == "stop" else self._check(c) if action == "check" else self._unknown(c))
             if line:
                 log.append(line)
         for cid, p in list(self.procs.items()):
@@ -273,24 +333,35 @@ class Runs:
         sid, cwd, text = c.get("sessionId", ""), c.get("cwd", ""), (c.get("prompt") or "").strip()
         if not sid or not text:
             self.store.update(path, {"status": "failed", "error": "A message needs a session and some text."})
+            self._answer_back(c, {"status": "answered", "error": "A message needs a session and some text."})
             return f"{c['id']}: refused, empty"
         wt = work_type_of(cwd, self.roots)
         if wt == "other" or not os.path.isdir(cwd):
             self.store.update(path, {"status": "failed",
                               "error": "The session's folder is not under a registered folder on this machine."})
+            self._answer_back(c, {"status": "answered", "error": "The session's folder is not under a registered folder."})
             return f"{c['id']}: refused, folder not registered"
         if not self.claude:
             self.store.update(path, {"status": "failed", "error": NO_CLI})
+            self._answer_back(c, {"status": "answered", "error": NO_CLI})
             return f"{c['id']}: no claude CLI"
         why = self.wait_reason(sid, bool(c.get("force")))
         if why:
             if c.get("status") != "waiting" or c.get("waitReason") != why:
                 self.store.update(path, {"status": "waiting", "waitReason": why, "workType": wt})
+                self._answer_back(c, {"waitReason": why})
                 return f"{c['id']}: session {sid} {'is in a turn' if why == 'turn' else 'is open in the app or a terminal'}, the message waits"
             return None
         p = self._spawn(c["id"], message_command(self.claude, text, sid), cwd)
         self.store.update(path, {"status": "running", "workType": wt, "pid": p.pid, "startedAt": now_iso()})
+        self._answer_back(c, {"waitReason": None})
         return f"{c['id']}: sent to session {sid}"
+
+    def _check(self, c: dict) -> str:
+        """"Check now" on a session page: writes what the wait rule sees, once, on the command itself."""
+        st = session_status(self.logs, c.get("sessionId", ""))
+        self.store.update(f"commands/{c['id']}", {"status": "done", "endedAt": now_iso(), "check": st})
+        return f"{c['id']}: checked {c.get('sessionId', '')}"
 
     def _stop(self, c: dict) -> str:
         target = c.get("target", "")
@@ -326,8 +397,16 @@ class Runs:
             fields["status"] = "failed"
             fields["error"] = redact(str(r.get("result") or (err or out or "")[-800:]), 800)
         self.store.update(f"commands/{cid}", fields)
+        c = self.store.get(f"commands/{cid}") or {}
+        if fields["status"] == "done":
+            self._answer_back(c, {"status": "delivered", "deliveredAt": now_iso(), "deliveredVia": "resume",
+                                  "followUp": redact(str(r.get("result") or ""), 2000), "error": None})
+        elif fields["status"] == "stopped":
+            self._answer_back(c, {"status": "closed", "error": "Stopped on the page before it reached the session."})
+        else:
+            self._answer_back(c, {"status": "answered", "lastTryAt": now_iso(),
+                                  "error": fields.get("error") or f"The message run {fields['status']}."})
         if self.push is not None and fields["status"] in ("done", "failed"):
-            c = self.store.get(f"commands/{cid}") or {}
             first = (fields.get("result") or fields.get("error") or "").strip().split("\n")
             body = next((line for line in first if line.strip(" -")), "")[:160]
             what = "message" if c.get("action") == "message" else "run"

@@ -2,7 +2,7 @@ import json
 import subprocess
 from datetime import datetime, timedelta, timezone
 
-from agent_bridge.deliver import deliver, resume_command
+from agent_bridge.deliver import deliver
 from agent_bridge.inbox import Inbox, answer_text
 
 
@@ -73,48 +73,39 @@ def beat(store, sid, minutes_ago):
     store.put_many({f"liveSessions/{sid}": {"sessionId": sid, "beatAt": at}})
 
 
-class Runner:
-    def __init__(self, code=0, out='{"result": "ok, continuing"}'):
-        self.calls, self.code, self.out = [], code, out
-
-    def __call__(self, cmd, **kw):
-        self.calls.append((cmd, kw))
-        return subprocess.CompletedProcess(cmd, self.code, self.out, "boom" if self.code else "")
+def handed(store, qid):
+    item = store.get(f"inbox/{qid}")
+    return item, store.get(f"commands/{item['commandId']}")
 
 
-def test_open_session_is_never_resumed():
+def test_open_session_is_never_handed_over():
     store = FakeStore()
     qid = make(store).post("question", "q", "q")
     owner_answers(store, qid, "A")
-    beat(store, "s1", 1)
-    run = Runner()
-    assert deliver(store, "PC", "claude", run) == [] and run.calls == []
+    beat(store, "s1", 1)  # its inbox_ask still waits and takes the answer itself
+    assert deliver(store, "PC", "claude") == [] and store.get(f"inbox/{qid}")["status"] == "answered"
 
 
-def test_closed_session_is_resumed_with_the_answer():
+def test_late_answer_goes_as_a_message_to_the_same_session():
     store = FakeStore()
     qid = make(store).post("question", "q", "q")
     owner_answers(store, qid, "A", "note")
     beat(store, "s1", 10)
-    run = Runner()
-    log = deliver(store, "PC", "claude", run)
-    cmd, kw = run.calls[0]
-    assert cmd[:2] == ["claude", "-p"] and cmd[3:5] == ["--resume", "s1"] and "Choice: A." in cmd[2]
-    assert "ANTHROPIC_API_KEY" not in kw["env"]
-    item = store.get(f"inbox/{qid}")
-    assert item["status"] == "delivered" and item["deliveredVia"] == "resume" and item["followUp"] == "ok, continuing"
-    assert log == [f"{qid}: delivered by resume"]
+    log = deliver(store, "PC", "claude")
+    item, c = handed(store, qid)
+    assert item["status"] == "delivering" and log == [f"{qid}: handed to run {c['id']}"]
+    assert c["action"] == "message" and c["sessionId"] == "s1" and c["status"] == "new" and c["inboxId"] == qid
+    assert "Choice: A." in c["prompt"] and c["machine"] == "PC"
+    assert deliver(store, "PC", "claude") == []  # handed once
 
 
-def test_failed_resume_stays_answered_and_waits_before_retry():
+def test_failed_try_goes_again_after_10_minutes():
     store = FakeStore()
     qid = make(store).post("question", "q", "q")
     owner_answers(store, qid, "A")
-    run = Runner(code=1, out="")
-    deliver(store, "PC", "claude", run)
-    assert store.get(f"inbox/{qid}")["status"] == "answered" and store.get(f"inbox/{qid}")["error"] == "boom"
-    deliver(store, "PC", "claude", run)
-    assert len(run.calls) == 1  # no second try within 10 minutes
+    deliver(store, "PC", "claude")
+    store.update(f"inbox/{qid}", {"status": "answered", "error": "boom"})  # runs.py wrote the failure back
+    assert deliver(store, "PC", "claude") == []  # lastTryAt is fresh
 
 
 def test_other_machine_and_missing_claude():
@@ -123,30 +114,26 @@ def test_other_machine_and_missing_claude():
     owner_answers(store, q1, "A")
     q2 = make(store, "s2").post("question", "q", "q")
     owner_answers(store, q2, "A")
-    run = Runner()
-    assert deliver(store, "PC", None, run) == [f"{q2}: no claude CLI"] and run.calls == []
+    assert deliver(store, "PC", None) == [f"{q2}: no claude CLI"]
     assert store.get(f"inbox/{q1}")["status"] == "answered"
 
 
 def test_reviewed_result_without_a_note_closes():
     store = FakeStore()
-    rid = make(store).post("result", "done", "numbers")
+    rid = make(store).post("result", "r", "r")
     owner_answers(store, rid)
-    deliver(store, "PC", "claude", Runner())
+    deliver(store, "PC", "claude")
     assert store.get(f"inbox/{rid}")["status"] == "closed"
 
 
-def test_resume_command_shape():
-    assert resume_command("claude", "abc", "hi") == ["claude", "-p", "hi", "--resume", "abc", "--output-format", "json"]
-
-
-def test_resume_error_shows_claudes_message():
+def test_cancelled_message_closes_the_answer():
     store = FakeStore()
     qid = make(store).post("question", "q", "q")
     owner_answers(store, qid, "A")
-    run = Runner(code=1, out='{"type": "result", "is_error": true, "result": "Not logged in · Please run /login"}')
-    deliver(store, "PC", "claude", run)
-    assert store.get(f"inbox/{qid}")["error"] == "Not logged in · Please run /login"
+    deliver(store, "PC", "claude")
+    item, c = handed(store, qid)
+    store.update(f"commands/{c['id']}", {"status": "cancelled"})  # Cancel on the Runs tab
+    assert deliver(store, "PC", "claude") == [f"{qid}: cancelled"] and store.get(f"inbox/{qid}")["status"] == "closed"
 
 
 def test_plan_rounds_follow_its_versions():
@@ -196,24 +183,3 @@ def test_reopened_answer_branches_and_old_branch_keeps_its_answer():
     assert v4["parent"] == 1 and v4["madeBy"][0]["choice"] == "Graph"
     assert store.docs[f"planVersions/{pid}_v2"]["madeBy"][0]["choice"] == "List"
     assert store.docs[f"plans/{pid}"]["chosen"] == 4
-
-
-def test_answer_waits_like_a_message(tmp_path):
-    import json
-
-    logs = tmp_path / "logs"
-    (logs / "proj").mkdir(parents=True)
-    log = logs / "proj" / "s1.jsonl"
-    store = FakeStore()
-    qid = make(store).post("question", "q", "q")
-    owner_answers(store, qid, "A")
-    run = Runner()
-    log.write_text(json.dumps({"type": "user", "entrypoint": "sdk-cli", "message": {"content": "work"}}))
-    assert deliver(store, "PC", "claude", run, logs=logs, procs=lambda: []) == [f"{qid}: waits (turn)"] and run.calls == []
-    log.write_text(json.dumps({"type": "assistant", "entrypoint": "claude-desktop", "message": {"stop_reason": "end_turn"}}))
-    open_now = lambda: [("s1", "")]  # the app runs this session
-    assert deliver(store, "PC", "claude", run, logs=logs, procs=open_now) == [f"{qid}: waits (app)"] and run.calls == []
-    assert store.get(f"inbox/{qid}")["waitReason"] == "app"
-    store.update(f"inbox/{qid}", {"force": True})  # the owner taps Send anyway
-    assert deliver(store, "PC", "claude", run, logs=logs, procs=open_now) == [f"{qid}: delivered by resume"]
-    assert len(run.calls) == 1

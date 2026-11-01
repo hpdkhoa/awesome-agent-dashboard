@@ -205,16 +205,16 @@ export function InboxView({ item, session, plan, onOpenPlan }: {
           <Md text={item.followUp} cwd={item.cwd} />
         </Section>
       )}
-      {item.status === "answered" && item.waitReason && (
+      {(item.status === "answered" || item.status === "delivering") && item.waitReason && (
         <div className="actions">
           <p className="small">
             {item.waitReason === "turn"
               ? "The session is in a turn: your answer goes when it ends."
               : "The session was last used in the app or a terminal and may still be open there: tell it through Remote Control, or send it anyway."}
           </p>
-          <button onClick={() => cancelAnswer(item.id)}>Cancel</button>
+          <button onClick={() => cancelAnswer(item)}>Cancel</button>
           {item.waitReason === "app" && (
-            <button onClick={() => forceAnswer(item.id)} disabled={item.force}>
+            <button onClick={() => forceAnswer(item)} disabled={item.force}>
               {item.force ? "Sending anyway" : "Send anyway (a second process: the open window won't see it)"}
             </button>
           )}

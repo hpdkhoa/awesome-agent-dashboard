@@ -160,7 +160,12 @@ export function Dashboard() {
             <StartForm machines={machines ?? []} />
           </div>
         ) : tab === "plans" ? (
-          <PlanList plans={shownPlans} items={inbox} picked={plan?.id} onPick={setPickedPlan} />
+          <>
+            <div className="pad">
+              <StartForm machines={machines ?? []} plan />
+            </div>
+            <PlanList plans={shownPlans} items={inbox} picked={plan?.id} onPick={setPickedPlan} />
+          </>
         ) : tab === "inbox" ? (
           <InboxList items={items} picked={item?.id} onPick={setPickedItem} />
         ) : (

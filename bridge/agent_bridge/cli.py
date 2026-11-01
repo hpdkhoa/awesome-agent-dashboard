@@ -118,7 +118,7 @@ def main(argv: list[str] | None = None) -> None:
                     flush=True,
                 )
                 if store is not None:
-                    for line in deliver(store, cfg.machine, claude, logs=cfg.logs):
+                    for line in deliver(store, cfg.machine, claude):
                         print(f"{stamp()} inbox {line}", flush=True)
             if runs is not None:
                 for line in runs.step(feed.current() if feed is not None else None):

@@ -176,11 +176,13 @@ def test_message_waits_for_the_turn_to_end_then_goes(tmp_path, monkeypatch):
     store, runs, work = setup(tmp_path, monkeypatch)
     log = tmp_path / "logs" / "proj" / "busy.jsonl"
     log.write_text(line("user", message={"content": "work"}))  # a turn is running
+    OPEN[:] = [("busy", str(work))]  # in a process that holds the session
     cmd(store, "m1", action="message", sessionId="busy", cwd=str(work), prompt="later")
     runs.step()
     c = store.get("commands/m1")
     assert c["status"] == "waiting" and c["waitReason"] == "turn" and runs.procs == {}
     log.write_text(log.read_text() + chr(10) + line("assistant", message={"stop_reason": "end_turn"}))  # the turn ended
+    OPEN.clear()  # and the process went away
     assert wait_done(runs, "m1", store)["status"] == "done"
 
 
@@ -202,6 +204,9 @@ def test_open_or_closed_comes_from_the_processes(tmp_path):
     assert log_wait_reason(logs, "term", procs=lambda: [(None, "K:/other")]) is None
     assert log_wait_reason(logs, "run", procs=lambda: [(None, "K:/w")]) is None  # last turn was a headless run
     assert log_wait_reason(logs, "app", procs=lambda: None) == "app"  # no process list: the old guess
+    (logs / "p" / "cut.jsonl").write_text(line("user", "claude-desktop", cwd="K:/w", message={"content": "<task-notification>"}))
+    assert log_wait_reason(logs, "cut", procs=lambda: []) is None  # no turn end, but no process: cut off, closed
+    assert log_wait_reason(logs, "cut", procs=lambda: [("cut", "K:/w")]) == "turn"
 
 
 def test_message_to_a_session_open_in_the_app_waits(tmp_path, monkeypatch):
@@ -222,9 +227,11 @@ def test_message_to_a_session_open_in_the_app_waits(tmp_path, monkeypatch):
 def test_send_anyway_never_jumps_a_running_turn(tmp_path, monkeypatch):
     store, runs, work = setup(tmp_path, monkeypatch)
     (tmp_path / "logs" / "proj" / "busy.jsonl").write_text(line("user", "claude-desktop", message={"content": "work"}))
+    OPEN[:] = [("busy", str(work))]
     cmd(store, "m1", action="message", sessionId="busy", cwd=str(work), prompt="hi", force=True)
     runs.step()
     assert store.get("commands/m1")["waitReason"] == "turn" and runs.procs == {}
+    OPEN.clear()
 
 
 def test_message_outside_registered_folders_is_refused(tmp_path, monkeypatch):
@@ -237,3 +244,29 @@ def test_message_outside_registered_folders_is_refused(tmp_path, monkeypatch):
 def test_message_command_shape():
     c = message_command("claude", "hi", "sid")
     assert c[:3] == ["claude", "-p", "hi"] and c[c.index("--resume") + 1] == "sid" and APPROVAL_TOOL in c
+
+
+def test_an_answer_message_writes_its_outcome_on_the_inbox_item(tmp_path, monkeypatch):
+    store, runs, work = setup(tmp_path, monkeypatch)
+    store.put_many({"inbox/q1": {"id": "q1", "status": "delivering"}})
+    OPEN[:] = [("app", str(work))]
+    (tmp_path / "logs" / "proj" / "app.jsonl").write_text(line("assistant", "claude-desktop", message={"stop_reason": "end_turn"}))
+    cmd(store, "m1", action="message", sessionId="app", cwd=str(work), prompt="The owner answered", inboxId="q1")
+    runs.step()
+    assert store.get("inbox/q1")["waitReason"] == "app"  # the inbox page shows why it waits
+    OPEN.clear()  # the owner closed the window
+    assert wait_done(runs, "m1", store)["status"] == "done"
+    q = store.get("inbox/q1")
+    assert q["status"] == "delivered" and q["deliveredVia"] == "resume" and q["followUp"].startswith("did: The owner answered")
+    assert q["waitReason"] is None
+
+
+def test_check_now_writes_what_the_rule_sees(tmp_path, monkeypatch):
+    store, runs, work = setup(tmp_path, monkeypatch)
+    (tmp_path / "logs" / "proj" / "s.jsonl").write_text(line("user", "claude-desktop", message={"content": "work"}))
+    cmd(store, "k1", action="check", sessionId="s")
+    runs.step()
+    c = store.get("commands/k1")
+    assert c["status"] == "done" and c["check"]["lastFrom"] == "claude-desktop"
+    # no claude process carries this made-up id, so the turn with no end counts as cut off
+    assert c["check"]["open"] is False and c["check"]["turn"] is False
