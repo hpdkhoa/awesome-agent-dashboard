@@ -1,9 +1,9 @@
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import { fileURLToPath } from "node:url";
-import { vcbRoute } from "./worker/index";
+import { priceRoute } from "./worker/index";
 
-// `npm run dev` only: answer /api/fx/vcb with the same code the Worker runs, so the local page can sync rates.
+// `npm run dev` only: answer the price routes with the same code the Worker runs, so the local page can sync rates.
 function devRates(): Plugin {
   const store = new Map<string, { res: Response; at: number }>();
   const cache = {
@@ -16,8 +16,10 @@ function devRates(): Plugin {
   return {
     name: "dev-rates",
     configureServer(server) {
-      server.middlewares.use("/api/fx/vcb", async (_req, res) => {
-        const r = await vcbRoute(cache);
+      server.middlewares.use("/api", async (req, res, next) => {
+        const route = priceRoute("/api" + (req.url ?? "").split("?")[0], cache);
+        if (!route) return next();
+        const r = await route;
         res.statusCode = r.status;
         res.setHeader("content-type", r.headers.get("content-type") ?? "application/json");
         res.end(await r.text());

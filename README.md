@@ -80,6 +80,13 @@ time, the session's own question box opens. Add it once to `~/.claude/settings.j
   "hooks": [ { "type": "command", "command": "python -m agent_bridge ask-hook", "timeout": 660 } ] } ] } }
 ```
 
+## Money and Rates
+
+The Money tab keeps VND, USD and gold entries. The Rates tab has one manual Sync button for five public sources:
+Vietcombank's rate feed, HSBC Vietnam's rate table, and the SJC gold bar price from giavang.net, PNJ and Bảo Tín Mạnh
+Hải. The Worker fetches each source at most once every 5 minutes, and each source reports its own error on its own
+line. The page saves only what changed, and the report reads only what the page saved. HSBC's terms allow private use only.
+
 ## Storage
 
 The Storage tab counts every collection, lists its documents 50 at a time with their size by Firestore's size rules,

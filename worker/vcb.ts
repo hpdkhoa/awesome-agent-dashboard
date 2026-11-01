@@ -2,7 +2,8 @@
 export const VCB_URL = "https://portal.vietcombank.com.vn/Usercontrols/TVPortal.TyGia/pXML.aspx";
 export const VCB_MIN_GAP_S = 300;
 
-export type Rate = { name: string; buy: number | null; transfer: number | null; sell: number | null };
+// buy: cash buy; transfer: transfer buy; sell: transfer sell; sellCash: cash sell, where the bank quotes it apart.
+export type Rate = { name: string; buy: number | null; transfer: number | null; sell: number | null; sellCash?: number | null };
 export type VcbRates = { source: string; sourceUrl: string; sourceTime: string; rates: Record<string, Rate> };
 
 // "25,580.00" to 25580; "-" or "" to null (the bank does not quote that side).

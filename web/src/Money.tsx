@@ -78,7 +78,7 @@ export function MoneyView({ entries, fx, gold }: { entries: Entry[]; fx?: FxSnap
       <p className="muted small">
         Values use the last rates saved on this page: {fx ? `Vietcombank ${new Date(fx.sourceTime).toLocaleString()}` : "none synced"}
         {" · "}
-        {gold ? `gold typed ${gold.date}` : "no gold price"}.
+        {gold ? `gold ${gold.source ?? "typed"} ${new Date(gold.sourceTime ?? gold.date).toLocaleString()}` : "no gold price"}.
       </p>
       <h2>Entries</h2>
       <table>

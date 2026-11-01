@@ -2,15 +2,17 @@ import { useEffect, useState } from "react";
 import { collection, deleteDoc, doc, limit, onSnapshot, orderBy, query, setDoc, type QueryConstraint } from "firebase/firestore";
 import { db } from "./firebase";
 
-// Money flow in three assets. Rates come only from what this page synced (Vietcombank) or the owner typed (gold).
+// Money flow in three assets. Rates come only from what this page synced (Vietcombank, HSBC, three SJC gold sources)
+// or the owner typed (gold).
 export type Asset = "VND" | "USD" | "GOLD";
 export const UNIT: Record<Asset, string> = { VND: "đ", USD: "$", GOLD: "chỉ" };
 
 export type Entry = { id: string; date: string; asset: Asset; direction: "in" | "out"; amount: number; note: string; createdAt: string };
-export type Rate = { name: string; buy: number | null; transfer: number | null; sell: number | null };
+export type Rate = { name: string; buy: number | null; transfer: number | null; sell: number | null; sellCash?: number | null };
 // One manual sync of Vietcombank's feed (worker/index.ts returns everything but id and savedAt).
 export type FxSnapshot = {
   id: string;
+  sourceId?: string; // "vcb" or "hsbc"; missing on the first Vietcombank syncs
   source: string;
   sourceUrl: string;
   sourceTime: string;
@@ -18,8 +20,11 @@ export type FxSnapshot = {
   savedAt: string;
   rates: Record<string, Rate>;
 };
-// A gold price the owner typed, in VND per lượng (1 lượng = 10 chỉ).
-export type GoldPrice = { id: string; date: string; product: string; buy: number; sell: number; note: string; enteredAt: string };
+// A gold price in VND per lượng (1 lượng = 10 chỉ): synced (the SJC bar price of one source) or typed by the owner.
+export type GoldPrice = {
+  id: string; date: string; product: string; buy: number; sell: number | null; note: string; enteredAt: string;
+  sourceId?: string; source?: string; sourceUrl?: string; sourceTime?: string; fetchedAt?: string;
+};
 
 export const MIN_GAP_MS = 5 * 60 * 1000; // Vietcombank: one request every 5 minutes at most
 
@@ -53,25 +58,70 @@ export const addGold = (g: Omit<GoldPrice, "id" | "enteredAt">) => {
 
 const sameRates = (a: Record<string, Rate>, b: Record<string, Rate>) => JSON.stringify(a) === JSON.stringify(b);
 
-// Manual sync: ask the site's Worker for Vietcombank's feed and save it, unless the last save is under 5 minutes old
-// or no rate changed since.
-export async function syncRates(latest: FxSnapshot | undefined): Promise<string> {
-  if (latest) {
-    const wait = MIN_GAP_MS - (Date.now() - Date.parse(latest.savedAt));
-    if (wait > 0) return `Wait ${Math.ceil(wait / 60000)} min: Vietcombank allows one request every 5 minutes.`;
-  }
-  // no-store: the site's edge may tell browsers to keep the answer for hours; the Worker's 5-minute cache is the only one.
-  const res = await fetch("/api/fx/vcb", { cache: "no-store" });
-  const body = await res.json();
-  if (!res.ok) throw new Error(body.error ?? `sync failed (${res.status})`);
-  // The feed's time moves on every few minutes even when no rate changed, so compare the rates themselves.
-  if (latest && sameRates(latest.rates, body.rates)) return `No rate changed since ${new Date(latest.sourceTime).toLocaleString()}.`;
-  const id = newId();
-  await setDoc(doc(db, "fxRates", id), { ...body, id, savedAt: now() });
-  return `Saved ${Object.keys(body.rates).length} rates from ${new Date(body.sourceTime).toLocaleString()}.`;
+// The sources behind the one Sync button (the owner's choice, 2026-11-01, "Do #1"), each saved as its own source.
+export const FX_SOURCES = [
+  { id: "vcb", label: "Vietcombank", path: "/api/fx/vcb" },
+  { id: "hsbc", label: "HSBC", path: "/api/fx/hsbc" },
+];
+export const GOLD_SOURCES = [
+  { id: "giavang", label: "giavang.net", path: "/api/gold/giavang" },
+  { id: "pnj", label: "PNJ", path: "/api/gold/pnj" },
+  { id: "btmh", label: "Bảo Tín Mạnh Hải", path: "/api/gold/btmh" },
+];
+export const fxSource = (s: FxSnapshot) => s.sourceId ?? "vcb"; // the first syncs were Vietcombank only
+export const goldSource = (g: GoldPrice) => g.sourceId ?? "typed";
+
+// One line per source: what it saved, or its own error (the owner's rule, 2026-11-01).
+export type SyncLine = { label: string; ok: boolean; text: string };
+
+const tooSoon = (savedAt: string | undefined) => {
+  const wait = savedAt ? MIN_GAP_MS - (Date.now() - Date.parse(savedAt)) : 0;
+  return wait > 0 ? `wait ${Math.ceil(wait / 60000)} min: one request every 5 minutes.` : "";
+};
+
+// no-store: the site's edge may tell browsers to keep the answer for hours; the Worker's 5-minute cache is the only one.
+async function ask(path: string, label: string) {
+  const res = await fetch(path, { cache: "no-store" });
+  const body = await res.json().catch(() => ({ error: `${label}: the answer was not JSON (${res.status})` }));
+  if (!res.ok) throw new Error(body.error ?? `${label}: sync failed (${res.status})`);
+  return body;
 }
 
-// Balances per asset, and their value in VND at the latest synced USD cash-buy rate and typed gold buy price.
+async function syncFx(src: (typeof FX_SOURCES)[number], latest: FxSnapshot | undefined): Promise<string> {
+  const wait = tooSoon(latest?.savedAt);
+  if (wait) return wait;
+  const body = await ask(src.path, src.label);
+  // The feed's time moves on every few minutes even when no rate changed, so compare the rates themselves.
+  if (latest && sameRates(latest.rates, body.rates)) return `no rate changed since ${new Date(latest.sourceTime).toLocaleString()}.`;
+  const id = newId();
+  await setDoc(doc(db, "fxRates", id), { ...body, sourceId: src.id, id, savedAt: now() });
+  return `saved ${Object.keys(body.rates).length} rates from ${new Date(body.sourceTime).toLocaleString()}.`;
+}
+
+async function syncGold(src: (typeof GOLD_SOURCES)[number], latest: GoldPrice | undefined): Promise<string> {
+  const wait = tooSoon(latest?.enteredAt);
+  if (wait) return wait;
+  const q = await ask(src.path, src.label);
+  if (latest && latest.buy === q.buy && latest.sell === q.sell) return `SJC price unchanged since ${new Date(latest.sourceTime ?? latest.enteredAt).toLocaleString()}.`;
+  const id = newId();
+  await setDoc(doc(db, "goldPrices", id), { ...q, id, date: q.sourceTime.slice(0, 10), note: "", enteredAt: now() });
+  return `saved SJC buy ${fmt(q.buy, 0)} / sell ${fmt(q.sell, 0)} đ per lượng (${new Date(q.sourceTime).toLocaleString()}).`;
+}
+
+// Manual sync of every source at once. Each runs on its own, so one failing source never stops the others.
+export function syncAll(fx: FxSnapshot[], gold: GoldPrice[]): Promise<SyncLine[]> {
+  const run = (label: string, job: () => Promise<string>) =>
+    job().then(
+      (text) => ({ label, ok: true, text: `${label}: ${text}` }),
+      (e: Error) => ({ label, ok: false, text: e.message.startsWith(label) ? e.message : `${label}: ${e.message}` }),
+    );
+  return Promise.all([
+    ...FX_SOURCES.map((s) => run(s.label, () => syncFx(s, fx.find((x) => fxSource(x) === s.id)))),
+    ...GOLD_SOURCES.map((s) => run(s.label, () => syncGold(s, gold.find((x) => goldSource(x) === s.id)))),
+  ]);
+}
+// Balances per asset, and their value in VND at the latest Vietcombank USD cash-buy rate and the gold buy price the
+// caller passes: SJC's own price (giavang.net, the owner's choice 2026-11-01), else the newest gold price saved.
 export function balances(entries: Entry[], fx: FxSnapshot | undefined, gold: GoldPrice | undefined) {
   const bal: Record<Asset, number> = { VND: 0, USD: 0, GOLD: 0 };
   for (const e of entries) bal[e.asset] += e.direction === "in" ? e.amount : -e.amount;
