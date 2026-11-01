@@ -91,6 +91,14 @@ the session branches the plan from the version that question was asked on; old b
 chooses a branch. A card per step shows only your answers, with the session's work (its note and the lines it changed)
 on hover.
 
+## Notifications on your phone
+
+The bridge sends a Web Push when a run needs your approval and when a run ends (done or failed). Once, on the machine
+that runs the bridge: `python -m agent_bridge push-setup`. It makes the push key, keeps the private half in the OS key
+store, and puts the public half on `meta/push`. `OWNER_EMAIL` from `.env` is the push contact. On the iPhone (iOS 16.4
+or newer): open the site in Safari, Share, Add to Home Screen, open it from the Home Screen, sign in, and tap "Turn on
+notifications". `python -m agent_bridge push-test` sends a test. A tap on a push opens that approval or run.
+
 ## Money and Rates
 
 The Money tab keeps VND, USD, EUR, gold bar and gold ring entries, typed in Vietnamese number format (`1.000.000`,

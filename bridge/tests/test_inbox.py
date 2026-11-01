@@ -23,6 +23,9 @@ class FakeStore:
     def update(self, path, fields):
         self.docs.setdefault(path, {}).update(fields)
 
+    def delete(self, path):
+        self.docs.pop(path, None)
+
     def where(self, collection, field, value):
         return [d for p, d in self.docs.items() if p.startswith(collection + "/") and d.get(field) == value]
 

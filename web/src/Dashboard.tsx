@@ -4,6 +4,20 @@ import { auth } from "./firebase";
 import { useInbox, useMachines, usePlans, useRuns, useSessions, useUsage, useWorkTypes, type Run, type Session, type Tokens } from "./data";
 import { MessageBox, RunList, StartForm } from "./Runs";
 import { PlanList, PlanView } from "./Plans";
+import { usePush, type PushState } from "./notify";
+
+// A tap on a push opens /?item=<inbox id> or /?run=<command id> (bridge/agent_bridge/push.py).
+const opened = new URLSearchParams(window.location.search);
+if ([...opened].length) window.history.replaceState(null, "", "/");
+
+const PUSH_LABEL: Record<PushState, string> = {
+  unsupported: "No notifications in this browser",
+  "home-screen": "Notifications: add to Home Screen first",
+  off: "Turn on notifications",
+  denied: "Notifications blocked in Settings",
+  on: "Notifications on",
+  "no-key": "Notifications: run push-setup on the bridge",
+};
 import { Md } from "./Markdown";
 import { Section } from "./Section";
 import { InboxList, InboxView, isWaiting } from "./Inbox";
@@ -40,9 +54,10 @@ export function Dashboard() {
   const [pickedPlan, setPickedPlan] = useState<string | null>(null);
   const [wt, setWt] = useState<string>("all");
   const [picked, setPicked] = useState<string | null>(null);
-  const [tab, setTab] = useState<"inbox" | "plans" | "sessions" | "runs" | "money" | "rates" | "storage">("inbox");
+  const [tab, setTab] = useState<"inbox" | "plans" | "sessions" | "runs" | "money" | "rates" | "storage">(opened.get("run") ? "runs" : "inbox");
   const [store, setStore] = useState("inbox");
-  const [pickedItem, setPickedItem] = useState<string | null>(null);
+  const [pickedItem, setPickedItem] = useState<string | null>(opened.get("item"));
+  const [push, turnOnPush] = usePush();
   // Money data loads only while the Money or Rates tab is open.
   const entries = useEntries(tab === "money");
   const fx = useFx(tab === "money" || tab === "rates");
@@ -90,6 +105,12 @@ export function Dashboard() {
           {usage.length} days {num(month.tokens)} tok · {usd(month.cost)} est.
         </span>
         <span className="stat muted">{lastSync ? "synced " + ago(lastSync) : "no sync yet"}</span>
+        {push && (
+          <button className={push === "off" ? "pill wait" : "pill"} disabled={push !== "off"} onClick={turnOnPush}
+            title="A push when a run needs your approval and when a run ends">
+            {PUSH_LABEL[push]}
+          </button>
+        )}
         <button className="right" onClick={() => signOut(auth)}>
           Sign out
         </button>

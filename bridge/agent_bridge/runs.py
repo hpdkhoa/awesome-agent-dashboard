@@ -72,9 +72,10 @@ class Runs:
     """The runs this bridge started, kept in memory while it lives."""
 
     def __init__(self, store, machine: str, roots: list[tuple[str, str]], claude: str | None, out_dir: Path,
-                 popen=subprocess.Popen, logs: Path | None = None):
+                 popen=subprocess.Popen, logs: Path | None = None, push=None):
         self.store, self.machine, self.roots, self.claude, self.popen = store, machine, roots, claude, popen
         self.logs = logs  # Claude Code's log folder, to see whether a session wrote recently
+        self.push = push  # a push.Pusher: tells the owner's phone when a run ended
         self.out_dir = out_dir  # each run's output goes to files, so a long run never blocks on a full pipe
         self.out_dir.mkdir(parents=True, exist_ok=True)
         self.procs: dict[str, subprocess.Popen] = {}
@@ -212,4 +213,11 @@ class Runs:
             fields["status"] = "failed"
             fields["error"] = redact(str(r.get("result") or (err or out or "")[-800:]), 800)
         self.store.update(f"commands/{cid}", fields)
+        if self.push is not None and fields["status"] in ("done", "failed"):
+            c = self.store.get(f"commands/{cid}") or {}
+            first = (fields.get("result") or fields.get("error") or "").strip().split("\n")
+            body = next((line for line in first if line.strip(" -")), "")[:160]
+            what = "message" if c.get("action") == "message" else "run"
+            self.push.notify(f"{what.capitalize()} {fields['status']}: {c.get('workType') or c.get('folder') or ''}".rstrip(": "),
+                             body or "No text.", f"/?run={cid}", cid)
         return f"{cid}: {fields['status']}"

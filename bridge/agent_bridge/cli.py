@@ -39,6 +39,8 @@ def main(argv: list[str] | None = None) -> None:
             c.add_argument("--every", type=float, default=60)
     sub.add_parser("inbox", help="the inbox MCP server (started by Claude Code, not by hand)")
     sub.add_parser("ask-hook", help="the question hook: Claude Code's question box goes to the inbox first")
+    sub.add_parser("push-setup", help="make this machine's push key once and publish its public half for the page")
+    sub.add_parser("push-test", help="send a test notification to every subscribed phone")
     a = p.parse_args(argv)
 
     if a.cmd == "inbox":
@@ -63,14 +65,29 @@ def main(argv: list[str] | None = None) -> None:
         print(f"Signed in as the owner. Token stored in {where}.")
         return
 
+    if a.cmd in ("push-setup", "push-test"):
+        from .push import pusher, setup
+
+        store = Firestore(Session(cfg))
+        store.check_owner()
+        if a.cmd == "push-setup":
+            print(f"Push key ready. Public key: {setup(store)}")
+        else:
+            n = pusher(store, cfg.owner_email).notify("Test from the agent dashboard", "Notifications work.", "/", "test")
+            print(f"Sent to {n} device(s).")
+        return
+
     store = None
-    if not a.dry_run:
+    if not getattr(a, "dry_run", False):
         store = Firestore(Session(cfg))
         store.check_owner()
     claude = find_claude(cfg.claude_bin)
     runs = gone = None
     if store is not None and a.cmd == "watch":
-        runs = Runs(store, cfg.machine, cfg.roots, claude, data_dir() / "runs", logs=cfg.logs)
+        from .push import pusher
+
+        runs = Runs(store, cfg.machine, cfg.roots, claude, data_dir() / "runs", logs=cfg.logs,
+                    push=pusher(store, cfg.owner_email))
         runs.forget_lost()
         feed = gone = None
         try:

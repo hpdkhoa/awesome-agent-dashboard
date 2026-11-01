@@ -102,3 +102,6 @@ class Firestore:
             ]
             self._call(f"{self.base}:commit", {"writes": writes})
         return len(items)
+
+    def delete(self, path: str) -> None:
+        self._call(f"{self.base}:commit", {"writes": [{"delete": f"{self.root}/{path}"}]})

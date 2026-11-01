@@ -209,6 +209,9 @@ def server():
             time.sleep(BEAT_SECONDS)
 
     threading.Thread(target=beat_forever, daemon=True).start()
+    from .push import pusher
+
+    push = pusher(inbox.store, cfg.owner_email)
 
     mcp = MCPServer(
         "agent-inbox",
@@ -269,6 +272,8 @@ def server():
             inbox.post, "approval", f"Allow {tool_name}?", json.dumps(input, indent=1, ensure_ascii=False)[:3500],
             [{"label": "Allow", "detail": "run this call"}, {"label": "Deny", "detail": "the session is told it was denied"}],
         )
+        what = input.get("command") or input.get("description") or input.get("file_path") or json.dumps(input, ensure_ascii=False)
+        await asyncio.to_thread(push.notify, f"Approval needed: {tool_name}", str(what)[:160], f"/?item={item_id}", item_id)
         end = time.time() + MAX_WAIT_MINUTES * 60
         while time.time() < end:
             item = await asyncio.to_thread(inbox.store.get, f"inbox/{item_id}")

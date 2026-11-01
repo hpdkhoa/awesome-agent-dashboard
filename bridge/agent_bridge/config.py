@@ -37,6 +37,7 @@ class Config:
     logs: Path
     roots: list[tuple[str, str]]
     claude_bin: str = ""
+    owner_email: str = ""  # the VAPID contact of the bridge's pushes; stays on this machine
 
     @classmethod
     def load(cls, env_path: Path | None = None) -> Config:
@@ -52,4 +53,4 @@ class Config:
                 roots.append((name.strip(), root.strip()))
         logs = Path(env.get("CLAUDE_LOGS") or Path.home() / ".claude" / "projects")
         machine = env.get("MACHINE_NAME") or socket.gethostname()
-        return cls(project, key, machine, logs, roots, env.get("CLAUDE_BIN", ""))
+        return cls(project, key, machine, logs, roots, env.get("CLAUDE_BIN", ""), env.get("OWNER_EMAIL", ""))
