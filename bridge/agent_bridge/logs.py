@@ -38,6 +38,7 @@ class FileState:
     last_prompt: str = ""
     last_reply: str = ""
     prompts: int = 0
+    remote_id: str = ""  # the Remote Control session id ("cse_..."), the newest one the log names
 
     def to_json(self) -> dict:
         return self.__dict__.copy()
@@ -85,6 +86,8 @@ def _fold(d: dict, st: FileState) -> None:
         st.last_ts = max(st.last_ts, ts)
     if not st.cwd and d.get("cwd"):
         st.cwd = d["cwd"]
+    if d.get("bridgeSessionId"):
+        st.remote_id = d["bridgeSessionId"]
     kind = d.get("type")
     if kind == "custom-title" and d.get("customTitle"):
         st.title = redact(d["customTitle"], 120)

@@ -28,6 +28,7 @@ export type Session = {
   prompts: number;
   subagents: number;
   messages: number;
+  remoteId?: string; // the Remote Control session id ("cse_..."), when the session was ever linked
   models: Record<string, number>;
   tokens: Tokens;
   days: Record<string, Tokens>;

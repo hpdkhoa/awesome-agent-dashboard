@@ -65,6 +65,9 @@ export function StartForm({ machines }: { machines: Machine[] }) {
   );
 }
 
+// claude.ai names a Remote Control session "session_..."; the log names the same id "cse_...".
+export const remoteUrl = (id: string) => `https://claude.ai/code/${id.replace(/^cse_/, "session_")}`;
+
 export function MessageBox({ s, runs }: { s: Session; runs: Run[] }) {
   const [text, setText] = useState("");
   const [error, setError] = useState("");
@@ -95,9 +98,19 @@ export function MessageBox({ s, runs }: { s: Session; runs: Run[] }) {
         }}
       />
       {error && <p className="bad small">{error}</p>}
+      {s.remoteId && (
+        <p className="small">
+          <a href={remoteUrl(s.remoteId)} target="_blank" rel="noreferrer">
+            Open this session in Remote Control
+          </a>
+          : what you type there shows in the open window and counts as you, approvals included. Needs Remote Control on in
+          that window.
+        </p>
+      )}
       <p className="muted small">
-        The bridge resumes the session with your message once it is closed. If it is open in a terminal or the desktop app,
-        the message waits; close that window to let it through.
+        Send here runs in the background: the bridge resumes the session with your message once it is closed, and the
+        reply shows only on this page. If it is open in a terminal or the desktop app, the message waits; close that window
+        to let it through.
       </p>
       <button className="primary" disabled={busy} onClick={send}>
         Send

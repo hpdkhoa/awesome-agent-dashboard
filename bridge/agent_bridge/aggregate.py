@@ -92,6 +92,7 @@ def build(
             "startedAt": min((f.first_ts for f in files if f.first_ts), default=""),
             "lastAt": max((f.last_ts for f in files), default=""),
             "prompts": main.prompts,
+            "remoteId": main.remote_id,
             "subagents": len(files) - 1,
             "messages": sum(models.values()),
             "models": dict(models),

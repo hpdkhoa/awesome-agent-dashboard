@@ -51,6 +51,13 @@ def test_tool_results_are_not_prompts(tmp_path):
     assert read_lines(p, FileState()).prompts == 1
 
 
+def test_remote_control_id_is_the_newest_one(tmp_path):
+    p = tmp_path / "proj" / "s1.jsonl"
+    write(p, [human(T1, "go"), {"type": "system", "timestamp": T2, "bridgeSessionId": "cse_old"},
+              {"type": "system", "timestamp": T3, "bridgeSessionId": "cse_new"}])
+    assert read_lines(p, FileState()).remote_id == "cse_new"
+
+
 def test_reading_in_two_steps_equals_one(tmp_path):
     p = tmp_path / "proj" / "s1.jsonl"
     write(p, [human(T1, "a"), assistant("m1", T2)])
