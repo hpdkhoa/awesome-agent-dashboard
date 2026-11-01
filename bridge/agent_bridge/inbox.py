@@ -188,7 +188,9 @@ def server():
         """Keep waiting for the owner's answer to an earlier inbox_ask."""
         return await wait_for(item_id, wait_minutes, ctx)
 
-    @mcp.tool()
+    # Text only: Claude Code refuses a permission answer that also carries structured content ("Expected a single text
+    # block param"), which the SDK adds to any tool returning str unless told not to.
+    @mcp.tool(structured_output=False)
     async def inbox_approve(tool_name: str, input: dict, tool_use_id: str = "") -> str:
         """Permission prompt for runs started from the dashboard: the owner allows or denies the call in the inbox."""
         import json
