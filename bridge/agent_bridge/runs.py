@@ -286,7 +286,7 @@ class Runs:
         if why:
             if c.get("status") != "waiting" or c.get("waitReason") != why:
                 self.store.update(path, {"status": "waiting", "waitReason": why, "workType": wt})
-                return f"{c['id']}: session {sid} {'is in a turn' if why == 'turn' else 'was last used in a window'}, the message waits"
+                return f"{c['id']}: session {sid} {'is in a turn' if why == 'turn' else 'is open in the app or a terminal'}, the message waits"
             return None
         p = self._spawn(c["id"], message_command(self.claude, text, sid), cwd)
         self.store.update(path, {"status": "running", "workType": wt, "pid": p.pid, "startedAt": now_iso()})
