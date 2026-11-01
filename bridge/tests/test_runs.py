@@ -246,6 +246,22 @@ def test_message_command_shape():
     assert c[:3] == ["claude", "-p", "hi"] and c[c.index("--resume") + 1] == "sid" and APPROVAL_TOOL in c
 
 
+def test_one_setting_picks_the_mode_for_every_run(tmp_path):
+    # Manual unless meta/runs says "auto"; bypass is never passed, whatever the setting holds
+    assert "--permission-mode" not in message_command("claude", "hi", "sid")
+    for mode in ("bypassPermissions", "dontAsk", "acceptEdits", ""):
+        assert "--permission-mode" not in start_command("claude", "x", "sid", mode)
+    auto = message_command("claude", "hi", "sid", "auto")
+    assert auto[auto.index("--permission-mode") + 1] == "auto" and APPROVAL_TOOL in auto
+    store = FakeStore()
+    runs = Runs(store, "PC", [], "claude", tmp_path)
+    assert runs.mode() == "manual"
+    store.put_many({"meta/runs": {"permissionMode": "bypassPermissions"}})
+    assert runs.mode() == "manual"
+    store.put_many({"meta/runs": {"permissionMode": "auto"}})
+    assert runs.mode() == "auto"
+
+
 def test_an_answer_message_writes_its_outcome_on_the_inbox_item(tmp_path, monkeypatch):
     store, runs, work = setup(tmp_path, monkeypatch)
     store.put_many({"inbox/q1": {"id": "q1", "status": "delivering"}})

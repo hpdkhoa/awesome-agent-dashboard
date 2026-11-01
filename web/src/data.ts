@@ -99,6 +99,7 @@ export type Run = {
   action: "start" | "stop" | "message" | "check";
   waitReason?: "turn" | "app";
   force?: boolean;
+  permissionMode?: RunMode; // the setting the bridge read when this run went
   // "Check now": what the bridge's wait rule saw for the session (bridge runs.py session_status)
   check?: { turn: boolean; lastFrom: string; open: boolean | null; openSince: string | null; openIn: "app" | "terminal" | null };
   createdAt: string;
@@ -201,6 +202,18 @@ export const checkSession = (machine: string, sessionId: string) => {
   const id = newId();
   return setDoc(doc(db, "commands", id), { id, action: "check", machine, sessionId, status: "new", createdAt: new Date().toISOString() });
 };
+
+// The owner's one setting for every run, meta/runs (the owner's choice, 2026-11-02: "do 1 but it is one setting use for
+// all kinds not set every run"). Manual: every approval comes to the inbox. Auto: Claude Code's safety check decides
+// most, the inbox is the fallback. The bridge reads it when a run goes (bridge runs.py mode()).
+export type RunMode = "manual" | "auto";
+export function useRunMode(): RunMode | null {
+  const [mode, setMode] = useState<RunMode | null>(null);
+  useEffect(() => onSnapshot(doc(db, "meta", "runs"), (d) => setMode(d.data()?.permissionMode === "auto" ? "auto" : "manual")), []);
+  return mode;
+}
+export const setRunMode = (mode: RunMode) =>
+  setDoc(doc(db, "meta", "runs"), { permissionMode: mode, changedAt: new Date().toISOString() }, { merge: true });
 
 export const stopRun = (machine: string, target: string) => {
   const id = newId();

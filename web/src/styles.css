@@ -88,6 +88,7 @@ td { padding: 4px 0; border-bottom: 1px solid var(--line); }
 .tag { margin-left: 8px; font-size: 11px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--live); color: var(--live); }
 textarea { width: 100%; font: inherit; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: inherit; }
 .actions { display: flex; gap: 8px; margin-top: 10px; }
+.mode-switch { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 14px; }
 .primary { background: var(--accent); color: var(--bg); border-color: var(--accent); }
 code { font-size: 12px; }
 .mono { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }

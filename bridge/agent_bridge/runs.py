@@ -6,6 +6,12 @@ existing session) or "stop" (a run to end). The bridge on the named machine runs
     start:    claude -p <prompt> --output-format json --session-id <new id> --permission-prompt-tool <inbox approve>
     message:  claude -p <message> --output-format json --resume <session> --permission-prompt-tool <inbox approve>
 
+Both add `--permission-mode auto` when the owner's one setting, meta/runs permissionMode, says "auto" (the owner's
+choice, 2026-11-02: "do 1 but it is one setting use for all kinds not set every run"). It covers every kind of run:
+starts, plan starts, messages and delivered answers. Auto lets Claude Code's safety check decide most approvals; the
+inbox stays the fallback when the check pauses or an ask rule applies. Any other value is Manual: every approval goes to
+the inbox. There is no bypass mode.
+
 A session's state comes from its messages, not from a heartbeat (the owner's model, 2026-11-01: "the session not
 sent or completed just count as closed ... when I start the message send then that session become open and wait til
 EOB or the done token then the state become closed again"). A message waits ("waiting") while:
@@ -24,7 +30,8 @@ the same wait rule, approvals in the inbox, a push when it ends, and a row in Ru
 inbox item (the owner's choice, 2026-11-02: "build the fix", so a plan stays one session).
 
 Rules from the plan: only folders registered in WORK_ROOTS, a fixed list of actions, the prompt goes to claude as one
-argument (never through a shell), permissions stay on and every approval goes to the owner's inbox (no bypass mode),
+argument (never through a shell), permissions stay on: in Manual every approval goes to the owner's inbox, in Auto the
+safety check decides first and the inbox is the fallback (never bypass mode),
 ANTHROPIC_API_KEY is removed so the run uses the plan (terms T7).
 """
 
@@ -203,14 +210,19 @@ def log_wait_reason(logs: Path | None, session_id: str, force: bool = False, pro
     return None
 
 
-def start_command(claude: str, prompt: str, session_id: str) -> list[str]:
+def mode_args(mode: str) -> list[str]:
+    """Only "auto" changes the mode; anything else stays Manual. Bypass is never passed."""
+    return ["--permission-mode", "auto"] if mode == "auto" else []
+
+
+def start_command(claude: str, prompt: str, session_id: str, mode: str = "manual") -> list[str]:
     return [claude, "-p", prompt, "--output-format", "json", "--session-id", session_id,
-            "--permission-prompt-tool", APPROVAL_TOOL]
+            "--permission-prompt-tool", APPROVAL_TOOL, *mode_args(mode)]
 
 
-def message_command(claude: str, message: str, session_id: str) -> list[str]:
+def message_command(claude: str, message: str, session_id: str, mode: str = "manual") -> list[str]:
     return [claude, "-p", message, "--output-format", "json", "--resume", session_id,
-            "--permission-prompt-tool", APPROVAL_TOOL]
+            "--permission-prompt-tool", APPROVAL_TOOL, *mode_args(mode)]
 
 
 def parse_result(out: str | None) -> dict:
@@ -266,6 +278,10 @@ class Runs:
         if c.get("inboxId"):
             self.store.update(f"inbox/{c['inboxId']}", fields)
 
+    def mode(self) -> str:
+        """The owner's one setting for every run, read when a run starts: "auto" or "manual"."""
+        return "auto" if (self.store.get("meta/runs") or {}).get("permissionMode") == "auto" else "manual"
+
     def step(self, todo: list[dict] | None = None) -> list[str]:
         """Acts on the commands still to do. `todo` comes from the listener (listen.py); without it, ask Firestore."""
         log = []
@@ -316,9 +332,10 @@ class Runs:
         if not self.claude:
             self.store.update(path, {"status": "failed", "error": NO_CLI})
             return f"{c['id']}: no claude CLI"
-        sid = str(uuid.uuid4())
-        p = self._spawn(c["id"], start_command(self.claude, prompt, sid), c["folder"])
-        self.store.update(path, {"status": "running", "sessionId": sid, "workType": wt, "pid": p.pid, "startedAt": now_iso()})
+        sid, mode = str(uuid.uuid4()), self.mode()
+        p = self._spawn(c["id"], start_command(self.claude, prompt, sid, mode), c["folder"])
+        self.store.update(path, {"status": "running", "sessionId": sid, "workType": wt, "pid": p.pid,
+                                 "startedAt": now_iso(), "permissionMode": mode})
         return f"{c['id']}: started session {sid} in {c['folder']}"
 
     def wait_reason(self, session_id: str, force: bool = False) -> str | None:
@@ -352,8 +369,10 @@ class Runs:
                 self._answer_back(c, {"waitReason": why})
                 return f"{c['id']}: session {sid} {'is in a turn' if why == 'turn' else 'is open in the app or a terminal'}, the message waits"
             return None
-        p = self._spawn(c["id"], message_command(self.claude, text, sid), cwd)
-        self.store.update(path, {"status": "running", "workType": wt, "pid": p.pid, "startedAt": now_iso()})
+        mode = self.mode()
+        p = self._spawn(c["id"], message_command(self.claude, text, sid, mode), cwd)
+        self.store.update(path, {"status": "running", "workType": wt, "pid": p.pid, "startedAt": now_iso(),
+                                 "permissionMode": mode})
         self._answer_back(c, {"waitReason": None})
         return f"{c['id']}: sent to session {sid}"
 

@@ -144,6 +144,11 @@ with no answer in 25 minutes is denied. The prompt is passed to `claude` as one 
 needs the Claude Code CLI on that machine, signed in through Anthropic's own sign-in. Open terminal or desktop-app
 sessions cannot be started or stopped from the page.
 
+One switch on the Runs tab, Approvals Manual or Auto, covers every run the page sends: starts, plans, messages and
+late answers. It lives on `meta/runs` and the bridge reads it when each run goes. Manual is the rule above. Auto adds
+`--permission-mode auto`: Claude Code's safety check approves most steps, and the inbox still gets what it pauses on and
+any ask rule. The bridge passes no other mode, so bypass is never used. Desktop windows keep their own mode picker.
+
 The message box on a session page sends a message the same way (`claude -p --resume`). A session counts as closed
 unless a turn is running in it, read from the end of its log. A message waits while a turn runs and goes when it
 ends. A session open in the app or a terminal waits too, because a second process would split its conversation; the

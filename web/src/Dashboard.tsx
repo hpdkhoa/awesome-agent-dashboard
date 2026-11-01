@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { signOut } from "firebase/auth";
 import { auth } from "./firebase";
 import { RECENT_DAYS, useInbox, useMachines, usePlans, useRuns, useSessions, useUsage, useWorkTypes, type Run, type Session, type Tokens } from "./data";
-import { MessageBox, RunList, StartForm } from "./Runs";
+import { MessageBox, ModeSwitch, RunList, StartForm } from "./Runs";
 import { PlanList, PlanView } from "./Plans";
 import { usePush, type PushState } from "./notify";
 import { FileViewer } from "./FileView";
@@ -197,7 +197,10 @@ export function Dashboard() {
         ) : tab === "rates" ? (
           fx && gold ? <RatesReport fx={fx} gold={gold} /> : <p className="muted">Loading</p>
         ) : tab === "runs" ? (
-          <RunList runs={runs ?? []} />
+          <>
+            <ModeSwitch />
+            <RunList runs={runs ?? []} />
+          </>
         ) : tab === "plans" ? (
           plan ? (
             <PlanView key={plan.id} plan={plan} items={inbox} session={sessions.find((s) => s.id === plan.sessionId)} onOpenItem={openItem} />

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { cancelMessage, checkSession, forceMessage, sendMessage, startRun, stopRun, type Machine, type Run, type Session } from "./data";
+import { cancelMessage, checkSession, forceMessage, sendMessage, setRunMode, startRun, stopRun, useRunMode, type Machine, type Run, type Session } from "./data";
 import { usd } from "./Dashboard";
 import { Md } from "./Markdown";
 import { Section } from "./Section";
@@ -157,6 +157,24 @@ export function MessageBox({ s, runs }: { s: Session; runs: Run[] }) {
   );
 }
 
+// One switch for every run the dashboard sends: starts, plans, messages and late answers.
+export function ModeSwitch() {
+  const mode = useRunMode();
+  if (!mode) return null;
+  return (
+    <div className="mode-switch">
+      <span className="label">Approvals</span>
+      <button className={mode === "manual" ? "tab on" : "tab"} onClick={() => setRunMode("manual")}>Manual</button>
+      <button className={mode === "auto" ? "tab on" : "tab"} onClick={() => setRunMode("auto")}>Auto</button>
+      <span className="muted small">
+        {mode === "auto"
+          ? "Claude Code's safety check approves most steps; the inbox gets the rest. For every run from here on."
+          : "Every approval comes to the inbox. For every run from here on."}
+      </span>
+    </div>
+  );
+}
+
 export function RunList({ runs, title = "Runs from the dashboard" }: { runs: Run[]; title?: string }) {
   const shown = runs.filter((r) => r.action === "start" || r.action === "message");
   return (
@@ -177,6 +195,7 @@ export function RunList({ runs, title = "Runs from the dashboard" }: { runs: Run
           extra={
             <>
               {r.action === "message" ? "message" : "new session"} · {r.workType ?? ""} · {r.machine} ·{" "}
+              {r.permissionMode === "auto" && <>auto · </>}
               {ago(r.startedAt ?? r.createdAt)}
               {r.costUsd != null && <> · {usd(r.costUsd)}</>}
             </>
