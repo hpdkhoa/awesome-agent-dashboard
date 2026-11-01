@@ -39,6 +39,11 @@ td { padding: 4px 0; border-bottom: 1px solid var(--line); }
 .muted { color: var(--muted); }
 .small { font-size: 12px; }
 .bad { color: var(--bad); }
+.tiles { display: flex; flex-wrap: wrap; gap: 12px; margin: 8px 0 16px; }
+.tiles > div { flex: 1 1 200px; padding: 10px 14px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
+.tiles p { margin: 0; }
+.balance td + td { padding-left: 10px; }
+.big { font-size: 22px; font-weight: 500; font-variant-numeric: tabular-nums; text-align: left; }
 .card { max-width: 420px; margin: 15vh auto; padding: 24px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; }
 
 .app {

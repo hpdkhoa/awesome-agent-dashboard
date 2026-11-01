@@ -6,7 +6,7 @@ import { MessageBox, RunList, StartForm } from "./Runs";
 import { Md } from "./Markdown";
 import { Section } from "./Section";
 import { InboxList, InboxView, isWaiting } from "./Inbox";
-import { fxSource, goldSource, useEntries, useFx, useGold } from "./moneyData";
+import { useEntries, useFx, useGold } from "./moneyData";
 import { EntryForm, MoneyView } from "./Money";
 import { RatesReport, RatesSide } from "./Rates";
 import { StorageSide, StorageView } from "./Storage";
@@ -120,7 +120,7 @@ export function Dashboard() {
         {tab === "storage" ? (
           <StorageSide picked={store} onPick={setStore} />
         ) : tab === "money" ? (
-          <EntryForm />
+          <EntryForm fx={fx} gold={gold} />
         ) : tab === "rates" ? (
           <RatesSide fx={fx} gold={gold} />
         ) : tab === "runs" ? (
@@ -151,7 +151,7 @@ export function Dashboard() {
         {tab === "storage" ? (
           <StorageView name={store} />
         ) : tab === "money" ? (
-          entries && fx && gold ? <MoneyView entries={entries} fx={fx.find((s) => fxSource(s) === "vcb")} gold={gold.find((g) => goldSource(g) === "giavang") ?? gold[0]} /> : <p className="muted">Loading</p>
+          entries && fx && gold ? <MoneyView entries={entries} fx={fx} gold={gold} /> : <p className="muted">Loading</p>
         ) : tab === "rates" ? (
           fx && gold ? <RatesReport fx={fx} gold={gold} /> : <p className="muted">Loading</p>
         ) : tab === "runs" ? (

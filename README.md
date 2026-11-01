@@ -82,9 +82,12 @@ time, the session's own question box opens. Add it once to `~/.claude/settings.j
 
 ## Money and Rates
 
-The Money tab keeps VND, USD and gold entries. The Rates tab has one manual Sync button for five public sources:
-Vietcombank's rate feed, HSBC Vietnam's rate table, and the SJC gold bar price from giavang.net, PNJ and Bảo Tín Mạnh
-Hải. The Worker fetches each source at most once every 5 minutes, and each source reports its own error on its own
+The Money tab keeps VND, USD, EUR, gold bar and gold ring entries, typed in Vietnamese number format (`1.000.000`,
+`1,5`). An "in" entry can keep the price paid, for profit or loss. Its Balance dashboard shows each asset, the rate it is
+valued at, its value in đ, its share and its profit or loss: gold at SJC's own buy price on giavang.net (bar or ring),
+dollars and euros at Vietcombank's cash buy. Saving an entry syncs the rates first. The Rates tab has one manual Sync
+button for five public sources: Vietcombank's rate feed, HSBC Vietnam's rate table, and the SJC gold bar and plain ring
+price from giavang.net, PNJ and Bảo Tín Mạnh Hải. The Worker fetches each source at most once every 5 minutes, and each source reports its own error on its own
 line. The page saves only what changed, and the report reads only what the page saved. HSBC's terms allow private use only.
 
 ## Storage

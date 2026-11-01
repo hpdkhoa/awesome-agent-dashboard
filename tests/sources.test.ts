@@ -28,21 +28,30 @@ describe("SJC gold, in đ per lượng", () => {
     const g = parseGiavang(read("giavang-2026-11-01.json"));
     expect(g).toMatchObject({ sourceId: "giavang", buy: 136_000_000, sell: 139_000_000 });
     expect(g.sourceTime).toBe("2026-10-31T08:12:06+07:00");
+    expect(g.ring).toEqual({ product: "Nhẫn SJC 999.9", buy: 131_800_000, sell: 135_800_000, sourceTime: "2026-10-31T08:18:06+07:00" });
   });
   it("PNJ: thousand đ per chỉ times 10,000", () => {
     const g = parsePnj(read("pnj-2026-11-01.json"));
     expect(g).toMatchObject({ sourceId: "pnj", product: "Vàng miếng SJC 999.9", buy: 136_000_000, sell: 139_000_000 });
     expect(g.sourceTime).toBe("2026-10-31T10:38:15+07:00");
+    expect(g.ring).toMatchObject({ product: "Nhẫn Trơn PNJ 999.9", buy: 133_600_000, sell: 137_600_000 });
   });
   it("Bảo Tín Mạnh Hải: the SJC row, not the purity column", () => {
     const g = parseBtmh(read("btmh-2026-11-01.html"));
     expect(g).toMatchObject({ sourceId: "btmh", product: "Vàng miếng SJC (Cty CP BTMH)", buy: 136_000_000, sell: 139_000_000 });
     expect(g.sourceTime).toBe("2026-10-31T18:14:58+07:00");
+    // the plain ring row, not "Kim Gia Bảo Gift 24K" (138.8M) above it
+    expect(g.ring).toMatchObject({ product: "Kim Gia Bảo 24K", buy: 133_800_000, sell: 137_800_000 });
   });
   it("refuse pages without an SJC price", () => {
     expect(() => parseGiavang('{"data":[]}')).toThrow(/no SJC/);
     expect(() => parsePnj('{"data":[]}')).toThrow(/no SJC/);
     expect(() => parseBtmh("<html></html>")).toThrow(/not the Bảo Tín/);
+  });
+  it("a missing ring row leaves the bar price and ring null", () => {
+    const body = JSON.parse(read("giavang-2026-11-01.json"));
+    body.data = body.data.filter((r: { type_code: string }) => r.type_code !== "SJ9999");
+    expect(parseGiavang(JSON.stringify(body))).toMatchObject({ buy: 136_000_000, ring: null });
   });
 });
 

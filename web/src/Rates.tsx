@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { addGold, fmt, FX_SOURCES, fxSource, GOLD_SOURCES, goldSource, syncAll, type FxSnapshot, type GoldPrice, type SyncLine } from "./moneyData";
+import { addGold, fmt, parseAmount, FX_SOURCES, fxSource, GOLD_SOURCES, goldSource, syncAll, type FxSnapshot, type GoldPrice, type SyncLine } from "./moneyData";
 
 const today = () => new Date().toLocaleDateString("en-CA");
 
@@ -20,13 +20,13 @@ export function RatesSide({ fx, gold }: { fx: FxSnapshot[] | null; gold: GoldPri
 
   return (
     <div className="pad form">
-      <h2>Rates and SJC gold</h2>
+      <h2>Rates and gold</h2>
       <button className="primary" disabled={!ready || busy} onClick={sync}>
         {!ready ? "Loading" : busy ? "Syncing" : "Sync all sources"}
       </button>
       <p className="small muted">
-        Manual only. Vietcombank and HSBC rates; SJC bar price from giavang.net, PNJ and Bảo Tín Mạnh Hải. Each site is asked at
-        most once every 5 minutes.
+        Manual, and on each Save in Money. Vietcombank and HSBC rates; the SJC bar and the plain 999.9 ring from giavang.net,
+        PNJ and Bảo Tín Mạnh Hải. At most one sync every 5 minutes, Save included.
       </p>
       {lines.map((l) => (
         <p key={l.label} className={l.ok ? "small" : "small bad"}>
@@ -38,17 +38,18 @@ export function RatesSide({ fx, gold }: { fx: FxSnapshot[] | null; gold: GoldPri
   );
 }
 function GoldForm() {
+  const [kind, setKind] = useState<"bar" | "ring">("bar");
   const [product, setProduct] = useState("SJC 1 lượng");
   const [buy, setBuy] = useState("");
   const [sell, setSell] = useState("");
   const [date, setDate] = useState(today());
   const [msg, setMsg] = useState("");
-  const b = Number(buy.replace(/[.,]/g, ""));
-  const s = Number(sell.replace(/[.,]/g, ""));
+  const b = parseAmount(buy).value ?? 0;
+  const s = parseAmount(sell).value ?? 0;
   const ok = b > 0 && s > 0 && s >= b && product.trim() !== "";
 
   const save = () =>
-    addGold({ date, product: product.trim(), buy: b, sell: s, note: "" })
+    addGold({ date, product: product.trim(), buy: b, sell: s, note: "", kind })
       .then(() => {
         setBuy("");
         setSell("");
@@ -59,6 +60,10 @@ function GoldForm() {
   return (
     <>
       <h2>Gold price typed by you</h2>
+      <select value={kind} onChange={(e) => setKind(e.target.value as "bar" | "ring")}>
+        <option value="bar">Gold bar</option>
+        <option value="ring">Gold ring</option>
+      </select>
       <input placeholder="Product" value={product} onChange={(e) => setProduct(e.target.value)} />
       <input inputMode="numeric" placeholder="Buy, đ per lượng" value={buy} onChange={(e) => setBuy(e.target.value)} />
       <input inputMode="numeric" placeholder="Sell, đ per lượng" value={sell} onChange={(e) => setSell(e.target.value)} />
@@ -160,11 +165,12 @@ export function RatesReport({ fx, gold }: { fx: FxSnapshot[]; gold: GoldPrice[] 
       {FX_SOURCES.map((s) => (
         <FxTable key={s.id} label={s.label} list={fx.filter((x) => fxSource(x) === s.id)} />
       ))}
-      <h2>SJC gold, đ per lượng</h2>
+      <h2>Gold, đ per lượng</h2>
       <table>
         <thead>
           <tr className="small muted">
             <td>Source</td>
+            <td>Kind</td>
             <td>Product</td>
             <td className="num">Buy</td>
             <td className="num">Sell</td>
@@ -174,24 +180,40 @@ export function RatesReport({ fx, gold }: { fx: FxSnapshot[]; gold: GoldPrice[] 
         <tbody>
           {goldBy
             .filter((s) => s.list.length > 0)
-            .map((s) => {
-              const g = s.list[0];
-              return (
-                <tr key={s.id}>
-                  <td>{g.sourceUrl ? <a href={g.sourceUrl}>{s.label}</a> : s.label}</td>
+            .flatMap((s) => {
+              // the newest saved bar and ring of each source; a typed price is one or the other
+              const bar = s.list.find((g) => s.id !== "typed" || (g.kind ?? "bar") === "bar");
+              const typedRing = s.id === "typed" ? s.list.find((g) => g.kind === "ring") : undefined;
+              const ring = typedRing ? { ...typedRing, sourceTime: typedRing.sourceTime ?? typedRing.date } : s.list.find((g) => g.ring)?.ring;
+              const link = (g?: GoldPrice) => (g?.sourceUrl ? <a href={g.sourceUrl}>{s.label}</a> : s.label);
+              const rows: [string, string, { product: string; buy: number; sell: number | null }, string][] = [];
+              if (bar) rows.push([s.id + "bar", "bar", bar, bar.sourceTime ?? bar.date]);
+              if (ring) rows.push([s.id + "ring", "ring", ring, ring.sourceTime]);
+              return rows.map(([key, kind, g, t]) => (
+                <tr key={key}>
+                  <td>{link(s.list[0])}</td>
+                  <td className="small">{kind}</td>
                   <td className="small">{g.product}</td>
                   <td className="num">{fmt(g.buy, 0)}</td>
                   <td className="num">{fmt(g.sell, 0)}</td>
-                  <td className="small">{new Date(g.sourceTime ?? g.date).toLocaleString()}</td>
+                  <td className="small">{new Date(t).toLocaleString()}</td>
                 </tr>
-              );
+              ));
             })}
         </tbody>
       </table>
       {goldBy
         .filter((s) => s.list.length > 0)
         .map((s) => (
-          <Line key={s.id} label={`${s.label} SJC buy`} points={[...s.list].reverse().map((g) => ({ t: g.sourceTime ?? g.date, v: g.buy }))} />
+          <div key={s.id}>
+            <Line label={`${s.label} SJC bar buy`} points={[...s.list].reverse().filter((g) => (g.kind ?? "bar") === "bar").map((g) => ({ t: g.sourceTime ?? g.date, v: g.buy }))} />
+            {s.list.some((g) => g.ring || g.kind === "ring") && (
+              <Line
+                label={`${s.label} ring buy`}
+                points={[...s.list].reverse().flatMap((g) => (g.ring ? [{ t: g.ring.sourceTime, v: g.ring.buy }] : g.kind === "ring" ? [{ t: g.sourceTime ?? g.date, v: g.buy }] : []))}
+              />
+            )}
+          </div>
         ))}
       {gold.length === 0 && <p className="muted">No gold price saved yet. Press "Sync all sources".</p>}
     </article>
