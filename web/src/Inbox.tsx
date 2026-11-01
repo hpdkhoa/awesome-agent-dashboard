@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { answerItem, type InboxItem, type Plan, type Session } from "./data";
 import { Md } from "./Markdown";
+import { openFile } from "./FileView";
 import { Section } from "./Section";
 
 const KIND = { question: "Question", suggestion: "Suggestion", result: "Result to review", approval: "Approval" };
@@ -98,7 +99,7 @@ export function InboxView({ item, session, plan, onOpenPlan }: {
       </p>
 
       <Section id="inbox.text" title={item.kind === "approval" ? "The call" : "Details"}>
-        <Md text={body} />
+        <Md text={body} cwd={item.cwd} />
       </Section>
 
       {item.files.length > 0 && (
@@ -106,7 +107,7 @@ export function InboxView({ item, session, plan, onOpenPlan }: {
           <ul className="small">
             {item.files.map((f) => (
               <li key={f}>
-                <code>{f}</code>
+                <code className="file-link" role="button" onClick={() => openFile(f, item.cwd)}>{f}</code>
               </li>
             ))}
           </ul>
@@ -201,7 +202,7 @@ export function InboxView({ item, session, plan, onOpenPlan }: {
       )}
       {item.followUp && (
         <Section id="inbox.followup" title="The session's reply">
-          <Md text={item.followUp} />
+          <Md text={item.followUp} cwd={item.cwd} />
         </Section>
       )}
       {item.error && <p className="bad small">Delivery problem: {item.error}</p>}

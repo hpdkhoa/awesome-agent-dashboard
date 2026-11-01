@@ -1,7 +1,8 @@
 """agent-bridge signin | sync | watch | inbox | ask-hook.
 
 sync and watch read Claude Code's logs. watch also delivers the owner's answers to closed sessions by resuming them
-(deliver.py) and starts and stops the runs the owner asks for on the page (runs.py). inbox is the MCP server each
+(deliver.py), starts and stops the runs the owner asks for on the page (runs.py), and serves the file viewer
+(files.py). inbox is the MCP server each
 session starts.
 """
 
@@ -89,6 +90,12 @@ def main(argv: list[str] | None = None) -> None:
         runs = Runs(store, cfg.machine, cfg.roots, claude, data_dir() / "runs", logs=cfg.logs,
                     push=pusher(store, cfg.owner_email))
         runs.forget_lost()
+        if cfg.files_url:
+            from .files import Files, firebase_verifier, serve
+
+            serve(Files(cfg.roots, firebase_verifier(cfg.project_id, cfg.owner_email)), list(cfg.site_origins), cfg.files_port)
+            store.put_many({"meta/files": {"url": cfg.files_url}})
+            print(f"file viewer on 127.0.0.1:{cfg.files_port} for {cfg.files_url}", flush=True)
         feed = gone = None
         try:
             from .listen import CommandFeed, DeletedFeed, firestore_client

@@ -207,7 +207,7 @@ function Panel({ plan, versions, asked, pick, onOpenItem }: {
           <button onClick={() => chooseVersion(plan.id, v.n)}>Choose this branch</button>
         )}
       </div>
-      {full && <Md text={v.text} />}
+      {full && <Md text={v.text} cwd={plan.cwd} />}
     </Section>
   );
 }

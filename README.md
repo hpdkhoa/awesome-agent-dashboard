@@ -93,11 +93,25 @@ on hover.
 
 ## Notifications on your phone
 
-The bridge sends a Web Push when a run needs your approval and when a run ends (done or failed). Once, on the machine
+The bridge sends a Web Push when a run needs your approval, when a run ends (done or failed), for each question
+waiting for you (plan questions and the question box too), each suggestion and result, and each new plan version. Once, on the machine
 that runs the bridge: `python -m agent_bridge push-setup`. It makes the push key, keeps the private half in the OS key
 store, and puts the public half on `meta/push`. `OWNER_EMAIL` from `.env` is the push contact. On the iPhone (iOS 16.4
 or newer): open the site in Safari, Share, Add to Home Screen, open it from the Home Screen, sign in, and tap "Turn on
 notifications". `python -m agent_bridge push-test` sends a test. A tap on a push opens that approval or run.
+
+## Files from your PC
+
+A file path in a session reply, a run result, an inbox item or a plan (a link, an image or a `path`) opens in a viewer
+on the page: images, html pages (with their own images and css), PDF, video, markdown and text. The bytes come straight
+from the bridge on your PC through your own Cloudflare Tunnel; nothing is stored in Firestore except the viewer's
+address. The bridge checks your Firebase sign-in on each ask (your verified Google account, as the rules do), serves
+only files inside `WORK_ROOTS`, never env files or keys, and each link works for 10 minutes. Html runs sandboxed, with
+no access to the page or your sign-in.
+
+Set `FILES_URL`, `FILES_PORT` and `SITE_ORIGINS` in `.env` (see `.env.example`), then add a public hostname to your
+tunnel: `FILES_URL`'s host to `http://127.0.0.1:FILES_PORT`. `watch` starts the viewer and puts its address on
+`meta/files`.
 
 ## Money and Rates
 

@@ -146,11 +146,11 @@ export function RunList({ runs, title = "Runs from the dashboard" }: { runs: Run
           }
         >
           <p className="label">Prompt</p>
-          <Md text={r.prompt} />
+          <Md text={r.prompt} cwd={r.cwd ?? r.folder ?? ""} />
           {r.result && (
             <>
               <p className="label">Result</p>
-              <Md text={r.result} />
+              <Md text={r.result} cwd={r.cwd ?? r.folder ?? ""} />
             </>
           )}
           {r.error && <p className="bad small">{r.error}</p>}

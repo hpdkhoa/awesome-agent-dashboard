@@ -100,8 +100,11 @@ def main() -> None:
         from .firestore import Firestore
 
         cfg = Config.load()
-        inbox = Inbox(Firestore(Session(cfg)), cfg.machine, cfg.roots, event.get("session_id", ""),
-                      event.get("cwd") or os.getcwd())
+        from .push import pusher
+
+        store = Firestore(Session(cfg))
+        inbox = Inbox(store, cfg.machine, cfg.roots, event.get("session_id", ""), event.get("cwd") or os.getcwd(),
+                      pusher(store, cfg.owner_email))
         out = handle(event, inbox)
     except (Exception, SystemExit) as e:
         print(f"agent-inbox question hook skipped: {e}", file=sys.stderr)

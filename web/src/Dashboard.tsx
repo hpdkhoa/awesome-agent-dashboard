@@ -5,8 +5,9 @@ import { useInbox, useMachines, usePlans, useRuns, useSessions, useUsage, useWor
 import { MessageBox, RunList, StartForm } from "./Runs";
 import { PlanList, PlanView } from "./Plans";
 import { usePush, type PushState } from "./notify";
+import { FileViewer } from "./FileView";
 
-// A tap on a push opens /?item=<inbox id> or /?run=<command id> (bridge/agent_bridge/push.py).
+// A tap on a push opens /?item=<inbox id>, /?run=<command id> or /?plan=<plan id> (bridge/agent_bridge/push.py).
 const opened = new URLSearchParams(window.location.search);
 if ([...opened].length) window.history.replaceState(null, "", "/");
 
@@ -51,10 +52,10 @@ export function Dashboard() {
   const inbox = useInbox();
   const runs = useRuns();
   const plans = usePlans();
-  const [pickedPlan, setPickedPlan] = useState<string | null>(null);
+  const [pickedPlan, setPickedPlan] = useState<string | null>(opened.get("plan"));
   const [wt, setWt] = useState<string>("all");
   const [picked, setPicked] = useState<string | null>(null);
-  const [tab, setTab] = useState<"inbox" | "plans" | "sessions" | "runs" | "money" | "rates" | "storage">(opened.get("run") ? "runs" : "inbox");
+  const [tab, setTab] = useState<"inbox" | "plans" | "sessions" | "runs" | "money" | "rates" | "storage">(opened.get("run") ? "runs" : opened.get("plan") ? "plans" : "inbox");
   const [store, setStore] = useState("inbox");
   const [pickedItem, setPickedItem] = useState<string | null>(opened.get("item"));
   const [push, turnOnPush] = usePush();
@@ -207,6 +208,7 @@ export function Dashboard() {
           <p className="muted">Pick a session.</p>
         )}
       </main>
+      <FileViewer />
 
       <section className="usage">
         <Section id="usage.days" title="Spend by day" extra="last 14 days">
@@ -285,17 +287,17 @@ function SessionView({ s, runs }: { s: Session; runs: Run[] }) {
       </p>
       <MessageBox key={s.id} s={s} runs={runs} />
       <Section id="session.lastPrompt" title="Last prompt">
-        <Md text={s.lastPrompt} />
+        <Md text={s.lastPrompt} cwd={s.cwd} />
       </Section>
       <Section id="session.lastReply" title="Last reply">
-        <Md text={s.lastReply} />
+        <Md text={s.lastReply} cwd={s.cwd} />
       </Section>
       <Section id="session.tokens" title="Tokens" extra={`${num(s.tokens.total)} · ${usd(s.tokens.costUsd)} est.`} open={false}>
         <TokenTable t={s.tokens} />
       </Section>
       {s.firstPrompt && s.firstPrompt !== s.title && (
         <Section id="session.firstPrompt" title="First prompt" open={false}>
-          <Md text={s.firstPrompt} />
+          <Md text={s.firstPrompt} cwd={s.cwd} />
         </Section>
       )}
     </article>

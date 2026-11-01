@@ -55,3 +55,22 @@ def test_public_key_is_the_uncompressed_point():
     v.generate_keys()
     k = public_key(v.private_pem().decode())
     assert len(k) == 87 and k.startswith("B")
+
+
+def test_questions_suggestions_results_and_plan_versions_push():
+    from agent_bridge.inbox import Inbox
+
+    store = FakeStore()
+    got = []
+    ib = Inbox(store, "PC", [("labs", "K:/labs")], "s1", "K:/labs/x", type("P", (), {"notify": lambda self, *a: got.append(a)})())
+    pid = ib.plan_start("Plans tab", "# v1", "first draft")
+    q = ib.post("question", "List or graph?", "\nPick one.")
+    h = ib.post("question", "Hook question", "Which?", extra={"via": "hook"})
+    ib.post("suggestion", "Idea", "Try this")
+    ib.post("result", "Done", "All tests pass")
+    ib.post("approval", "Allow Bash?", "{}")
+    titles = [a[0] for a in got]
+    assert titles == ["Plan v1: Plans tab", "Question: List or graph?", "Question: Hook question", "Suggestion: Idea", "Result to review: Done"]
+    assert got[0][1] == "first draft" and got[0][2] == f"/?plan={pid}"
+    assert got[1][1] == "Pick one." and got[1][2] == f"/?item={q}"
+    assert got[2][1].startswith("Answer within 10 minutes") and got[2][3] == h

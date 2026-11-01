@@ -30,6 +30,7 @@ BEAT_SECONDS = 60
 LIVE_SECONDS = 180  # a session whose heartbeat is older than this is treated as closed
 POLL_SECONDS = 5
 MAX_WAIT_MINUTES = 25  # under Claude Code's 30-minute idle limit for a local MCP server
+PUSH_TITLE = {"question": "Question", "suggestion": "Suggestion", "result": "Result to review"}
 
 
 def now_iso() -> str:
@@ -39,9 +40,12 @@ def now_iso() -> str:
 class Inbox:
     """Inbox operations on any store with get, update, put_many and where (Firestore, or a fake in tests)."""
 
-    def __init__(self, store, machine: str, roots: list[tuple[str, str]], session_id: str, cwd: str):
+    def __init__(self, store, machine: str, roots: list[tuple[str, str]], session_id: str, cwd: str, push=None):
         self.store, self.machine, self.roots = store, machine, roots
         self.session_id, self.cwd = session_id or "unknown", cwd
+        # a push.Pusher: tells the owner's phone about each question, suggestion, result and plan version (the owner's
+        # choice, 2026-11-01, "do #1 and #2"); approvals push from inbox_approve with the call in the body
+        self.push = push
 
     def open_plan(self) -> dict | None:
         """This session's open plan, the newest if there are several."""
@@ -88,6 +92,8 @@ class Inbox:
             "text": redact(text, 30000), "note": redact(note, 400), "createdAt": now_iso(),
         }})
         self.store.update(f"plans/{plan_id}", {"current": n, "last": n, "chosen": n, "updatedAt": now_iso()})
+        if self.push is not None:
+            self.push.notify(f"Plan v{n}: {plan.get('title', '')}", note or "New version.", f"/?plan={plan_id}", f"plan-{plan_id}")
         return n
 
     def plan_close(self, plan_id: str, note: str = "") -> None:
@@ -123,6 +129,10 @@ class Inbox:
         }})
         if extra.get("planId"):
             self.store.update(f"plans/{extra['planId']}", {"updatedAt": now_iso()})
+        if self.push is not None and kind in PUSH_TITLE:
+            first = next((line for line in text.splitlines() if line.strip()), "")
+            body = ("Answer within 10 minutes, or the session asks there. " if extra.get("via") == "hook" else "") + first
+            self.push.notify(f"{PUSH_TITLE[kind]}: {title}", body[:200] or title, f"/?item={item_id}", item_id)
         return item_id
 
     def beat(self) -> None:
@@ -198,7 +208,11 @@ def server():
     from .firestore import Firestore
 
     cfg = Config.load()
-    inbox = Inbox(Firestore(Session(cfg)), cfg.machine, cfg.roots, os.environ.get("CLAUDE_CODE_SESSION_ID", ""), os.getcwd())
+    from .push import pusher
+
+    store = Firestore(Session(cfg))
+    push = pusher(store, cfg.owner_email)
+    inbox = Inbox(store, cfg.machine, cfg.roots, os.environ.get("CLAUDE_CODE_SESSION_ID", ""), os.getcwd(), push)
 
     def beat_forever():
         while True:
@@ -209,9 +223,6 @@ def server():
             time.sleep(BEAT_SECONDS)
 
     threading.Thread(target=beat_forever, daemon=True).start()
-    from .push import pusher
-
-    push = pusher(inbox.store, cfg.owner_email)
 
     mcp = MCPServer(
         "agent-inbox",

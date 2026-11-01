@@ -38,6 +38,9 @@ class Config:
     roots: list[tuple[str, str]]
     claude_bin: str = ""
     owner_email: str = ""  # the VAPID contact of the bridge's pushes; stays on this machine
+    files_url: str = ""  # the public address the owner's Cloudflare Tunnel routes to the file viewer (files.py)
+    files_port: int = 8793
+    site_origins: tuple[str, ...] = ()  # the page origins allowed to ask the file viewer
 
     @classmethod
     def load(cls, env_path: Path | None = None) -> Config:
@@ -53,4 +56,6 @@ class Config:
                 roots.append((name.strip(), root.strip()))
         logs = Path(env.get("CLAUDE_LOGS") or Path.home() / ".claude" / "projects")
         machine = env.get("MACHINE_NAME") or socket.gethostname()
-        return cls(project, key, machine, logs, roots, env.get("CLAUDE_BIN", ""), env.get("OWNER_EMAIL", ""))
+        origins = tuple(o.strip().rstrip("/") for o in env.get("SITE_ORIGINS", "").split(";") if o.strip())
+        return cls(project, key, machine, logs, roots, env.get("CLAUDE_BIN", ""), env.get("OWNER_EMAIL", ""),
+                   env.get("FILES_URL", "").rstrip("/"), int(env.get("FILES_PORT") or 8793), origins)

@@ -74,7 +74,7 @@ export function PlanView({ plan, items, session, onOpenItem }: {
             {v && (
               <Section id={`plan.v.${n === plan.current ? "latest" : "old"}`} title={`v${n} · ${v.note || "no note"}`} extra={when(v.createdAt)}
                 open={n === plan.current}>
-                <Md text={v.text} />
+                <Md text={v.text} cwd={plan.cwd} />
               </Section>
             )}
             {qs.length > 0 && (
