@@ -145,8 +145,10 @@ sessions cannot be started or stopped from the page.
 
 The message box on a session page sends a message the same way (`claude -p --resume`). A session counts as closed
 unless a turn is running in it, read from the end of its log. A message waits while a turn runs and goes when it
-ends. A session whose last turn came from the app or a terminal may still be open there, and a second process would
-split its conversation, so the message waits and the page points to Remote Control. The session list shows the last
+ends. A session open in the app or a terminal waits too, because a second process would split its conversation; the
+page points to Remote Control, and you can cancel the message or send it anyway. Open is read from the running
+processes: the desktop app runs one `claude` per open session with `--resume=<id>`; a terminal started with plain
+`claude` counts for the sessions last used in its folder. Inbox answers to closed sessions follow the same rule. The session list shows the last
 5 days; older sessions load only when asked.
 
 ## Checks

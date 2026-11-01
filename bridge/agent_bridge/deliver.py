@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 
 from .inbox import answer_text, is_live, now_iso
 from .redact import redact
-from .runs import log_wait_reason, parse_result
+from .runs import claude_processes, log_wait_reason, parse_result
 
 RETRY_SECONDS = 600
 
@@ -31,7 +31,7 @@ def resume_command(claude: str, session_id: str, message: str) -> list[str]:
     return [claude, "-p", message, "--resume", session_id, "--output-format", "json"]
 
 
-def deliver(store, machine: str, claude: str | None, run=subprocess.run, logs=None) -> list[str]:
+def deliver(store, machine: str, claude: str | None, run=subprocess.run, logs=None, procs=claude_processes) -> list[str]:
     """Resumes closed sessions with their answers. Returns one line per item acted on."""
     log = []
     for item in store.where("inbox", "status", "answered"):
@@ -41,7 +41,7 @@ def deliver(store, machine: str, claude: str | None, run=subprocess.run, logs=No
             continue
         if is_live(store, item["sessionId"]):
             continue  # the open session picks the answer up itself
-        why = log_wait_reason(logs, item["sessionId"], bool(item.get("force")))
+        why = log_wait_reason(logs, item["sessionId"], bool(item.get("force")), procs)
         if why:
             if item.get("waitReason") != why:
                 store.update(f"inbox/{item['id']}", {"waitReason": why})

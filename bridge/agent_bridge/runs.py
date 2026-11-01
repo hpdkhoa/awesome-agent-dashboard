@@ -12,8 +12,11 @@ EOB or the done token then the state become closed again"). A message waits ("wa
 
 - a turn is running in the session: a run of this bridge works in it, or its log has no turn end yet (waitReason
   "turn"); it goes once the turn ends;
-- the session's last turn came from the app or a terminal (waitReason "app"): that window may still be open, and a
-  second process would split the conversation, so the page points to Remote Control (the owner's choice "do 1 and 3").
+- the session is open in the app or a terminal (waitReason "app"): a second process would split the conversation, so
+  the page points to Remote Control (the owner's choice "do 1 and 3"). Open is measured, not guessed (the owner's
+  choice "do 3"): the desktop app runs one claude process per open session with --resume=<id>. A terminal started
+  with plain `claude` shows no id, so a session last used in a terminal counts as open while a claude process without
+  an id runs in its folder. When the process list can't be read, a session last used in a window counts as open.
   The owner can send it anyway (force) or cancel it on the page ("do 2 and 3"); a running turn always waits.
 
 Rules from the plan: only folders registered in WORK_ROOTS, a fixed list of actions, the prompt goes to claude as one
@@ -25,6 +28,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import time
 import signal
 import subprocess
 import uuid
@@ -36,13 +41,15 @@ from .redact import redact
 
 APPROVAL_TOOL = "mcp__agent-inbox__inbox_approve"
 NO_CLI = "No signed-in claude CLI on this machine. Install Claude Code and sign in, or set CLAUDE_BIN."
+SESSION_ARG = re.compile(r"^--(?:resume|session-id)(?:=(.+))?$")
+SCAN_SECONDS = 3  # one process scan serves every waiting message and answer of one bridge round
 TAIL_BYTES = 256 * 1024  # the end of a session log: enough for its last turn's closing lines
 SKIP = {"queue-operation", "frame-link", "api-request", "api-request-shape", "api-request-blob", "attachment",
         "file-history-snapshot", "summary", "custom-title", "last-prompt"}  # lines that are not conversation turns
 
 
-def last_turn(path: Path) -> tuple[bool, str]:
-    """(a turn is still running, the entrypoint of the last turn) from the end of a session log. A turn ends with the
+def last_turn(path: Path) -> tuple[bool, str, str]:
+    """(a turn is still running, the entrypoint of the last turn, its folder) from the end of a session log. A turn ends with the
     assistant's end_turn, the stop hooks' summary, an interrupt, or a slash command's output."""
     with open(path, "rb") as f:
         f.seek(max(0, f.seek(0, 2) - TAIL_BYTES))
@@ -55,20 +62,20 @@ def last_turn(path: Path) -> tuple[bool, str]:
         kind = d.get("type")
         if kind in SKIP or kind not in ("user", "assistant", "system"):
             continue
-        entry = d.get("entrypoint") or ""
+        entry, cwd = d.get("entrypoint") or "", d.get("cwd") or ""
         msg = d.get("message") or {}
         if kind == "system":
             if d.get("subtype") in ("stop_hook_summary", "turn_duration"):
-                return False, entry
+                return False, entry, cwd
             continue
         if kind == "assistant":
-            return msg.get("stop_reason") not in ("end_turn", "stop_sequence", "max_tokens", "refusal"), entry
+            return msg.get("stop_reason") not in ("end_turn", "stop_sequence", "max_tokens", "refusal"), entry, cwd
         content = msg.get("content")
         text = content if isinstance(content, str) else " ".join(
             c.get("text", "") for c in content or [] if isinstance(c, dict))
         # an interrupt ends the turn; a slash command (/login, /model) writes lines but runs no turn
-        return not text.lstrip().startswith(("[Request interrupted", "<local-command", "<command-")), entry
-    return False, ""
+        return not text.lstrip().startswith(("[Request interrupted", "<local-command", "<command-")), entry, cwd
+    return False, "", ""
 
 
 def from_window(entry: str) -> bool:
@@ -76,16 +83,69 @@ def from_window(entry: str) -> bool:
     return bool(entry) and not entry.startswith("sdk")
 
 
-def log_wait_reason(logs: Path | None, session_id: str, force: bool = False) -> str | None:
-    """"turn" while a turn runs in the session, "app" when its last turn came from a window (unless forced), else None.
-    Used for messages (Runs) and for inbox answers (deliver.py)."""
+_scan: tuple[float, list[tuple[str | None, str]] | None] = (0.0, None)
+
+
+def claude_processes() -> list[tuple[str | None, str]] | None:
+    """(session id or None, folder) of each Claude Code session process on this machine: the app's open sessions
+    (--resume=<id>) and terminals. Leaves out headless runs (-p, the bridge's own) and the app's own Electron processes.
+    None when the process list can't be read."""
+    global _scan
+    if time.monotonic() - _scan[0] < SCAN_SECONDS:
+        return _scan[1]
+    try:
+        import psutil
+
+        procs, helpers_of = [], set()
+        for p in psutil.process_iter(["name"]):
+            if not (p.info["name"] or "").lower().startswith("claude"):
+                continue
+            try:
+                args = p.cmdline()
+                if any(a.startswith("--type") for a in args):
+                    helpers_of.add(p.ppid())  # an Electron helper: its parent is the app itself, not a session
+                    continue
+                procs.append((p.pid, args, p.cwd()))
+            except psutil.Error:
+                continue
+        out = []
+        for pid, args, cwd in procs:
+            if pid in helpers_of or "-p" in args or "--print" in args:
+                continue
+            sid = None
+            for i, a in enumerate(args):
+                m = SESSION_ARG.match(a)
+                if m:
+                    sid = m.group(1) or (args[i + 1] if i + 1 < len(args) else None)
+                    break
+            out.append((sid, cwd))
+    except Exception:
+        out = None
+    _scan = (time.monotonic(), out)
+    return out
+
+
+def _same_folder(a: str, b: str) -> bool:
+    return bool(a and b) and os.path.normcase(os.path.normpath(a)) == os.path.normcase(os.path.normpath(b))
+
+
+def log_wait_reason(logs: Path | None, session_id: str, force: bool = False, procs=claude_processes) -> str | None:
+    """"turn" while a turn runs in the session, "app" while it is open in the app or a terminal (unless forced), else
+    None. Used for messages (Runs) and for inbox answers (deliver.py)."""
     if logs and logs.is_dir():
         for f in logs.glob(f"*/{session_id}.jsonl"):
-            running, entry = last_turn(f)
+            running, entry, cwd = last_turn(f)
             if running:
                 return "turn"
-            if from_window(entry) and not force:
+            if force:
+                return None
+            seen = procs()
+            if seen is None:
+                return "app" if from_window(entry) else None
+            if any(sid == session_id for sid, _ in seen):
                 return "app"
+            if from_window(entry) and any(sid is None and _same_folder(c, cwd) for sid, c in seen):
+                return "app"  # a terminal with no id in this session's folder may be this session
     return None
 
 
@@ -128,10 +188,11 @@ class Runs:
     """The runs this bridge started, kept in memory while it lives."""
 
     def __init__(self, store, machine: str, roots: list[tuple[str, str]], claude: str | None, out_dir: Path,
-                 popen=subprocess.Popen, logs: Path | None = None, push=None):
+                 popen=subprocess.Popen, logs: Path | None = None, push=None, procs=claude_processes):
         self.store, self.machine, self.roots, self.claude, self.popen = store, machine, roots, claude, popen
         self.logs = logs  # Claude Code's log folder, to see whether a session wrote recently
         self.push = push  # a push.Pusher: tells the owner's phone when a run ended
+        self.procs_seen = procs  # which sessions are open in the app or a terminal (injectable for tests)
         self.out_dir = out_dir  # each run's output goes to files, so a long run never blocks on a full pipe
         self.out_dir.mkdir(parents=True, exist_ok=True)
         self.procs: dict[str, subprocess.Popen] = {}
@@ -205,7 +266,7 @@ class Runs:
         for k in self.procs:
             if (self.store.get(f"commands/{k}") or {}).get("sessionId") == session_id:
                 return "turn"  # a run of this bridge is working in it
-        return log_wait_reason(self.logs, session_id, force)
+        return log_wait_reason(self.logs, session_id, force, self.procs_seen)
 
     def _message(self, c: dict) -> str | None:
         path = f"commands/{c['id']}"

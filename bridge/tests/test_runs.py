@@ -38,7 +38,7 @@ def setup(tmp_path, monkeypatch):
 
     logs = tmp_path / "logs"
     (logs / "proj").mkdir(parents=True)
-    runs = Runs(store, "PC", [("labs", str(work))], "claude", tmp_path / "out", popen=popen, logs=logs)
+    runs = Runs(store, "PC", [("labs", str(work))], "claude", tmp_path / "out", popen=popen, logs=logs, procs=lambda: OPEN)
     return store, runs, work
 
 
@@ -169,7 +169,7 @@ def test_last_turn_reads_the_log_end(tmp_path):
                        ([line("user", "cli", message={"content": "<local-command-stdout>Login successful</local-command-stdout>"})],
                         (False, "cli"))):
         f.write_text(chr(10).join(rows))
-        assert last_turn(f) == want
+        assert last_turn(f)[:2] == want
 
 
 def test_message_waits_for_the_turn_to_end_then_goes(tmp_path, monkeypatch):
@@ -184,8 +184,29 @@ def test_message_waits_for_the_turn_to_end_then_goes(tmp_path, monkeypatch):
     assert wait_done(runs, "m1", store)["status"] == "done"
 
 
-def test_message_to_a_session_last_used_in_a_window_waits(tmp_path, monkeypatch):
+OPEN: list = []  # the claude processes the tests pretend are running: (session id or None, folder)
+
+
+def test_open_or_closed_comes_from_the_processes(tmp_path):
+    from agent_bridge.runs import log_wait_reason
+
+    logs = tmp_path / "logs"
+    (logs / "p").mkdir(parents=True)
+    ended = lambda entry: line("assistant", entry, cwd="K:/w", message={"stop_reason": "end_turn"})
+    (logs / "p" / "app.jsonl").write_text(ended("claude-desktop"))
+    (logs / "p" / "term.jsonl").write_text(ended("cli"))
+    (logs / "p" / "run.jsonl").write_text(ended("sdk-cli"))
+    assert log_wait_reason(logs, "app", procs=lambda: [("app", "K:/w")]) == "app"  # the app runs it: open
+    assert log_wait_reason(logs, "app", procs=lambda: []) is None  # no process: closed, the message goes
+    assert log_wait_reason(logs, "term", procs=lambda: [(None, "K:\w")]) == "app"  # a terminal in its folder
+    assert log_wait_reason(logs, "term", procs=lambda: [(None, "K:/other")]) is None
+    assert log_wait_reason(logs, "run", procs=lambda: [(None, "K:/w")]) is None  # last turn was a headless run
+    assert log_wait_reason(logs, "app", procs=lambda: None) == "app"  # no process list: the old guess
+
+
+def test_message_to_a_session_open_in_the_app_waits(tmp_path, monkeypatch):
     store, runs, work = setup(tmp_path, monkeypatch)
+    OPEN[:] = [("app", str(work))]
     log = tmp_path / "logs" / "proj" / "app.jsonl"
     log.write_text(line("assistant", "claude-desktop", message={"stop_reason": "end_turn"}))
     cmd(store, "m1", action="message", sessionId="app", cwd=str(work), prompt="hi")
@@ -195,6 +216,7 @@ def test_message_to_a_session_last_used_in_a_window_waits(tmp_path, monkeypatch)
     assert c["status"] == "waiting" and c["waitReason"] == "app" and runs.procs == {}
     store.update("commands/m1", {"force": True})  # the owner taps Send anyway
     assert wait_done(runs, "m1", store)["status"] == "done"
+    OPEN.clear()
 
 
 def test_send_anyway_never_jumps_a_running_turn(tmp_path, monkeypatch):

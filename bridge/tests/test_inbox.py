@@ -209,9 +209,11 @@ def test_answer_waits_like_a_message(tmp_path):
     owner_answers(store, qid, "A")
     run = Runner()
     log.write_text(json.dumps({"type": "user", "entrypoint": "sdk-cli", "message": {"content": "work"}}))
-    assert deliver(store, "PC", "claude", run, logs=logs) == [f"{qid}: waits (turn)"] and run.calls == []
+    assert deliver(store, "PC", "claude", run, logs=logs, procs=lambda: []) == [f"{qid}: waits (turn)"] and run.calls == []
     log.write_text(json.dumps({"type": "assistant", "entrypoint": "claude-desktop", "message": {"stop_reason": "end_turn"}}))
-    assert deliver(store, "PC", "claude", run, logs=logs) == [f"{qid}: waits (app)"] and run.calls == []
+    open_now = lambda: [("s1", "")]  # the app runs this session
+    assert deliver(store, "PC", "claude", run, logs=logs, procs=open_now) == [f"{qid}: waits (app)"] and run.calls == []
     assert store.get(f"inbox/{qid}")["waitReason"] == "app"
     store.update(f"inbox/{qid}", {"force": True})  # the owner taps Send anyway
-    assert deliver(store, "PC", "claude", run, logs=logs) == [f"{qid}: delivered by resume"] and len(run.calls) == 1
+    assert deliver(store, "PC", "claude", run, logs=logs, procs=open_now) == [f"{qid}: delivered by resume"]
+    assert len(run.calls) == 1
