@@ -119,3 +119,26 @@ def test_synthetic_messages_are_skipped(tmp_path):
 def test_redact_keeps_markdown_shape():
     text = "# Title\r\n\r\n\r\n\r\n- a  \n- b\n\n```\n    indented\n```"
     assert redact(text, 500) == "# Title\n\n- a\n- b\n\n```\n    indented\n```"
+
+
+def test_deleted_documents_are_not_written_again(tmp_path, monkeypatch):
+    from agent_bridge import sync
+    from agent_bridge.config import Config
+    from test_inbox import FakeStore
+
+    monkeypatch.setenv("APPDATA", str(tmp_path / "app"))
+    logs = tmp_path / "logs"
+    write(logs / "proj" / "s1.jsonl", [human(T1, "hi"), assistant("m1", T2, "ok", sid="s1")])
+    write(logs / "proj" / "s2.jsonl", [human(T1, "hi"), assistant("m2", T2, "ok", sid="s2")])
+    cfg = Config("p", "k", "PC", logs, [])
+    store = FakeStore()
+    store.put_many({"meta/deleted": {"paths": {"sessions/s1": "2026-11-01"}}})
+    sync.run(cfg, 36500, store)
+    assert "sessions/s1" not in store.docs and "sessions/s2" in store.docs
+    store.docs.pop("sessions/s2")  # deleted on the page, without a tombstone from the listener yet
+    write(logs / "proj" / "s2.jsonl", [assistant("m3", T3, "more", sid="s2")])
+    sync.run(cfg, 36500, store, deleted=lambda: {"sessions/s2"})
+    assert "sessions/s2" not in store.docs
+    store.docs["meta/deleted"] = {"paths": {}}  # the owner clears the tombstones: both come back
+    sync.run(cfg, 36500, store)
+    assert "sessions/s1" in store.docs and "sessions/s2" in store.docs

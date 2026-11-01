@@ -55,6 +55,8 @@ export type InboxItem = {
   deliveredVia?: "live" | "resume";
   followUp?: string;
   error?: string | null;
+  via?: "hook"; // posted by the question hook from Claude Code's own question box
+  multi?: boolean; // more than one option may be picked
 };
 
 export type Machine = {

@@ -72,12 +72,26 @@ def changed_only(state: State, docs: dict[str, dict]) -> dict[str, dict]:
     return out
 
 
-def run(cfg: Config, days: float, store=None, dry_run: bool = False) -> dict:
-    """Reads, builds and writes. store is a Firestore (None with dry_run). Returns counts for the report."""
+def deleted_paths(store, listened: set[str] | None) -> set[str]:
+    """The documents the owner deleted on the Storage tab (meta/deleted), from the listener or one read."""
+    if listened is not None:
+        return listened
+    return set(((store.get("meta/deleted") or {}).get("paths")) or {})
+
+
+def run(cfg: Config, days: float, store=None, dry_run: bool = False, deleted=lambda: None) -> dict:
+    """Reads, builds and writes. store is a Firestore (None with dry_run). Returns counts for the report.
+
+    deleted: returns the listener's set of deleted paths, or None to read meta/deleted once. A deleted document is
+    never written again (the owner's choice, 2026-11-01, "B1"), and its hash is not kept, so clearing it writes it back.
+    """
     state = State(data_dir() / f"state-{cfg.project_id}.json")
     sessions = read_all(cfg, state, days)
     docs, now = documents(cfg, sessions, days)
     todo = changed_only(state, docs)
+    if todo and store is not None:
+        gone = deleted_paths(store, deleted())
+        todo = {p: v for p, v in todo.items() if p not in gone}
     if not dry_run and todo:
         store.put_many({p: {**d, "syncedAt": now} for p, (d, _) in todo.items()})
         for p, (_, h) in todo.items():

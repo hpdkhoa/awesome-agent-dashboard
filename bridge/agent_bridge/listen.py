@@ -39,7 +39,9 @@ def firestore_client(session):
     return firestore.Client(project=session.cfg.project_id, credentials=FirebaseIdToken())
 
 
-class CommandFeed:
+class Feed:
+    """One listen, reopened every 50 minutes and after a drop. Subclasses say what to listen to."""
+
     def __init__(self, client, clock=time.monotonic):
         self.client, self.clock = client, clock
         self.lock = threading.Lock()
@@ -53,9 +55,10 @@ class CommandFeed:
         with self.lock:
             self.docs = rows
 
-    def _open(self) -> None:
-        from google.cloud.firestore_v1.base_query import FieldFilter
+    def _query(self):
+        raise NotImplementedError
 
+    def _open(self) -> None:
         if self.watch is not None:
             try:
                 self.watch.unsubscribe()
@@ -63,8 +66,7 @@ class CommandFeed:
                 pass
         with self.lock:
             self.docs = None
-        q = self.client.collection("commands").where(filter=FieldFilter("status", "in", STATUSES))
-        self.watch = q.on_snapshot(self._on_snapshot)
+        self.watch = self._query().on_snapshot(self._on_snapshot)
         self.opened = self.clock()
         self.opens += 1
 
@@ -72,7 +74,7 @@ class CommandFeed:
         return self.watch is None or bool(getattr(self.watch, "_closed", False))
 
     def current(self) -> list[dict] | None:
-        """The commands still to act on, as of the last change; None while (re)opening."""
+        """The documents as of the last change; None while (re)opening."""
         if self._dropped() or self.clock() - self.opened > REOPEN_SECONDS:
             self._open()
         with self.lock:
@@ -82,3 +84,25 @@ class CommandFeed:
         if self.watch is not None:
             self.watch.unsubscribe()
             self.watch = None
+
+
+class CommandFeed(Feed):
+    """The commands still to act on."""
+
+    def _query(self):
+        from google.cloud.firestore_v1.base_query import FieldFilter
+
+        return self.client.collection("commands").where(filter=FieldFilter("status", "in", STATUSES))
+
+
+class DeletedFeed(Feed):
+    """meta/deleted: the paths the owner deleted on the Storage tab, which sync must not write again."""
+
+    def _query(self):
+        return self.client.collection("meta").document("deleted")
+
+    def paths(self) -> set[str] | None:
+        rows = self.current()
+        if rows is None:
+            return None
+        return {p for r in rows for p in (r.get("paths") or {})}

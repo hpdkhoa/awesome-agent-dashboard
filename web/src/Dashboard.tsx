@@ -9,6 +9,7 @@ import { InboxList, InboxView, isWaiting } from "./Inbox";
 import { useEntries, useFx, useGold } from "./moneyData";
 import { EntryForm, MoneyView } from "./Money";
 import { RatesReport, RatesSide } from "./Rates";
+import { StorageSide, StorageView } from "./Storage";
 
 const ACTIVE_MS = 5 * 60 * 1000;
 
@@ -36,7 +37,8 @@ export function Dashboard() {
   const runs = useRuns();
   const [wt, setWt] = useState<string>("all");
   const [picked, setPicked] = useState<string | null>(null);
-  const [tab, setTab] = useState<"inbox" | "sessions" | "runs" | "money" | "rates">("inbox");
+  const [tab, setTab] = useState<"inbox" | "sessions" | "runs" | "money" | "rates" | "storage">("inbox");
+  const [store, setStore] = useState("inbox");
   const [pickedItem, setPickedItem] = useState<string | null>(null);
   // Money data loads only while the Money or Rates tab is open.
   const entries = useEntries(tab === "money");
@@ -111,8 +113,13 @@ export function Dashboard() {
           <button className={tab === "rates" ? "tab on" : "tab"} onClick={() => setTab("rates")}>
             Rates
           </button>
+          <button className={tab === "storage" ? "tab on" : "tab"} onClick={() => setTab("storage")}>
+            Storage
+          </button>
         </div>
-        {tab === "money" ? (
+        {tab === "storage" ? (
+          <StorageSide picked={store} onPick={setStore} />
+        ) : tab === "money" ? (
           <EntryForm />
         ) : tab === "rates" ? (
           <RatesSide fx={fx} />
@@ -141,7 +148,9 @@ export function Dashboard() {
       </aside>
 
       <main className="main">
-        {tab === "money" ? (
+        {tab === "storage" ? (
+          <StorageView name={store} />
+        ) : tab === "money" ? (
           entries && fx && gold ? <MoneyView entries={entries} fx={fx[0]} gold={gold[0]} /> : <p className="muted">Loading</p>
         ) : tab === "rates" ? (
           fx && gold ? <RatesReport fx={fx} gold={gold} /> : <p className="muted">Loading</p>

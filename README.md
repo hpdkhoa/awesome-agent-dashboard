@@ -69,6 +69,23 @@ An answer to a session that has closed is delivered by `watch`, which resumes th
 (or `CLAUDE_BIN` in `.env` pointing to it). The bridge never resumes a session that is still open: each open session's
 inbox server sends a heartbeat every minute.
 
+### Claude Code's own question box
+
+A session that asks with Claude Code's built-in question box (not `inbox_ask`) reaches the inbox through a hook. Each
+question waits in the inbox for up to 10 minutes; answered there, the answers go back to the session. Not answered in
+time, the session's own question box opens. Add it once to `~/.claude/settings.json`:
+
+```json
+{ "hooks": { "PreToolUse": [ { "matcher": "AskUserQuestion",
+  "hooks": [ { "type": "command", "command": "python -m agent_bridge ask-hook", "timeout": 660 } ] } ] } }
+```
+
+## Storage
+
+The Storage tab counts every collection, lists its documents 50 at a time with their size by Firestore's size rules,
+and deletes the ones you pick. A deleted session, day, work type or machine goes on `meta/deleted`, and the bridge
+never writes it again.
+
 ## Runs from the page (P3)
 
 The Runs tab starts your own Claude Code in a folder registered in `WORK_ROOTS` on that machine, and stops runs it

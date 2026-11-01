@@ -108,3 +108,8 @@ td + td { padding-left: 12px; }
   .side { max-height: 50vh; }
   .main { padding: 16px; }
 }
+
+.store { width: 100%; margin: 8px 0 12px; }
+.store tbody tr { cursor: pointer; }
+.store tr.on td { background: var(--accent-bg); }
+.store td { white-space: nowrap; max-width: 260px; overflow: hidden; text-overflow: ellipsis; }

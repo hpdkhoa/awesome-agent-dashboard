@@ -38,7 +38,7 @@ class Inbox:
         self.session_id, self.cwd = session_id or "unknown", cwd
 
     def post(self, kind: str, title: str, text: str, options: list[dict] | None = None,
-             recommended: int | None = None, files: list[str] | None = None) -> str:
+             recommended: int | None = None, files: list[str] | None = None, extra: dict | None = None) -> str:
         item_id = uuid.uuid4().hex[:20]
         opts = [{"label": redact(o.get("label", ""), 120), "detail": redact(o.get("detail", ""), 400)} for o in options or []]
         if recommended is not None and not 0 <= recommended < len(opts):
@@ -58,6 +58,7 @@ class Inbox:
             "status": "open",
             "createdAt": now_iso(),
             "answer": None,
+            **(extra or {}),
         }})
         return item_id
 

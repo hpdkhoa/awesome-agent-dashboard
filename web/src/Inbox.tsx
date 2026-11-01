@@ -38,7 +38,10 @@ export function InboxList({ items, picked, onPick }: { items: InboxItem[]; picke
         </li>
       ))}
       {items.length === 0 && (
-        <li className="muted row">Nothing yet. Sessions post here with inbox_ask, inbox_suggest and inbox_result.</li>
+        <li className="muted row">
+          Nothing yet. Sessions post here with inbox_ask, inbox_suggest and inbox_result, and their question box goes here
+          first for 10 minutes.
+        </li>
       )}
     </ul>
   );
@@ -73,6 +76,13 @@ export function InboxView({ item, session }: { item: InboxItem; session?: Sessio
         {KIND[item.kind]} · {item.workType} · {item.machine} · {ago(item.createdAt)} · {STATUS[item.status]}
         <br />
         from session: {session?.title ?? item.sessionId}
+        {item.via === "hook" && open && (
+          <>
+            <br />
+            from the session's question box: answer within 10 minutes of {new Date(item.createdAt).toLocaleTimeString()}, or the
+            session asks there instead
+          </>
+        )}
       </p>
 
       <Section id="inbox.text" title={item.kind === "approval" ? "The call" : "Details"}>
@@ -95,14 +105,19 @@ export function InboxView({ item, session }: { item: InboxItem; session?: Sessio
         <Section id="inbox.options" title="Options" extra={item.options.length}>
           <div className="options">
             {item.options.map((o, n) => {
-              const on = (open ? choice : item.answer?.choice) === o.label;
+              const picked = (open ? choice : item.answer?.choice ?? "").split(", ");
+              const on = item.multi ? picked.includes(o.label) : (open ? choice : item.answer?.choice) === o.label;
               return (
                 <button
                   key={n}
                   className={on ? "option on" : "option"}
                   disabled={!open}
                   onClick={() => {
-                    setChoice(o.label);
+                    if (item.multi) {
+                      // the labels in the order Claude offered them, joined the way Claude Code joins a multi-select answer
+                      const next = on ? picked.filter((l) => l !== o.label) : [...picked, o.label];
+                      setChoice(item.options.map((x) => x.label).filter((l) => next.includes(l)).join(", "));
+                    } else setChoice(o.label);
                     setError("");
                   }}
                 >

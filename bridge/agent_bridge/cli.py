@@ -1,4 +1,4 @@
-"""agent-bridge signin | sync | watch | inbox.
+"""agent-bridge signin | sync | watch | inbox | ask-hook.
 
 sync and watch read Claude Code's logs. watch also delivers the owner's answers to closed sessions by resuming them
 (deliver.py) and starts and stops the runs the owner asks for on the page (runs.py). inbox is the MCP server each
@@ -38,12 +38,18 @@ def main(argv: list[str] | None = None) -> None:
         if name == "watch":
             c.add_argument("--every", type=float, default=60)
     sub.add_parser("inbox", help="the inbox MCP server (started by Claude Code, not by hand)")
+    sub.add_parser("ask-hook", help="the question hook: Claude Code's question box goes to the inbox first")
     a = p.parse_args(argv)
 
     if a.cmd == "inbox":
         from .inbox import server
 
         server()
+        return
+    if a.cmd == "ask-hook":
+        from .ask import main as ask_main
+
+        ask_main()
         return
 
     if os.environ.get("ANTHROPIC_API_KEY"):
@@ -62,15 +68,16 @@ def main(argv: list[str] | None = None) -> None:
         store = Firestore(Session(cfg))
         store.check_owner()
     claude = find_claude(cfg.claude_bin)
-    runs = None
+    runs = gone = None
     if store is not None and a.cmd == "watch":
         runs = Runs(store, cfg.machine, cfg.roots, claude, data_dir() / "runs", logs=cfg.logs)
         runs.forget_lost()
-        feed = None
+        feed = gone = None
         try:
-            from .listen import CommandFeed, firestore_client
+            from .listen import CommandFeed, DeletedFeed, firestore_client
 
-            feed = CommandFeed(firestore_client(store.s))
+            client = firestore_client(store.s)
+            feed, gone = CommandFeed(client), DeletedFeed(client)
         except ImportError:
             print("google-cloud-firestore is not installed: asking for commands every 5 s instead of listening", flush=True)
     stamp = lambda: time.strftime("%Y-%m-%d %H:%M:%S")
@@ -79,7 +86,7 @@ def main(argv: list[str] | None = None) -> None:
         try:
             if time.time() >= next_sync:
                 next_sync = time.time() + a.every
-                r = run(cfg, a.days, store, dry_run=a.dry_run)
+                r = run(cfg, a.days, store, dry_run=a.dry_run, deleted=gone.paths if gone is not None else lambda: None)
                 print(
                     f"{stamp()} sessions {r['sessions']}, tokens {r['tokens']:,}, "
                     f"list-price estimate ${r['costUsd']:,}, documents {'to write' if a.dry_run else 'written'} "
