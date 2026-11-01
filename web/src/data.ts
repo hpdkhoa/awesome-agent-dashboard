@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { collection, doc, limit, onSnapshot, orderBy, query, setDoc, updateDoc, type QueryConstraint } from "firebase/firestore";
+import { collection, doc, limit, onSnapshot, orderBy, query, setDoc, updateDoc, where, type QueryConstraint } from "firebase/firestore";
 import { db } from "./firebase";
 
 // The shapes the bridge writes (bridge/agent_bridge/aggregate.py).
@@ -58,7 +58,17 @@ export type InboxItem = {
   error?: string | null;
   via?: "hook"; // posted by the question hook from Claude Code's own question box
   multi?: boolean; // more than one option may be picked
+  planId?: string; // the plan this question belongs to
+  round?: number; // asked on this version of the plan (0: before v1)
 };
+
+// A plan with rounds of questions (the owner's choice, 2026-11-01, "do 2"): versions in planVersions, questions in the
+// inbox with planId and round.
+export type Plan = {
+  id: string; title: string; sessionId: string; machine: string; cwd: string; workType: string;
+  status: "open" | "done"; current: number; createdAt: string; updatedAt: string; closeNote?: string;
+};
+export type PlanVersion = { id: string; planId: string; n: number; text: string; note: string; createdAt: string };
 
 export type Machine = {
   name: string;
@@ -100,6 +110,20 @@ export const useSessions = () => useCollection<Session>("sessions", orderBy("las
 export const useUsage = () => useCollection<Usage>("usage", orderBy("day", "desc"), limit(30));
 export const useWorkTypes = () => useCollection<WorkType>("workTypes");
 export const useMachines = () => useCollection<Machine>("machines");
+export const usePlans = () => useCollection<Plan>("plans", orderBy("updatedAt", "desc"), limit(100));
+
+// One plan's versions, read only while its page is open. Sorted here, so the query needs no composite index.
+export function usePlanVersions(planId: string | undefined): PlanVersion[] | null {
+  const [rows, setRows] = useState<PlanVersion[] | null>(null);
+  useEffect(() => {
+    setRows(null);
+    if (!planId) return;
+    return onSnapshot(query(collection(db, "planVersions"), where("planId", "==", planId)), (s) =>
+      setRows(s.docs.map((d) => d.data() as PlanVersion).sort((a, b) => a.n - b.n)),
+    );
+  }, [planId]);
+  return rows;
+}
 export const useInbox = () => useCollection<InboxItem>("inbox", orderBy("createdAt", "desc"), limit(200));
 
 // The owner's answer. The session picks it up live, or the bridge resumes the session if it has closed.

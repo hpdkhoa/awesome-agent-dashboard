@@ -8,6 +8,10 @@ Delivery (the owner's choice, 2026-11-01, "option 1"):
 
 Kinds: question, suggestion, result, approval (a tool call in a run started from the dashboard).
 Item states: open -> answered (the owner, on the page) -> delivered (live or by resume), or closed (nothing to send).
+
+Plans (the owner's choice, 2026-11-01, "do 2"): a session opens a plan (plans/<id>) and posts its versions
+(planVersions/<id>_v<n>). Each question the session asks while the plan is open joins it, in the round of the version
+it was asked on (round 0: before v1), so the page shows v1, its questions and answers, v2, and so on.
 """
 
 
@@ -37,9 +41,48 @@ class Inbox:
         self.store, self.machine, self.roots = store, machine, roots
         self.session_id, self.cwd = session_id or "unknown", cwd
 
+    def open_plan(self) -> dict | None:
+        """This session's open plan, the newest if there are several."""
+        if self.session_id == "unknown":
+            return None
+        plans = [p for p in self.store.where("plans", "sessionId", self.session_id) if p.get("status") == "open"]
+        return max(plans, key=lambda p: p.get("createdAt", ""), default=None)
+
+    def plan_start(self, title: str, text: str = "", note: str = "") -> str:
+        plan_id = uuid.uuid4().hex[:20]
+        self.store.put_many({f"plans/{plan_id}": {
+            "id": plan_id, "title": redact(title, 200), "sessionId": self.session_id, "machine": self.machine,
+            "cwd": self.cwd, "workType": work_type_of(self.cwd, self.roots), "status": "open", "current": 0,
+            "createdAt": now_iso(), "updatedAt": now_iso(),
+        }})
+        if text.strip():
+            self.plan_version(plan_id, text, note)
+        return plan_id
+
+    def plan_version(self, plan_id: str, text: str, note: str = "") -> int:
+        """Saves the next version of a plan and returns its number. Questions asked from now on are its round."""
+        plan = self.store.get(f"plans/{plan_id}")
+        if not plan:
+            raise ValueError(f"no plan {plan_id}")
+        n = int(plan.get("current", 0)) + 1
+        self.store.put_many({f"planVersions/{plan_id}_v{n}": {
+            "id": f"{plan_id}_v{n}", "planId": plan_id, "n": n, "text": redact(text, 30000), "note": redact(note, 400),
+            "createdAt": now_iso(),
+        }})
+        self.store.update(f"plans/{plan_id}", {"current": n, "updatedAt": now_iso()})
+        return n
+
+    def plan_close(self, plan_id: str, note: str = "") -> None:
+        self.store.update(f"plans/{plan_id}", {"status": "done", "closeNote": redact(note, 400), "updatedAt": now_iso()})
+
     def post(self, kind: str, title: str, text: str, options: list[dict] | None = None,
              recommended: int | None = None, files: list[str] | None = None, extra: dict | None = None) -> str:
         item_id = uuid.uuid4().hex[:20]
+        extra = dict(extra or {})
+        if kind == "question" and "planId" not in extra:
+            plan = self.open_plan()
+            if plan:
+                extra.update(planId=plan["id"], round=int(plan.get("current", 0)))
         opts = [{"label": redact(o.get("label", ""), 120), "detail": redact(o.get("detail", ""), 400)} for o in options or []]
         if recommended is not None and not 0 <= recommended < len(opts):
             recommended = None
@@ -58,8 +101,10 @@ class Inbox:
             "status": "open",
             "createdAt": now_iso(),
             "answer": None,
-            **(extra or {}),
+            **extra,
         }})
+        if extra.get("planId"):
+            self.store.update(f"plans/{extra['planId']}", {"updatedAt": now_iso()})
         return item_id
 
     def beat(self) -> None:
@@ -146,7 +191,9 @@ def server():
         "agent-inbox",
         instructions=(
             "The owner's dashboard inbox. Post a decision the owner must make with inbox_ask (give options and mark "
-            "the one you recommend), a result to review with inbox_result, and an idea with inbox_suggest."
+            "the one you recommend), a result to review with inbox_result, and an idea with inbox_suggest. For planning "
+            "with rounds of questions, open a plan with plan_start, post each new version with plan_version, and close "
+            "it with plan_close: every question you ask while it is open joins the round of its current version."
         ),
     )
 
@@ -209,6 +256,33 @@ def server():
             await asyncio.sleep(POLL_SECONDS)
         await asyncio.to_thread(inbox.store.update, f"inbox/{item_id}", {"status": "closed", "error": "No answer in time; denied."})
         return approval_reply(None, input)
+
+    @mcp.tool()
+    async def plan_start(title: str, text: str = "", note: str = "") -> str:
+        """Open a plan on the dashboard. text: version 1 (markdown), if you have one. Questions you ask with inbox_ask
+        (or your question box) while the plan is open join it, in the round of its current version."""
+        plan_id = await asyncio.to_thread(inbox.plan_start, title, text, note)
+        plan = await asyncio.to_thread(inbox.store.get, f"plans/{plan_id}")
+        return f"Opened plan {plan_id} at version {plan.get('current', 0)}."
+
+    @mcp.tool()
+    async def plan_version(text: str, note: str, plan_id: str = "") -> str:
+        """Post the next version of the plan (the whole text, markdown). note: one line on what changed and which
+        answers caused it. plan_id: this session's open plan when empty."""
+        plan_id = plan_id or ((await asyncio.to_thread(inbox.open_plan)) or {}).get("id", "")
+        if not plan_id:
+            return "No open plan in this session. Open one with plan_start."
+        n = await asyncio.to_thread(inbox.plan_version, plan_id, text, note)
+        return f"Saved version {n} of plan {plan_id}. Questions asked from now on are round {n}."
+
+    @mcp.tool()
+    async def plan_close(note: str = "", plan_id: str = "") -> str:
+        """Close the plan when the owner approved it or it ended. plan_id: this session's open plan when empty."""
+        plan_id = plan_id or ((await asyncio.to_thread(inbox.open_plan)) or {}).get("id", "")
+        if not plan_id:
+            return "No open plan in this session."
+        await asyncio.to_thread(inbox.plan_close, plan_id, note)
+        return f"Closed plan {plan_id}."
 
     @mcp.tool()
     async def inbox_suggest(title: str, suggestion: str) -> str:

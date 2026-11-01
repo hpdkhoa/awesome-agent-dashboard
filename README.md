@@ -80,6 +80,13 @@ time, the session's own question box opens. Add it once to `~/.claude/settings.j
   "hooks": [ { "type": "command", "command": "python -m agent_bridge ask-hook", "timeout": 660 } ] } ] } }
 ```
 
+### Plans
+
+For planning with rounds of questions, a session opens a plan with `plan_start`, posts each new version with
+`plan_version` (the whole text and one line on what changed), and closes it with `plan_close`. Every question the
+session asks while the plan is open, with `inbox_ask` or its own question box, joins the round of the version it was
+asked on. The Plans tab shows each version, then its questions and your answers, in order.
+
 ## Money and Rates
 
 The Money tab keeps VND, USD, EUR, gold bar and gold ring entries, typed in Vietnamese number format (`1.000.000`,

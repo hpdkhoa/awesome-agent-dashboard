@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
 import { signOut } from "firebase/auth";
 import { auth } from "./firebase";
-import { useInbox, useMachines, useRuns, useSessions, useUsage, useWorkTypes, type Run, type Session, type Tokens } from "./data";
+import { useInbox, useMachines, usePlans, useRuns, useSessions, useUsage, useWorkTypes, type Run, type Session, type Tokens } from "./data";
 import { MessageBox, RunList, StartForm } from "./Runs";
+import { PlanList, PlanView } from "./Plans";
 import { Md } from "./Markdown";
 import { Section } from "./Section";
 import { InboxList, InboxView, isWaiting } from "./Inbox";
@@ -35,9 +36,11 @@ export function Dashboard() {
   const machines = useMachines();
   const inbox = useInbox();
   const runs = useRuns();
+  const plans = usePlans();
+  const [pickedPlan, setPickedPlan] = useState<string | null>(null);
   const [wt, setWt] = useState<string>("all");
   const [picked, setPicked] = useState<string | null>(null);
-  const [tab, setTab] = useState<"inbox" | "sessions" | "runs" | "money" | "rates" | "storage">("inbox");
+  const [tab, setTab] = useState<"inbox" | "plans" | "sessions" | "runs" | "money" | "rates" | "storage">("inbox");
   const [store, setStore] = useState("inbox");
   const [pickedItem, setPickedItem] = useState<string | null>(null);
   // Money data loads only while the Money or Rates tab is open.
@@ -50,6 +53,9 @@ export function Dashboard() {
   const items = (inbox ?? []).filter((i) => wt === "all" || i.workType === wt);
   const waiting = (inbox ?? []).filter(isWaiting).length;
   const item = items.find((i) => i.id === pickedItem) ?? items.find(isWaiting) ?? items[0];
+  const shownPlans = (plans ?? []).filter((p) => wt === "all" || p.workType === wt);
+  const plan = shownPlans.find((p) => p.id === pickedPlan) ?? shownPlans[0];
+  const openItem = (id: string) => (setPickedItem(id), setTab("inbox"));
   const todayUse = usage?.find((u) => u.day === today());
   const month = (usage ?? []).reduce((a, u) => ({ tokens: a.tokens + u.total, cost: a.cost + u.costUsd }), { tokens: 0, cost: 0 });
   const lastSync = (machines ?? []).map((m) => m.syncedAt).sort().at(-1);
@@ -101,6 +107,9 @@ export function Dashboard() {
           <button className={tab === "inbox" ? "tab on" : "tab"} onClick={() => setTab("inbox")}>
             Inbox {waiting > 0 && <span className="count">{waiting}</span>}
           </button>
+          <button className={tab === "plans" ? "tab on" : "tab"} onClick={() => setTab("plans")}>
+            Plans
+          </button>
           <button className={tab === "sessions" ? "tab on" : "tab"} onClick={() => setTab("sessions")}>
             Sessions
           </button>
@@ -127,6 +136,8 @@ export function Dashboard() {
           <div className="pad">
             <StartForm machines={machines ?? []} />
           </div>
+        ) : tab === "plans" ? (
+          <PlanList plans={shownPlans} items={inbox} picked={plan?.id} onPick={setPickedPlan} />
         ) : tab === "inbox" ? (
           <InboxList items={items} picked={item?.id} onPick={setPickedItem} />
         ) : (
@@ -156,9 +167,16 @@ export function Dashboard() {
           fx && gold ? <RatesReport fx={fx} gold={gold} /> : <p className="muted">Loading</p>
         ) : tab === "runs" ? (
           <RunList runs={runs ?? []} />
+        ) : tab === "plans" ? (
+          plan ? (
+            <PlanView key={plan.id} plan={plan} items={inbox} session={sessions.find((s) => s.id === plan.sessionId)} onOpenItem={openItem} />
+          ) : (
+            <p className="muted">No plans yet.</p>
+          )
         ) : tab === "inbox" ? (
           item ? (
-            <InboxView key={item.id} item={item} session={sessions.find((s) => s.id === item.sessionId)} />
+            <InboxView key={item.id} item={item} session={sessions.find((s) => s.id === item.sessionId)}
+              plan={(plans ?? []).find((p) => p.id === item.planId)} onOpenPlan={(id) => (setPickedPlan(id), setTab("plans"))} />
           ) : (
             <p className="muted">The inbox is empty.</p>
           )

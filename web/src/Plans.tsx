@@ -1,0 +1,98 @@
+import { usePlanVersions, type InboxItem, type Plan, type Session } from "./data";
+import { isWaiting } from "./Inbox";
+import { Md } from "./Markdown";
+import { Section } from "./Section";
+
+// Plans with rounds of questions (the owner's choice, 2026-11-01, "do 2"): each version, then the questions asked on it
+// and your answers, in order. A linear list for now; the graph of choices comes after its plan is approved.
+
+const when = (iso: string) => new Date(iso).toLocaleString();
+const roundName = (n: number) => (n === 0 ? "Questions before v1" : `Questions on v${n}`);
+
+export function PlanList({ plans, items, picked, onPick }: { plans: Plan[]; items: InboxItem[]; picked?: string; onPick: (id: string) => void }) {
+  return (
+    <ul className="list">
+      {plans.map((p) => {
+        const waiting = items.filter((i) => i.planId === p.id && isWaiting(i)).length;
+        return (
+          <li key={p.id} className={p.id === picked ? "row on" : "row"} onClick={() => onPick(p.id)}>
+            <span className={waiting ? "dot wait" : p.status === "open" ? "dot live" : "dot"} />
+            <div className="grow">
+              <div className="title">{p.title}</div>
+              <div className="muted small">
+                v{p.current} · {p.workType} · {p.status === "open" ? "open" : "done"}
+                {waiting > 0 && ` · ${waiting} waiting for you`}
+              </div>
+            </div>
+          </li>
+        );
+      })}
+      {plans.length === 0 && (
+        <li className="muted row">No plans yet. A session opens one with plan_start; its questions then group here by round.</li>
+      )}
+    </ul>
+  );
+}
+
+export function PlanView({ plan, items, session, onOpenItem }: {
+  plan: Plan; items: InboxItem[]; session?: Session; onOpenItem: (id: string) => void;
+}) {
+  const versions = usePlanVersions(plan.id);
+  const asked = items.filter((i) => i.planId === plan.id).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const rounds = Array.from({ length: plan.current + 1 }, (_, n) => n);
+  return (
+    <article>
+      <h1>{plan.title}</h1>
+      <p className="meta">
+        Plan · v{plan.current} · {plan.status === "open" ? "open" : "done"} · {plan.workType} · updated {when(plan.updatedAt)}
+        <br />
+        from session: {session?.title ?? plan.sessionId}
+        {plan.closeNote && (
+          <>
+            <br />
+            closed: {plan.closeNote}
+          </>
+        )}
+      </p>
+      {versions === null && <p className="muted">Loading</p>}
+      {rounds.map((n) => {
+        const v = versions?.find((x) => x.n === n);
+        const qs = asked.filter((i) => (i.round ?? 0) === n);
+        return (
+          <div key={n}>
+            {v && (
+              <Section id={`plan.v.${n === plan.current ? "latest" : "old"}`} title={`v${n} · ${v.note || "no note"}`} extra={when(v.createdAt)}
+                open={n === plan.current}>
+                <Md text={v.text} />
+              </Section>
+            )}
+            {qs.length > 0 && (
+              <Section id="plan.round" title={roundName(n)} extra={`${qs.filter(isWaiting).length} waiting · ${qs.length} asked`}>
+                <table>
+                  <tbody>
+                    {qs.map((q) => (
+                      <tr key={q.id}>
+                        <td>
+                          <button className="link" onClick={() => onOpenItem(q.id)}>
+                            {q.title}
+                          </button>
+                        </td>
+                        <td className={isWaiting(q) ? "small wait-fg" : "small"}>
+                          {isWaiting(q)
+                            ? "waiting for you"
+                            : q.answer
+                              ? [q.answer.choice, q.answer.text && `note: ${q.answer.text}`].filter(Boolean).join(" · ")
+                              : q.status}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </Section>
+            )}
+          </div>
+        );
+      })}
+    </article>
+  );
+}

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { answerItem, type InboxItem, type Session } from "./data";
+import { answerItem, type InboxItem, type Plan, type Session } from "./data";
 import { Md } from "./Markdown";
 import { Section } from "./Section";
 
@@ -47,7 +47,9 @@ export function InboxList({ items, picked, onPick }: { items: InboxItem[]; picke
   );
 }
 
-export function InboxView({ item, session }: { item: InboxItem; session?: Session }) {
+export function InboxView({ item, session, plan, onOpenPlan }: {
+  item: InboxItem; session?: Session; plan?: Plan; onOpenPlan?: (id: string) => void;
+}) {
   const [choice, setChoice] = useState<string>("");
   const [text, setText] = useState("");
   const [error, setError] = useState("");
@@ -76,6 +78,16 @@ export function InboxView({ item, session }: { item: InboxItem; session?: Sessio
         {KIND[item.kind]} · {item.workType} · {item.machine} · {ago(item.createdAt)} · {STATUS[item.status]}
         <br />
         from session: {session?.title ?? item.sessionId}
+        {plan && (
+          <>
+            <br />
+            part of plan{" "}
+            <button className="link" onClick={() => onOpenPlan?.(plan.id)}>
+              {plan.title}
+            </button>
+            , {item.round ? `questions on v${item.round}` : "questions before v1"}
+          </>
+        )}
         {item.via === "hook" && open && (
           <>
             <br />

@@ -9,6 +9,8 @@ import { db } from "./firebase";
 // liveSessions is a heartbeat the inbox server rewrites every minute, so it is not kept deleted.
 export const COLLECTIONS: { name: string; label: string; order?: string; bridge?: boolean; show: string[] }[] = [
   { name: "inbox", label: "Inbox items", order: "createdAt", show: ["title", "kind", "status", "createdAt"] },
+  { name: "plans", label: "Plans", order: "updatedAt", show: ["title", "status", "current", "updatedAt"] },
+  { name: "planVersions", label: "Plan versions", order: "createdAt", show: ["planId", "n", "note", "createdAt"] },
   { name: "commands", label: "Runs and messages", order: "createdAt", show: ["action", "status", "prompt", "createdAt"] },
   { name: "sessions", label: "Sessions", order: "lastAt", bridge: true, show: ["title", "workType", "lastAt"] },
   { name: "usage", label: "Spend by day", order: "day", bridge: true, show: ["day", "total", "costUsd"] },

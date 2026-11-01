@@ -144,3 +144,30 @@ def test_resume_error_shows_claudes_message():
     run = Runner(code=1, out='{"type": "result", "is_error": true, "result": "Not logged in · Please run /login"}')
     deliver(store, "PC", "claude", run)
     assert store.get(f"inbox/{qid}")["error"] == "Not logged in · Please run /login"
+
+
+def test_plan_rounds_follow_its_versions():
+    store = FakeStore()
+    ib = make(store)
+    pid = ib.plan_start("Plans tab")
+    q0 = ib.post("question", "Scope?", "which", [{"label": "A"}])
+    assert ib.plan_version(pid, "# v1", "first draft") == 1
+    q1 = ib.post("question", "Graph?", "which", [{"label": "B"}])
+    assert ib.plan_version(pid, "# v2", "Q1 picked B") == 2
+    assert store.docs[f"inbox/{q0}"]["planId"] == pid and store.docs[f"inbox/{q0}"]["round"] == 0
+    assert store.docs[f"inbox/{q1}"]["round"] == 1
+    assert store.docs[f"planVersions/{pid}_v2"]["note"] == "Q1 picked B"
+    assert store.docs[f"plans/{pid}"]["current"] == 2
+    ib.plan_close(pid, "approved")
+    assert "planId" not in store.docs[f"inbox/{ib.post('question', 'later', 'x')}"]
+
+
+def test_only_this_sessions_open_plan_takes_questions():
+    store = FakeStore()
+    make(store, "other").plan_start("not mine")
+    ib = make(store)
+    assert "planId" not in store.docs[f"inbox/{ib.post('question', 'q', 'x')}"]
+    pid = ib.plan_start("mine", "# v1")
+    assert store.docs[f"inbox/{ib.post('question', 'q', 'x')}"]["planId"] == pid
+    assert store.docs[f"plans/{pid}"]["current"] == 1
+    assert store.docs[f"inbox/{ib.post('suggestion', 's', 'x')}"].get("planId") is None
