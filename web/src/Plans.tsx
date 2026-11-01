@@ -1,10 +1,12 @@
+import { useState } from "react";
 import { usePlanVersions, type InboxItem, type Plan, type Session } from "./data";
 import { isWaiting } from "./Inbox";
 import { Md } from "./Markdown";
+import { PlanGraph } from "./PlanGraph";
 import { Section } from "./Section";
 
 // Plans with rounds of questions (the owner's choice, 2026-11-01, "do 2"): each version, then the questions asked on it
-// and your answers, in order. A linear list for now; the graph of choices comes after its plan is approved.
+// and your answers, in order (List), or the tree of versions and choices with a summary of each step (Graph).
 
 const when = (iso: string) => new Date(iso).toLocaleString();
 const roundName = (n: number) => (n === 0 ? "Questions before v1" : `Questions on v${n}`);
@@ -38,6 +40,7 @@ export function PlanView({ plan, items, session, onOpenItem }: {
   plan: Plan; items: InboxItem[]; session?: Session; onOpenItem: (id: string) => void;
 }) {
   const versions = usePlanVersions(plan.id);
+  const [view, setView] = useState<"graph" | "list">("graph");
   const asked = items.filter((i) => i.planId === plan.id).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   const rounds = Array.from({ length: plan.current + 1 }, (_, n) => n);
   return (
@@ -54,8 +57,16 @@ export function PlanView({ plan, items, session, onOpenItem }: {
           </>
         )}
       </p>
+      <div className="chips">
+        {(["graph", "list"] as const).map((x) => (
+          <button key={x} className={view === x ? "chip on" : "chip"} onClick={() => setView(x)}>
+            {x === "graph" ? "Graph" : "List"}
+          </button>
+        ))}
+      </div>
       {versions === null && <p className="muted">Loading</p>}
-      {rounds.map((n) => {
+      {versions && view === "graph" && <PlanGraph plan={plan} versions={versions} asked={asked} onOpenItem={onOpenItem} />}
+      {view === "list" && rounds.map((n) => {
         const v = versions?.find((x) => x.n === n);
         const qs = asked.filter((i) => (i.round ?? 0) === n);
         return (

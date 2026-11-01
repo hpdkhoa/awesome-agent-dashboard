@@ -60,6 +60,8 @@ export type InboxItem = {
   multi?: boolean; // more than one option may be picked
   planId?: string; // the plan this question belongs to
   round?: number; // asked on this version of the plan (0: before v1)
+  reopened?: boolean; // the owner changed an earlier answer: the session branches the plan
+  history?: { choice: string; text: string; at: string }[]; // earlier answers, oldest first
 };
 
 // A plan with rounds of questions (the owner's choice, 2026-11-01, "do 2"): versions in planVersions, questions in the
@@ -67,8 +69,13 @@ export type InboxItem = {
 export type Plan = {
   id: string; title: string; sessionId: string; machine: string; cwd: string; workType: string;
   status: "open" | "done"; current: number; createdAt: string; updatedAt: string; closeNote?: string;
+  chosen?: number; // the version on the chosen line (default: the newest)
 };
-export type PlanVersion = { id: string; planId: string; n: number; text: string; note: string; createdAt: string };
+// madeBy: the answers that made this version, as they were then; parent: the version it grew from (a branch when older).
+export type Decision = { id: string; title: string; choice: string; text: string };
+export type PlanVersion = {
+  id: string; planId: string; n: number; text: string; note: string; createdAt: string; parent?: number; madeBy?: Decision[];
+};
 
 export type Machine = {
   name: string;
@@ -129,6 +136,15 @@ export const useInbox = () => useCollection<InboxItem>("inbox", orderBy("created
 // The owner's answer. The session picks it up live, or the bridge resumes the session if it has closed.
 export const answerItem = (id: string, choice: string, text: string) =>
   updateDoc(doc(db, "inbox", id), { status: "answered", answer: { choice, text, at: new Date().toISOString() }, error: null });
+// Reopen an answer in a plan: the old answer goes to history, and the session gets the new one with the round to
+// branch from (live, or by resume).
+export const reopenItem = (item: InboxItem, choice: string, text: string) =>
+  updateDoc(doc(db, "inbox", item.id), {
+    status: "answered", reopened: true, error: null,
+    history: [...(item.history ?? []), ...(item.answer ? [item.answer] : [])],
+    answer: { choice, text, at: new Date().toISOString() },
+  });
+export const chooseVersion = (planId: string, n: number) => updateDoc(doc(db, "plans", planId), { chosen: n });
 export const useRuns = () => useCollection<Run>("commands", orderBy("createdAt", "desc"), limit(100));
 
 const newId = () => crypto.randomUUID().replace(/-/g, "").slice(0, 20);

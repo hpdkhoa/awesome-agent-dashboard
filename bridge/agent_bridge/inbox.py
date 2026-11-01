@@ -12,6 +12,8 @@ Item states: open -> answered (the owner, on the page) -> delivered (live or by 
 Plans (the owner's choice, 2026-11-01, "do 2"): a session opens a plan (plans/<id>) and posts its versions
 (planVersions/<id>_v<n>). Each question the session asks while the plan is open joins it, in the round of the version
 it was asked on (round 0: before v1), so the page shows v1, its questions and answers, v2, and so on.
+Each version keeps its parent and the answers that made it (madeBy). When the owner reopens an answer on the page, the
+session posts a version whose parent is the version that question was asked on: a branch. Old branches stay.
 """
 
 
@@ -59,17 +61,33 @@ class Inbox:
             self.plan_version(plan_id, text, note)
         return plan_id
 
-    def plan_version(self, plan_id: str, text: str, note: str = "") -> int:
-        """Saves the next version of a plan and returns its number. Questions asked from now on are its round."""
+    def plan_version(self, plan_id: str, text: str, note: str = "", parent: int | None = None,
+                     answers: list[str] | None = None) -> int:
+        """Saves the next version of a plan and returns its number. Questions asked from now on are its round.
+
+        parent: the version this one grows from (default: the current one; an older one makes a branch).
+        answers: the inbox ids of the answers that made it (default: the answered questions asked on the parent).
+        Each answer is kept as it was then, so a branch made before a reopen still shows the old answer.
+        """
         plan = self.store.get(f"plans/{plan_id}")
         if not plan:
             raise ValueError(f"no plan {plan_id}")
-        n = int(plan.get("current", 0)) + 1
+        current = int(plan.get("current", 0))
+        parent = current if parent is None else parent
+        if not 0 <= parent <= current:
+            raise ValueError(f"plan {plan_id} has no version {parent}")
+        asked = {i["id"]: i for i in self.store.where("inbox", "planId", plan_id)}
+        if answers is None:
+            answers = [k for k, i in asked.items() if int(i.get("round", 0)) == parent and i.get("answer")]
+        made_by = [{"id": k, "title": asked[k].get("title", ""), "choice": (asked[k].get("answer") or {}).get("choice", ""),
+                    "text": (asked[k].get("answer") or {}).get("text", "")} for k in answers if k in asked]
+        # a plan's numbers only grow, so a branch from an old version still gets the next number
+        n = int(plan.get("last", current)) + 1
         self.store.put_many({f"planVersions/{plan_id}_v{n}": {
-            "id": f"{plan_id}_v{n}", "planId": plan_id, "n": n, "text": redact(text, 30000), "note": redact(note, 400),
-            "createdAt": now_iso(),
+            "id": f"{plan_id}_v{n}", "planId": plan_id, "n": n, "parent": parent, "madeBy": made_by,
+            "text": redact(text, 30000), "note": redact(note, 400), "createdAt": now_iso(),
         }})
-        self.store.update(f"plans/{plan_id}", {"current": n, "updatedAt": now_iso()})
+        self.store.update(f"plans/{plan_id}", {"current": n, "last": n, "chosen": n, "updatedAt": now_iso()})
         return n
 
     def plan_close(self, plan_id: str, note: str = "") -> None:
@@ -147,6 +165,11 @@ def answer_text(item: dict) -> str:
     a = item.get("answer") or {}
     kind = {"question": "your question", "suggestion": "your suggestion", "result": "your result"}.get(item.get("kind"), "")
     parts = [f'The owner answered {kind} "{item.get("title", "")}" on the dashboard.']
+    if item.get("reopened") and item.get("planId"):
+        was = (item.get("history") or [{}])[-1]
+        parts = [f'The owner reopened "{item.get("title", "")}" in plan {item["planId"]} and changed the answer'
+                 f' (it was: {was.get("choice") or was.get("text") or "no choice"}). Branch the plan: post a new version'
+                 f' with plan_version(parent={int(item.get("round", 0))}) built on this answer.']
     if a.get("choice"):
         parts.append(f"Choice: {a['choice']}.")
     if a.get("text"):
@@ -266,13 +289,17 @@ def server():
         return f"Opened plan {plan_id} at version {plan.get('current', 0)}."
 
     @mcp.tool()
-    async def plan_version(text: str, note: str, plan_id: str = "") -> str:
+    async def plan_version(text: str, note: str, plan_id: str = "", parent: int = -1) -> str:
         """Post the next version of the plan (the whole text, markdown). note: one line on what changed and which
-        answers caused it. plan_id: this session's open plan when empty."""
+        answers caused it. plan_id: this session's open plan when empty. parent: the version it grows from; leave it
+        out for the current one, or give an older one when the owner reopened an answer (a branch)."""
         plan_id = plan_id or ((await asyncio.to_thread(inbox.open_plan)) or {}).get("id", "")
         if not plan_id:
             return "No open plan in this session. Open one with plan_start."
-        n = await asyncio.to_thread(inbox.plan_version, plan_id, text, note)
+        try:
+            n = await asyncio.to_thread(inbox.plan_version, plan_id, text, note, None if parent < 0 else parent)
+        except ValueError as e:
+            return str(e)
         return f"Saved version {n} of plan {plan_id}. Questions asked from now on are round {n}."
 
     @mcp.tool()

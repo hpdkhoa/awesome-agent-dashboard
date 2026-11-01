@@ -119,3 +119,26 @@ td + td { padding-left: 12px; }
 .store tbody tr { cursor: pointer; }
 .store tr.on td { background: var(--accent-bg); }
 .store td { white-space: nowrap; max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+
+/* Plans: graph view */
+.step { margin: 8px 0; padding: 8px 12px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
+.step .chips, article .chips { margin: 6px 0; padding: 0; border-bottom: none; align-items: center; }
+.hov { position: relative; cursor: pointer; }
+.hov .pop { display: none; position: absolute; left: 0; top: 100%; z-index: 5; margin-top: 4px; min-width: 220px; max-width: 360px;
+  padding: 6px 8px; background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; font-size: 12px; white-space: normal; }
+.hov:hover .pop { display: block; }
+.tree-wrap { overflow-x: auto; margin: 8px 0; border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
+.tree { display: block; font: 13px system-ui, sans-serif; }
+.tree .edge { fill: none; stroke: var(--muted); stroke-width: 1.5; }
+.tree .edge.off { stroke-dasharray: 5 4; opacity: 0.6; }
+.tree .node, .tree .round { cursor: pointer; }
+.tree .node rect { fill: var(--bg); stroke: var(--fg); }
+.tree .node.off rect { stroke: var(--muted); stroke-dasharray: 5 4; }
+.tree .node text, .tree .round text { fill: var(--fg); text-anchor: middle; font-weight: 500; }
+.tree .node.off text { fill: var(--muted); }
+.tree .round polygon { fill: var(--bg); stroke: var(--accent); }
+.tree .round.waiting polygon { stroke: var(--wait-fg); stroke-width: 2; }
+.tree .picked rect, .tree .picked polygon { stroke: var(--live); stroke-width: 2.5; }
+.tree .tag-t { fill: var(--muted); font-size: 11px; font-weight: 400; }
+.diff { font-size: 12px; white-space: pre-wrap; max-height: 320px; overflow: auto; background: var(--bg); padding: 6px 8px; border-radius: 8px; }
+.reopen { margin-top: 6px; }

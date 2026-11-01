@@ -171,3 +171,25 @@ def test_only_this_sessions_open_plan_takes_questions():
     assert store.docs[f"inbox/{ib.post('question', 'q', 'x')}"]["planId"] == pid
     assert store.docs[f"plans/{pid}"]["current"] == 1
     assert store.docs[f"inbox/{ib.post('suggestion', 's', 'x')}"].get("planId") is None
+
+
+def test_reopened_answer_branches_and_old_branch_keeps_its_answer():
+    store = FakeStore()
+    ib = make(store)
+    pid = ib.plan_start("p", "# v1")
+    q = ib.post("question", "List or graph?", "x", [{"label": "List"}, {"label": "Graph"}])
+    owner_answers(store, q, "List")
+    assert ib.plan_version(pid, "# v2 list", "Q: List") == 2
+    assert store.docs[f"planVersions/{pid}_v2"]["parent"] == 1
+    assert store.docs[f"planVersions/{pid}_v2"]["madeBy"][0]["choice"] == "List"
+    assert ib.plan_version(pid, "# v3", "more") == 3
+    # the owner reopens the question on the page: the old answer goes to history
+    store.update(f"inbox/{q}", {"status": "answered", "reopened": True, "history": [{"choice": "List"}],
+                                "answer": {"choice": "Graph", "text": "", "at": "y"}})
+    text = answer_text(store.docs[f"inbox/{q}"])
+    assert "reopened" in text and "parent=1" in text and "it was: List" in text
+    assert ib.plan_version(pid, "# v4 graph", "Q reopened: Graph", parent=1) == 4
+    v4 = store.docs[f"planVersions/{pid}_v4"]
+    assert v4["parent"] == 1 and v4["madeBy"][0]["choice"] == "Graph"
+    assert store.docs[f"planVersions/{pid}_v2"]["madeBy"][0]["choice"] == "List"
+    assert store.docs[f"plans/{pid}"]["chosen"] == 4
