@@ -287,7 +287,9 @@ class Runs:
         log = []
         if todo is None:
             todo = self.store.where("commands", "status", "new") + self.store.where("commands", "status", "waiting")
-        for c in todo:
+        # oldest first: Firestore returns them by document id, so two messages to one session could flip (the owner's
+        # choice, 2026-11-02: "do 1": sort by the time sent)
+        for c in sorted(todo, key=lambda c: c.get("createdAt") or ""):
             if c.get("machine") != self.machine:
                 continue
             if c.get("status") == "new":

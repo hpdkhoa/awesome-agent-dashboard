@@ -209,6 +209,19 @@ def test_open_or_closed_comes_from_the_processes(tmp_path):
     assert log_wait_reason(logs, "cut", procs=lambda: [("cut", "K:/w")]) == "turn"
 
 
+def test_two_messages_to_one_session_go_oldest_first(tmp_path, monkeypatch):
+    store, runs, work = setup(tmp_path, monkeypatch)
+    OPEN.clear()
+    # the newer one comes back first, as a random document id can make Firestore do
+    cmd(store, "zz2", action="message", sessionId="s", cwd=str(work), prompt="second", createdAt="2026-11-02T01:00:01Z")
+    cmd(store, "aa1", action="message", sessionId="s", cwd=str(work), prompt="first", createdAt="2026-11-02T01:00:00Z")
+    runs.step()
+    assert store.get("commands/aa1")["status"] == "running"
+    assert store.get("commands/zz2")["status"] == "waiting" and store.get("commands/zz2")["waitReason"] == "turn"
+    assert wait_done(runs, "aa1", store)["status"] == "done"
+    assert "did: second" in wait_done(runs, "zz2", store)["result"]
+
+
 def test_message_to_a_session_open_in_the_app_waits(tmp_path, monkeypatch):
     store, runs, work = setup(tmp_path, monkeypatch)
     OPEN[:] = [("app", str(work))]
