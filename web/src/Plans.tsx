@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { usePlanVersions, type InboxItem, type Plan, type Session } from "./data";
+import { usePlanVersions, type InboxItem, type Plan, type Run, type Session } from "./data";
+import { PartsView } from "./PlanParts";
 import { isWaiting } from "./Inbox";
 import { Md } from "./Markdown";
 import { PlanGraph } from "./PlanGraph";
@@ -36,11 +37,11 @@ export function PlanList({ plans, items, picked, onPick }: { plans: Plan[]; item
   );
 }
 
-export function PlanView({ plan, items, session, onOpenItem }: {
-  plan: Plan; items: InboxItem[]; session?: Session; onOpenItem: (id: string) => void;
+export function PlanView({ plan, items, session, runs = [], onOpenItem }: {
+  plan: Plan; items: InboxItem[]; session?: Session; runs?: Run[]; onOpenItem: (id: string) => void;
 }) {
   const versions = usePlanVersions(plan.id);
-  const [view, setView] = useState<"graph" | "list">("graph");
+  const [view, setView] = useState<"parts" | "graph" | "list">(plan.kind === "parts" ? "parts" : "graph");
   const asked = items.filter((i) => i.planId === plan.id).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   const rounds = Array.from({ length: plan.current + 1 }, (_, n) => n);
   return (
@@ -58,13 +59,14 @@ export function PlanView({ plan, items, session, onOpenItem }: {
         )}
       </p>
       <div className="chips">
-        {(["graph", "list"] as const).map((x) => (
+        {(plan.kind === "parts" ? (["parts", "graph", "list"] as const) : (["graph", "list"] as const)).map((x) => (
           <button key={x} className={view === x ? "chip on" : "chip"} onClick={() => setView(x)}>
-            {x === "graph" ? "Graph" : "List"}
+            {x === "parts" ? "Plan" : x === "graph" ? "Graph" : "List"}
           </button>
         ))}
       </div>
       {versions === null && <p className="muted">Loading</p>}
+      {versions && view === "parts" && <PartsView plan={plan} versions={versions} items={items} runs={runs} onOpenItem={onOpenItem} />}
       {versions && view === "graph" && <PlanGraph plan={plan} versions={versions} asked={asked} onOpenItem={onOpenItem} />}
       {view === "list" && rounds.map((n) => {
         const v = versions?.find((x) => x.n === n);

@@ -64,8 +64,8 @@ def test_questions_suggestions_results_and_plan_versions_push():
     got = []
     ib = Inbox(store, "PC", [("labs", "K:/labs")], "s1", "K:/labs/x", type("P", (), {"notify": lambda self, *a: got.append(a)})())
     pid = ib.plan_start("Plans tab", "# v1", "first draft")
-    q = ib.post("question", "List or graph?", "\nPick one.")
-    h = ib.post("question", "Hook question", "Which?", extra={"via": "hook"})
+    q = ib.post("question", "List or graph?", "\nPick one.", [{"label": "List", "example": {"type": "text", "draft": "x"}}])
+    h = ib.post("question", "Hook question", "Which?", [{"label": "A", "example": {"type": "text", "draft": "x"}}], extra={"via": "hook"})
     ib.post("suggestion", "Idea", "Try this")
     ib.post("result", "Done", "All tests pass")
     ib.post("approval", "Allow Bash?", "{}")

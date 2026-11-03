@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { signOut } from "firebase/auth";
 import { auth } from "./firebase";
 import { RECENT_DAYS, useInbox, useMachines, usePlans, useRuns, useSessions, useUsage, useWorkTypes, type Run, type Session, type Tokens } from "./data";
-import { MessageBox, ModeSwitch, RunList, StartForm } from "./Runs";
+import { MessageBox, ModeSwitch, PlanFromSession, RunList, StartForm } from "./Runs";
 import { PlanList, PlanView } from "./Plans";
 import { usePush, type PushState } from "./notify";
 import { FileViewer } from "./FileView";
@@ -203,7 +203,8 @@ export function Dashboard() {
           </>
         ) : tab === "plans" ? (
           plan ? (
-            <PlanView key={plan.id} plan={plan} items={inbox} session={sessions.find((s) => s.id === plan.sessionId)} onOpenItem={openItem} />
+            <PlanView key={plan.id} plan={plan} items={inbox} session={sessions.find((s) => s.id === plan.sessionId)} runs={runs ?? []}
+              onOpenItem={openItem} />
           ) : (
             <p className="muted">No plans yet.</p>
           )
@@ -298,6 +299,7 @@ function SessionView({ s, runs }: { s: Session; runs: Run[] }) {
         {s.subagents} subagents · {Object.keys(s.models).join(", ")}
       </p>
       <MessageBox key={s.id} s={s} runs={runs} />
+      <PlanFromSession s={s} runs={runs} />
       <Section id="session.lastPrompt" title="Last prompt">
         <Md text={s.lastPrompt} cwd={s.cwd} />
       </Section>

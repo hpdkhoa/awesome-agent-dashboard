@@ -46,7 +46,7 @@ export type InboxItem = {
   workType: string;
   title: string;
   text: string;
-  options: { label: string; detail: string }[];
+  options: { label: string; detail: string; example?: Example }[];
   recommended: number | null;
   files: string[];
   status: "open" | "answered" | "delivering" | "delivered" | "closed";
@@ -65,7 +65,16 @@ export type InboxItem = {
   round?: number; // asked on this version of the plan (0: before v1)
   reopened?: boolean; // the owner changed an earlier answer: the session branches the plan
   history?: { choice: string; text: string; at: string }[]; // earlier answers, oldest first
+  stepId?: string; // asked while this step of the plan was running
+  switch?: { to: PlanKind; commandId: string }; // a Q&A message asks to change the plan (bridge inbox.py ask_switch)
 };
+
+// Every option of a plan question carries one (the owner's words, 2026-11-03: "every choose will have an example").
+export type Bench = { name: string; before: string; after: string; measured: boolean; source?: string };
+export type Example =
+  | { type: "image"; before: string; after: string; note?: string }
+  | { type: "code"; diff: string; bench: Bench[]; note?: string }
+  | { type: "text"; draft: string; note?: string };
 
 // A plan with rounds of questions (the owner's choice, 2026-11-01, "do 2"): versions in planVersions, questions in the
 // inbox with planId and round.
@@ -73,11 +82,33 @@ export type Plan = {
   id: string; title: string; sessionId: string; machine: string; cwd: string; workType: string;
   status: "open" | "done"; current: number; createdAt: string; updatedAt: string; closeNote?: string;
   chosen?: number; // the version on the chosen line (default: the newest)
+  kind?: "parts"; // a plan with six parts (plan from a session, 2026-11-03)
+  source?: { sessionId: string; commandId: string; pagesDir: string; pages: { file: string; first: number; last: number }[] };
+  activeStep?: string | null;
+};
+// The six parts, in the owner's order (2026-11-03): goal, summary, rules, lessons and how each was applied, leftover, steps.
+export type Parts = {
+  goal: string; summary: string;
+  rules: { rule: string; source: string }[];
+  lessons: { lesson: string; taughtBy: string; appliedIn: string }[];
+  leftover: string[];
+  steps: { id: string; title: string; does: string; check: string }[];
+};
+// The message kinds on a plan: four change it (a new plan version), Q&A never does.
+export type PlanKind = "qa" | "goal" | "step" | "rule" | "lesson";
+export const PLAN_KINDS: [PlanKind, string][] = [
+  ["qa", "Q&A"], ["goal", "Shift goal"], ["step", "Add step"], ["rule", "Change rule"], ["lesson", "Audit lesson"],
+];
+// A step version: each report on a step, its state and the session's reply (no plan version).
+export type PlanStep = {
+  id: string; planId: string; stepId: string; state: "next" | "now" | "done" | "failed"; updatedAt: string;
+  versions: { n: number; state: string; reply: string; at: string; planVersion: number }[];
 };
 // madeBy: the answers that made this version, as they were then; parent: the version it grew from (a branch when older).
 export type Decision = { id: string; title: string; choice: string; text: string };
 export type PlanVersion = {
   id: string; planId: string; n: number; text: string; note: string; createdAt: string; parent?: number; madeBy?: Decision[];
+  parts?: Parts; change?: { kind: PlanKind; message: string };
 };
 
 export type Machine = {
@@ -96,7 +127,14 @@ export type Run = {
   target?: string;
   cwd?: string;
   status: "new" | "waiting" | "running" | "stopping" | "done" | "stopped" | "failed" | "lost" | "cancelled";
-  action: "start" | "stop" | "message" | "check";
+  action: "start" | "stop" | "message" | "check" | "plan";
+  kind?: PlanKind; // a message on a plan
+  planId?: string;
+  sourceSessionId?: string; // plan from a session: the session it reads
+  stage?: string; // plan from a session: where the reading is
+  ownerText?: string;
+  stepId?: string; // a Run step message
+  quotes?: { checked: number; marked: number }; // plan from a session: quotes in the notes not found on their page
   waitReason?: "turn" | "app";
   force?: boolean;
   permissionMode?: RunMode; // the setting the bridge read when this run went
@@ -214,6 +252,43 @@ export function useRunMode(): RunMode | null {
 }
 export const setRunMode = (mode: RunMode) =>
   setDoc(doc(db, "meta", "runs"), { permissionMode: mode, changedAt: new Date().toISOString() }, { merge: true });
+
+export function usePlanSteps(planId: string | undefined): PlanStep[] | null {
+  const [rows, setRows] = useState<PlanStep[] | null>(null);
+  useEffect(() => {
+    if (!planId) return;
+    return onSnapshot(query(collection(db, "planSteps"), where("planId", "==", planId)), (s) =>
+      setRows(s.docs.map((d) => d.data() as PlanStep)));
+  }, [planId]);
+  return rows;
+}
+
+// Plan from a session: the bridge reads its real record and a new session writes the plan (bridge planfrom.py).
+export const planFromSession = (s: Session) => {
+  const id = newId();
+  return setDoc(doc(db, "commands", id), {
+    id, action: "plan", machine: s.machine, sourceSessionId: s.id, cwd: s.cwd, prompt: `Plan from session: ${s.title}`,
+    status: "new", createdAt: new Date().toISOString(),
+  });
+};
+// A message on a plan, with its kind; the owner's text is the prompt, the kind goes as a system prompt.
+export const sendPlanMessage = (plan: Plan, kind: PlanKind, text: string) => {
+  const id = newId();
+  return setDoc(doc(db, "commands", id), {
+    id, action: "message", machine: plan.machine, sessionId: plan.sessionId, cwd: plan.cwd, prompt: text, ownerText: text,
+    kind, planId: plan.id, status: "new", createdAt: new Date().toISOString(),
+  });
+};
+
+// Run step (the owner's words, 2026-11-03: "Add Ren step button"): a plain message to the plan's session.
+export const runStep = (plan: Plan, step: Parts["steps"][number]) => {
+  const id = newId();
+  const text = `Work on step ${step.id}: ${step.title}. Report it with step_update.`;
+  return setDoc(doc(db, "commands", id), {
+    id, action: "message", machine: plan.machine, sessionId: plan.sessionId, cwd: plan.cwd, prompt: text, ownerText: text,
+    planId: plan.id, stepId: step.id, status: "new", createdAt: new Date().toISOString(),
+  });
+};
 
 export const stopRun = (machine: string, target: string) => {
   const id = newId();

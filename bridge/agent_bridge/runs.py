@@ -1,7 +1,7 @@
 """Starts, messages and stops Claude Code runs the owner asks for on the dashboard (P3 and the message box).
 
 The page writes commands/<id> with action "start" (a registered folder and a prompt), "message" (a message to an
-existing session) or "stop" (a run to end). The bridge on the named machine runs the owner's own `claude` CLI:
+existing session), "plan" (a plan from a session's real record, planfrom.py) or "stop" (a run to end). The bridge on the named machine runs the owner's own `claude` CLI:
 
     start:    claude -p <prompt> --output-format json --session-id <new id> --permission-prompt-tool <inbox approve>
     message:  claude -p <message> --output-format json --resume <session> --permission-prompt-tool <inbox approve>
@@ -44,14 +44,18 @@ import time
 from datetime import datetime, timezone
 import signal
 import subprocess
+import threading
 import uuid
 from pathlib import Path
 
 from .aggregate import work_type_of
-from .inbox import now_iso
+from .digest import find_log, write_pages
+from .inbox import KINDS, now_iso
+from .planfrom import NO_EDITS, PLAN_PROMPT, kind_args, mark_quotes, note_command
 from .redact import redact
 
 APPROVAL_TOOL = "mcp__agent-inbox__inbox_approve"
+NOTE_SECONDS = 20 * 60  # one page's notes
 NO_CLI = "No signed-in claude CLI on this machine. Install Claude Code and sign in, or set CLAUDE_BIN."
 SESSION_ARG = re.compile(r"^--(?:resume|session-id)(?:=(.+))?$")
 SCAN_SECONDS = 3  # one process scan serves every waiting message and answer of one bridge round
@@ -220,9 +224,10 @@ def start_command(claude: str, prompt: str, session_id: str, mode: str = "manual
             "--permission-prompt-tool", APPROVAL_TOOL, *mode_args(mode)]
 
 
-def message_command(claude: str, message: str, session_id: str, mode: str = "manual") -> list[str]:
+def message_command(claude: str, message: str, session_id: str, mode: str = "manual", kind: str = "") -> list[str]:
+    """kind: a plan message's kind (qa, goal, step, rule, lesson); it goes as an appended system prompt."""
     return [claude, "-p", message, "--output-format", "json", "--resume", session_id,
-            "--permission-prompt-tool", APPROVAL_TOOL, *mode_args(mode)]
+            "--permission-prompt-tool", APPROVAL_TOOL, *mode_args(mode), *kind_args(kind)]
 
 
 def parse_result(out: str | None) -> dict:
@@ -264,6 +269,7 @@ class Runs:
         self.procs: dict[str, subprocess.Popen] = {}
         # "new" commands already acted on: a listener snapshot can lag behind our own write, never act twice
         self.acted: set[str] = set()
+        self.reading: dict[str, dict] = {}  # plan commands still reading pages: {"proc": the page run, "stop": bool}
 
     def forget_lost(self) -> None:
         """On start: runs marked running by an earlier bridge on this machine can no longer be followed."""
@@ -298,7 +304,8 @@ class Runs:
                 self.acted.add(c["id"])
             action = c.get("action")
             line = (self._start(c) if action == "start" else self._message(c) if action == "message"
-                    else self._stop(c) if action == "stop" else self._check(c) if action == "check" else self._unknown(c))
+                    else self._stop(c) if action == "stop" else self._check(c) if action == "check"
+                    else self._plan(c) if action == "plan" else self._unknown(c))
             if line:
                 log.append(line)
         for cid, p in list(self.procs.items()):
@@ -371,8 +378,8 @@ class Runs:
                 self._answer_back(c, {"waitReason": why})
                 return f"{c['id']}: session {sid} {'is in a turn' if why == 'turn' else 'is open in the app or a terminal'}, the message waits"
             return None
-        mode = self.mode()
-        p = self._spawn(c["id"], message_command(self.claude, text, sid, mode), cwd)
+        mode, kind = self.mode(), c.get("kind") if c.get("kind") in KINDS else ""
+        p = self._spawn(c["id"], message_command(self.claude, text, sid, mode, kind), cwd)
         self.store.update(path, {"status": "running", "workType": wt, "pid": p.pid, "startedAt": now_iso(),
                                  "permissionMode": mode})
         self._answer_back(c, {"waitReason": None})
@@ -384,8 +391,75 @@ class Runs:
         self.store.update(f"commands/{c['id']}", {"status": "done", "endedAt": now_iso(), "check": st})
         return f"{c['id']}: checked {c.get('sessionId', '')}"
 
+    def _plan(self, c: dict) -> str:
+        """A plan from a session: pages, notes per page, then a new session writes the plan (planfrom.py)."""
+        path, cid = f"commands/{c['id']}", c["id"]
+        src, cwd = c.get("sourceSessionId", ""), c.get("cwd", "")
+        log = find_log(self.logs, src)
+        why = ("No session to read." if not src else "No claude CLI on this machine." if not self.claude
+               else "The session's folder is not under a registered folder on this machine."
+               if work_type_of(cwd, self.roots) == "other" or not os.path.isdir(cwd)
+               else "The session's log is not on this machine." if log is None else "")
+        if why:
+            self.store.update(path, {"status": "failed", "error": why})
+            return f"{cid}: refused, {why}"
+        folder = self.out_dir / "plans" / cid
+        self.store.update(path, {"status": "running", "stage": "Reading the log", "startedAt": now_iso(),
+                                 "workType": work_type_of(cwd, self.roots), "pagesDir": str(folder)})
+        self.reading[cid] = {"proc": None, "stop": False}
+        threading.Thread(target=self._read_and_plan, args=(c, log, folder), daemon=True).start()
+        return f"{cid}: reading session {src}"
+
+    def _read_and_plan(self, c: dict, log: Path, folder: Path) -> None:
+        path, cid, r = f"commands/{c['id']}", c["id"], self.reading[c["id"]]
+        env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+        try:
+            pages, quotes = write_pages(log, folder), {"checked": 0, "marked": 0}
+            self.store.update(path, {"pages": pages, "stage": f"Read {len(pages)} pages"})
+            for i, pg in enumerate(pages, 1):
+                if r["stop"]:
+                    break
+                self.store.update(path, {"stage": f"Notes on page {i} of {len(pages)}"})
+                with open(folder / pg["file"], encoding="utf-8") as inp, \
+                        open(folder / f"notes-{i:02d}.out", "w", encoding="utf-8") as out:
+                    r["proc"] = self.popen(note_command(self.claude, i, len(pages)), cwd=str(folder), env=env,
+                                           stdin=inp, stdout=out, stderr=subprocess.DEVNULL)
+                    try:
+                        code = r["proc"].wait(NOTE_SECONDS)
+                    except subprocess.TimeoutExpired:
+                        _kill_tree(r["proc"])
+                        raise RuntimeError(f"The notes on page {i} took over {NOTE_SECONDS // 60} minutes.")
+                res = parse_result((folder / f"notes-{i:02d}.out").read_text(encoding="utf-8", errors="replace"))
+                if r["stop"]:
+                    break
+                if code != 0 or res.get("is_error") or not res.get("result"):
+                    raise RuntimeError(f"The notes on page {i} failed: " + str(res.get("result") or f"exit {code}")[:300])
+                notes, seen, off = mark_quotes(res["result"], (folder / pg["file"]).read_text(encoding="utf-8"), i)
+                (folder / f"notes-{i:02d}.md").write_text(notes, encoding="utf-8")
+                quotes = {"checked": quotes["checked"] + seen, "marked": quotes["marked"] + off}
+                self.store.update(path, {"quotes": quotes})
+            if r["stop"]:
+                self.store.update(path, {"status": "stopped", "endedAt": now_iso()})
+                return
+            sid = str(uuid.uuid4())
+            prompt = PLAN_PROMPT.format(source=c.get("sourceSessionId", ""), folder=folder, last=len(pages), command=cid)
+            cmd = start_command(self.claude, prompt, sid, self.mode()) + ["--add-dir", str(folder), "--disallowedTools", NO_EDITS]
+            p = self._spawn(cid, cmd, c.get("cwd", ""))
+            self.store.update(path, {"sessionId": sid, "pid": p.pid, "stage": "Writing the plan", "prompt": prompt})
+        except Exception as e:  # a failed page run or an unreadable log ends this plan, never the bridge
+            self.store.update(path, {"status": "failed", "endedAt": now_iso(), "error": redact(str(e), 800)})
+        finally:
+            self.reading.pop(cid, None)
+
     def _stop(self, c: dict) -> str:
         target = c.get("target", "")
+        if target in self.reading:  # a plan still reading pages: stop after killing the page run
+            r = self.reading[target]
+            r["stop"] = True
+            if r["proc"] is not None and r["proc"].poll() is None:
+                _kill_tree(r["proc"])
+            self.store.update(f"commands/{c['id']}", {"status": "done", "endedAt": now_iso()})
+            return f"{c['id']}: stopping {target}"
         p = self.procs.get(target)
         if p is None or p.poll() is not None:
             self.store.update(f"commands/{c['id']}", {"status": "failed", "error": "That run is not running on this machine."})

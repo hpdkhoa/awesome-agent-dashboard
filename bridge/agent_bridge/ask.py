@@ -25,7 +25,11 @@ def post_questions(inbox: Inbox, questions: list[dict]) -> list[str]:
     """One inbox item per question; options keep their labels, so an answer maps back to the label Claude offered."""
     ids = []
     for q in questions:
-        opts = [{"label": o.get("label", ""), "detail": o.get("description", "")} for o in q.get("options") or []]
+        # an option's preview is its example; a plan question with an option that has none is refused, and the
+        # session's own question box opens instead
+        opts = [{"label": o.get("label", ""), "detail": o.get("description", ""),
+                 **({"example": {"type": "text", "draft": o["preview"]}} if o.get("preview") else {})}
+                for o in q.get("options") or []]
         text = q.get("question", "")
         if q.get("multiSelect"):
             text += "\n\n(More than one option may be picked.)"

@@ -92,6 +92,23 @@ the session branches the plan from the version that question was asked on; old b
 chooses a branch. A card per step shows only your answers, with the session's work (its note and the lines it changed)
 on hover.
 
+### Plan from a session
+
+"Plan from this session" on a session page reads that session's whole record on your PC: your prompts, the replies,
+every tool call and output, and each subagent's final report (the app's own records and hidden thinking are left out).
+The bridge writes it as pages of about 150k tokens, one run with no tools writes notes on each page, and then a new
+session reads the notes and opens a plan with six parts: goal, summary, rules, lessons and where each was applied,
+leftover, and steps. Entries are cited as #n and open the page that holds them. The bridge checks each quote in the notes
+against its page and marks any that differ; the run shows how many it checked and marked.
+
+- **Plan versions** change only with the plan's data. A step moving (next, now, done, failed) is a step version: each
+  step shows its last reply like a message, older ones folded.
+- **Run step** on a step sends "Work on step sN" to the plan's session as a normal message.
+- **Messages on a plan** have a kind: Q&A, Shift goal, Add step, Change rule, Audit lesson. Q&A changes nothing; when
+  its answer needs a change, the session asks you to switch first.
+- **Examples:** every option of a plan question carries one: before and after pictures, a code diff with benchmarks
+  marked measured or estimated, or a draft. A plan question without one is refused.
+
 ## Notifications on your phone
 
 The bridge sends a Web Push when a run needs your approval, when a run ends (done or failed), for each question

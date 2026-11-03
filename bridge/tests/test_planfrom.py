@@ -1,0 +1,175 @@
+import json
+
+import pytest
+
+from agent_bridge.digest import records, write_pages
+from agent_bridge.inbox import Inbox, check_example
+from agent_bridge.planfrom import kind_args, mark_quotes
+from agent_bridge.runs import message_command
+from test_inbox import FakeStore
+from test_runs import cmd, setup, wait_done
+
+PARTS = {"goal": "ship it (#1)", "summary": "- built x (#2)", "rules": [{"rule": "no bypass", "source": "#1"}],
+         "lessons": [{"lesson": "sort the queue", "taught_by": "#3", "applied_in": "runs.py"}],
+         "leftover": ["read count"], "steps": [{"id": "s1", "title": "Count reads", "does": "count", "check": "a number"}]}
+EX = {"type": "text", "draft": "the draft"}
+
+
+def entry(kind, content, **f):
+    return json.dumps({"type": kind, "timestamp": "2026-11-03T01:00:00Z", "message": {"content": content}, **f})
+
+
+def write_log(folder):
+    log = folder / "proj" / "s1.jsonl"
+    log.parent.mkdir(parents=True)
+    log.write_text("\n".join([
+        entry("user", "build the plan"),
+        entry("user", "<system-reminder>x</system-reminder>"),
+        entry("user", "summary of before", isCompactSummary=True),
+        entry("assistant", [{"type": "thinking", "thinking": "hidden"}, {"type": "text", "text": "On it."},
+                            {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "ls"}}]),
+        entry("user", [{"type": "tool_result", "tool_use_id": "t1", "content": [{"type": "text", "text": "a.py"}, {"type": "image"}]}]),
+        json.dumps({"type": "file-history-snapshot", "snapshot": "x" * 100}),
+    ]), encoding="utf-8")
+    sub = folder / "proj" / "s1" / "subagents"
+    sub.mkdir(parents=True)
+    (sub / "agent-a1.jsonl").write_text(entry("assistant", [{"type": "text", "text": "first"}]) + "\n"
+                                        + entry("assistant", [{"type": "text", "text": "final report"}]), encoding="utf-8")
+    (sub / "agent-a1.meta.json").write_text(json.dumps({"description": "check x"}), encoding="utf-8")
+    return log
+
+
+def test_the_real_record_keeps_words_calls_outputs_and_subagent_reports(tmp_path):
+    rec = records(write_log(tmp_path))
+    labels = [r[1] for r in rec]
+    assert labels == ["OWNER", "CONTEXT SUMMARY (written by Claude, not the owner)", "CLAUDE", "CALL Bash",
+                      "OUTPUT Bash", "SUBAGENT agent-a1"]
+    assert rec[0][2] == "build the plan" and rec[4][2] == "a.py\n[image]"
+    assert "final report" in rec[5][2] and "first" not in rec[5][2] and "check x" in rec[5][2]
+    assert not any("hidden" in r[2] or "system-reminder" in r[2] for r in rec)
+
+
+def test_pages_hold_every_entry_and_split_a_huge_one(tmp_path):
+    log = write_log(tmp_path)
+    pages = write_pages(log, tmp_path / "out", page_bytes=200)
+    text = "".join((tmp_path / "out" / p["file"]).read_text(encoding="utf-8") for p in pages)
+    for n in range(1, 7):
+        assert f"#{n} " in text
+    assert pages[0]["first"] == 1 and pages[-1]["last"] == 6 and all(p["bytes"] <= 200 for p in pages)
+    big = tmp_path / "big"
+    big.mkdir()
+    (big / "p").mkdir()
+    (big / "p" / "s.jsonl").write_text(entry("user", "y" * 1000), encoding="utf-8")
+    pages = write_pages(big / "p" / "s.jsonl", tmp_path / "out2", page_bytes=300)
+    assert len(pages) >= 4 and "continues on the next page" in (tmp_path / "out2" / "page-01.txt").read_text(encoding="utf-8")
+    assert sum((tmp_path / "out2" / p["file"]).read_text(encoding="utf-8").count("y") for p in pages) == 1000
+
+
+def test_every_option_of_a_plan_question_needs_an_example():
+    assert check_example(None) == "no example"
+    assert check_example({"type": "image", "before": "a.png"}) is not None
+    assert check_example({"type": "image", "before": "a.png", "after": "b.png"}) is None
+    assert check_example({"type": "code", "diff": "-a\n+b"}) is not None  # no benchmark
+    assert check_example({"type": "code", "diff": "-a\n+b", "bench": [{"name": "t", "before": "1", "after": "2"}]}) is not None
+    assert check_example({"type": "code", "diff": "-a\n+b", "bench": [{"name": "t", "measured": False}]}) is None
+    assert check_example({"type": "text", "draft": " "}) is not None
+    store = FakeStore()
+    ib = Inbox(store, "PC", [], "s1", "/x")
+    ib.post("question", "free", "no plan, no example needed", [{"label": "A"}])
+    ib.plan_start("p", parts=PARTS)
+    with pytest.raises(ValueError, match="needs an example"):
+        ib.post("question", "q", "x", [{"label": "A", "example": EX}, {"label": "B"}])
+    qid = ib.post("question", "q", "x", [{"label": "A", "example": EX}])
+    assert store.docs[f"inbox/{qid}"]["options"][0]["example"] == EX
+
+
+def test_parts_plan_versions_change_on_data_never_on_a_step():
+    store = FakeStore()
+    store.put_many({"commands/c1": {"id": "c1", "action": "plan", "sourceSessionId": "old", "pagesDir": "D:/p",
+                                    "pages": [{"file": "page-01.txt", "first": 1, "last": 9}]}})
+    ib = Inbox(store, "PC", [], "s1", "/x")
+    pid = ib.plan_start("From old", parts=PARTS, source="c1")
+    plan = store.docs[f"plans/{pid}"]
+    assert plan["kind"] == "parts" and plan["source"]["sessionId"] == "old" and plan["current"] == 1
+    assert store.docs["commands/c1"]["planId"] == pid
+    v1 = store.docs[f"planVersions/{pid}_v1"]
+    assert v1["parts"]["lessons"][0]["appliedIn"] == "runs.py" and "## 1. Goal" in v1["text"]
+    with pytest.raises(ValueError, match="six parts"):
+        ib.plan_version(pid, "", "x", parts={"goal": "g"})
+    assert ib.step_update(pid, "s1", "now", "counting") == 1
+    assert ib.step_update(pid, "s1", "done", "40 reads a view") == 2
+    assert store.docs[f"plans/{pid}"]["current"] == 1  # a step moving makes no plan version
+    st = store.docs[f"planSteps/{pid}_s1"]
+    assert st["state"] == "done" and [v["reply"] for v in st["versions"]] == ["counting", "40 reads a view"]
+    with pytest.raises(ValueError, match="no step s9"):
+        ib.step_update(pid, "s9", "now", "x")
+
+
+def test_a_question_asked_during_a_step_joins_it():
+    store = FakeStore()
+    ib = Inbox(store, "PC", [], "s1", "/x")
+    pid = ib.plan_start("p", parts=PARTS)
+    ib.step_update(pid, "s1", "now", "working")
+    qid = ib.post("question", "q", "x", [{"label": "A", "example": EX}])
+    assert store.docs[f"inbox/{qid}"]["stepId"] == "s1"
+    ib.step_update(pid, "s1", "done", "ok")
+    assert "stepId" not in store.docs[f"inbox/{ib.post('question', 'q', 'x', [{'label': 'A', 'example': EX}])}"]
+
+
+def test_a_qa_message_never_changes_the_plan_until_the_owner_confirms_a_switch():
+    store = FakeStore()
+    ib = Inbox(store, "PC", [], "s1", "/x")
+    pid = ib.plan_start("p", parts=PARTS)
+    store.put_many({"commands/m1": {"id": "m1", "action": "message", "kind": "qa", "sessionId": "s1", "status": "running",
+                                    "prompt": "why s1?", "startedAt": "t"}})
+    with pytest.raises(ValueError, match="Q&A"):
+        ib.plan_version(pid, "", "x", parts=PARTS)
+    q = ib.ask_switch("step", "add s2: a test", "the answer needs a test step")
+    item = store.docs[f"inbox/{q}"]
+    assert item["planId"] == pid and item["options"][0]["example"]["draft"] == "add s2: a test"
+    store.update(f"inbox/{q}", {"status": "answered", "answer": {"choice": "Keep Q&A", "text": "", "at": "t"}})
+    assert ib.confirm_switch(q) is False and "switchedTo" not in store.docs["commands/m1"]
+    q = ib.ask_switch("step", "add s2", "why")
+    store.update(f"inbox/{q}", {"status": "answered", "answer": {"choice": "Switch to Add step", "text": "", "at": "t"}})
+    assert ib.confirm_switch(q) is True
+    assert ib.plan_version(pid, "", "added s2", parts=PARTS) == 2
+    assert store.docs[f"planVersions/{pid}_v2"]["change"] == {"kind": "step", "message": "why s1?"}
+
+
+def test_a_plan_message_kind_goes_as_a_system_prompt_and_qa_cannot_edit():
+    c = message_command("claude", "add a test", "sid", "manual", "step")
+    assert c[2] == "add a test" and "part 6" in c[c.index("--append-system-prompt") + 1]
+    qa = message_command("claude", "why?", "sid", "manual", "qa")
+    assert qa[qa.index("--disallowedTools") + 1] == "Edit,Write,NotebookEdit"
+    assert kind_args("bogus") == [] and "--append-system-prompt" not in message_command("claude", "hi", "sid")
+
+
+def test_plan_from_a_session_reads_pages_writes_notes_then_starts_the_plan_session(tmp_path, monkeypatch):
+    store, runs, work = setup(tmp_path, monkeypatch)
+    write_log(tmp_path / "logs2")
+    runs.logs = tmp_path / "logs2"
+    cmd(store, "p1", action="plan", sourceSessionId="s1", cwd=str(work))
+    runs.step()
+    c = wait_done(runs, "p1", store, seconds=40)
+    assert c["status"] == "done", c
+    folder = tmp_path / "out" / "plans" / "p1"
+    assert (folder / "page-01.txt").exists() and "did: This is page 1 of 1" in (folder / "notes-01.md").read_text(encoding="utf-8")
+    assert c["sessionId"] not in ("", "s1") and c["pages"][0]["last"] == 6
+    assert c["quotes"]["marked"] == 0
+    assert 'source="p1"' in c["prompt"] and "six parts" in c["prompt"]
+
+
+def test_plan_from_a_session_refuses_without_its_log(tmp_path, monkeypatch):
+    store, runs, work = setup(tmp_path, monkeypatch)
+    cmd(store, "p1", action="plan", sourceSessionId="nope", cwd=str(work))
+    runs.step()
+    assert store.get("commands/p1")["status"] == "failed" and "log" in store.get("commands/p1")["error"]
+
+
+def test_a_quote_in_the_notes_that_differs_from_the_page_is_marked():
+    page = "#4 12:00 OWNER\nleast verbose explains to me what\nthe log file contains, then the size cap"
+    notes = ('"least verbose explains to me what the log file contains" ok; “explains to me … the size cap” ok; '
+             '"least verbose tell me what the log file contains" wrong')
+    out, seen, off = mark_quotes(notes, page, 9)
+    assert (seen, off) == (3, 1)
+    assert out.count("[quote differs from page 09") == 1 and out.index("[quote differs") > out.index("tell me")

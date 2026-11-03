@@ -1,5 +1,8 @@
 import { useState } from "react";
-import { cancelMessage, checkSession, forceMessage, sendMessage, setRunMode, startRun, stopRun, useRunMode, type Machine, type Run, type Session } from "./data";
+import {
+  cancelMessage, checkSession, forceMessage, planFromSession, PLAN_KINDS, sendMessage, setRunMode, startRun, stopRun, useRunMode,
+  type Machine, type Run, type Session,
+} from "./data";
 import { usd } from "./Dashboard";
 import { Md } from "./Markdown";
 import { Section } from "./Section";
@@ -175,8 +178,32 @@ export function ModeSwitch() {
   );
 }
 
+// Plan from a session (the owner's words, 2026-11-03: "get all the data from the session, read all real execution to
+// start a plan"): the bridge reads the whole log in pages, notes each page, and a new session writes the plan.
+export function PlanFromSession({ s, runs }: { s: Session; runs: Run[] }) {
+  const [error, setError] = useState("");
+  const mine = runs.filter((r) => r.action === "plan" && r.sourceSessionId === s.id);
+  const going = mine.some((r) => r.status === "new" || r.status === "running");
+  return (
+    <Section id="session.plan" title="Plan from this session" extra={mine.length ? `${mine.length} made` : ""} open={false}>
+      <p className="muted small">
+        Reads this session's whole record on your PC: your prompts, the replies, every tool call and output, and each
+        subagent's final report. It writes notes per page, then a new session writes the plan: goal, summary, rules,
+        lessons and where they were applied, leftover, and steps. Nothing is changed.
+      </p>
+      {error && <p className="bad small">{error}</p>}
+      <button className="primary" disabled={going} onClick={() => planFromSession(s).catch((e) => setError(String(e?.code ?? e)))}>
+        {going ? "Reading" : "Plan from this session"}
+      </button>
+      {mine.length > 0 && <RunList runs={mine} title="Plans from this session" />}
+    </Section>
+  );
+}
+
+const KIND_NAME = Object.fromEntries(PLAN_KINDS) as Record<string, string>;
+
 export function RunList({ runs, title = "Runs from the dashboard" }: { runs: Run[]; title?: string }) {
-  const shown = runs.filter((r) => r.action === "start" || r.action === "message");
+  const shown = runs.filter((r) => r.action === "start" || r.action === "message" || r.action === "plan");
   return (
     <div>
       <h2 className="label">{title}</h2>
@@ -194,7 +221,10 @@ export function RunList({ runs, title = "Runs from the dashboard" }: { runs: Run
           }
           extra={
             <>
-              {r.action === "message" ? "message" : "new session"} · {r.workType ?? ""} · {r.machine} ·{" "}
+              {r.action === "message" ? (r.kind ? `plan message: ${KIND_NAME[r.kind]}` : "message")
+                : r.action === "plan" ? `plan from session${r.status === "running" && r.stage ? ": " + r.stage : ""}` : "new session"}
+              {r.quotes ? ` · quotes ${r.quotes.checked} checked, ${r.quotes.marked} marked` : ""}{" "}
+              · {r.workType ?? ""} · {r.machine} ·{" "}
               {r.permissionMode === "auto" && <>auto · </>}
               {ago(r.startedAt ?? r.createdAt)}
               {r.costUsd != null && <> · {usd(r.costUsd)}</>}

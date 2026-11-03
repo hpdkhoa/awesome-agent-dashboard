@@ -14,6 +14,18 @@ Plans (the owner's choice, 2026-11-01, "do 2"): a session opens a plan (plans/<i
 it was asked on (round 0: before v1), so the page shows v1, its questions and answers, v2, and so on.
 Each version keeps its parent and the answers that made it (madeBy). When the owner reopens an answer on the page, the
 session posts a version whose parent is the version that question was asked on: a branch. Old branches stay.
+
+Plan from a session (the owner's words, 2026-11-03, cc/dashboard/SESSION_PLAN.md): a plan made from a session's real
+record has six parts, in the owner's order: goal, summary, rules, lessons (each with how it was applied), leftover and
+steps. Two kinds of version (the owner's words: "The version I mention in this request is the plan version, the
+previous 2026-11-01 version will be the step version, which in each step I can see the last reply like a normal
+message"):
+- plan version (planVersions): only when the plan's data changes, never when a step moves;
+- step version (planSteps): each report on a step (step_update), its state and its reply; no plan version.
+A message on the plan has a kind: qa, goal, step, rule or lesson. A Q&A run never changes the plan: plan_version is
+refused in it until the owner confirms a switch to another kind (plan_switch).
+Every option of a question in a plan carries an example (the owner's words: "every choose will have an example"): a
+picture pair, a code diff with a benchmark, or a draft. A plan question without one is refused.
 """
 
 
@@ -31,6 +43,79 @@ LIVE_SECONDS = 180  # a session whose heartbeat is older than this is treated as
 POLL_SECONDS = 5
 MAX_WAIT_MINUTES = 25  # under Claude Code's 30-minute idle limit for a local MCP server
 PUSH_TITLE = {"question": "Question", "suggestion": "Suggestion", "result": "Result to review"}
+PARTS = ("goal", "summary", "rules", "lessons", "leftover", "steps")
+KINDS = {"qa": "Q&A", "goal": "Shift goal", "step": "Add step", "rule": "Change rule", "lesson": "Audit lesson"}
+STEP_STATES = ("next", "now", "done", "failed")
+
+
+def check_example(e) -> str | None:
+    """Why an option's example is not enough, or None when it is. image: before and after files; code: a diff and at
+    least one benchmark row that says whether it was measured; text: the draft."""
+    if not isinstance(e, dict):
+        return "no example"
+    t = e.get("type")
+    if t == "image":
+        return None if e.get("before") and e.get("after") else "an image example needs before and after files"
+    if t == "code":
+        bench = e.get("bench") or []
+        if not e.get("diff"):
+            return "a code example needs the diff"
+        if not bench or any(not isinstance(r, dict) or "measured" not in r for r in bench):
+            return "a code example needs benchmark rows, each with measured true or false"
+        return None
+    if t == "text":
+        return None if (e.get("draft") or "").strip() else "a text example needs the draft"
+    return "an example's type is image, code or text"
+
+
+def clean_example(e: dict) -> dict:
+    out = {"type": e["type"]}
+    for k, n in (("before", 300), ("after", 300), ("diff", 12000), ("draft", 6000), ("note", 400)):
+        if e.get(k):
+            out[k] = redact(str(e[k]), n)
+    if e.get("bench"):
+        out["bench"] = [{"name": redact(str(r.get("name", "")), 120), "before": redact(str(r.get("before", "")), 60),
+                         "after": redact(str(r.get("after", "")), 60), "measured": bool(r.get("measured")),
+                         "source": redact(str(r.get("source", "")), 200)} for r in e["bench"][:12]]
+    return out
+
+
+def _lines(v) -> str:
+    if isinstance(v, str):
+        return v
+    out = []
+    for x in v or []:
+        if isinstance(x, dict):
+            out.append("- " + " · ".join(f"{k}: {x[k]}" for k in x if x[k] not in ("", None)))
+        else:
+            out.append(f"- {x}")
+    return "\n".join(out)
+
+
+def parts_markdown(parts: dict) -> str:
+    """The six parts as one markdown text, for the list and graph views and the push."""
+    names = {"goal": "1. Goal", "summary": "2. Summary", "rules": "3. Rules", "lessons": "4. Lessons",
+             "leftover": "5. Leftover", "steps": "6. Steps"}
+    return "\n\n".join(f"## {names[k]}\n\n{_lines(parts.get(k))}" for k in PARTS)
+
+
+def clean_parts(parts: dict) -> dict:
+    """The six parts, each kept; steps get ids. Raises ValueError when one is missing."""
+    missing = [k for k in PARTS if k not in (parts or {})]
+    if missing:
+        raise ValueError("a plan needs all six parts; missing: " + ", ".join(missing))
+    out = {k: redact(_lines(parts[k]), 12000) for k in ("goal", "summary")}
+    out["rules"] = [{"rule": redact(str(r.get("rule", "")), 400), "source": redact(str(r.get("source", "")), 200)}
+                    for r in parts["rules"] or [] if isinstance(r, dict)]
+    out["lessons"] = [{"lesson": redact(str(r.get("lesson", "")), 400),
+                       "taughtBy": redact(str(r.get("taught_by", r.get("taughtBy", ""))), 400),
+                       "appliedIn": redact(str(r.get("applied_in", r.get("appliedIn", ""))), 400)}
+                      for r in parts["lessons"] or [] if isinstance(r, dict)]
+    out["leftover"] = [redact(str(x), 400) for x in parts["leftover"] or []]
+    out["steps"] = [{"id": str(st.get("id") or f"s{i}")[:20], "title": redact(str(st.get("title", "")), 200),
+                     "does": redact(str(st.get("does", "")), 1000), "check": redact(str(st.get("check", "")), 600)}
+                    for i, st in enumerate(parts["steps"] or [], 1) if isinstance(st, dict)]
+    return out
 
 
 def now_iso() -> str:
@@ -54,19 +139,38 @@ class Inbox:
         plans = [p for p in self.store.where("plans", "sessionId", self.session_id) if p.get("status") == "open"]
         return max(plans, key=lambda p: p.get("createdAt", ""), default=None)
 
-    def plan_start(self, title: str, text: str = "", note: str = "") -> str:
+    def plan_start(self, title: str, text: str = "", note: str = "", parts: dict | None = None, source: str = "") -> str:
+        """parts: the six parts of v1. source: the id of the dashboard command that read a session for this plan."""
         plan_id = uuid.uuid4().hex[:20]
-        self.store.put_many({f"plans/{plan_id}": {
+        doc = {
             "id": plan_id, "title": redact(title, 200), "sessionId": self.session_id, "machine": self.machine,
             "cwd": self.cwd, "workType": work_type_of(self.cwd, self.roots), "status": "open", "current": 0,
             "createdAt": now_iso(), "updatedAt": now_iso(),
-        }})
-        if text.strip():
-            self.plan_version(plan_id, text, note)
+        }
+        if parts is not None:
+            parts = clean_parts(parts)
+            doc["kind"] = "parts"
+        if source:
+            c = self.store.get(f"commands/{source}") or {}
+            if c.get("action") == "plan":
+                doc.update(kind="parts", source={"sessionId": c.get("sourceSessionId", ""), "commandId": source,
+                                                 "pagesDir": c.get("pagesDir", ""), "pages": c.get("pages") or []})
+                self.store.update(f"commands/{source}", {"planId": plan_id})
+        self.store.put_many({f"plans/{plan_id}": doc})
+        if parts is not None or text.strip():
+            self.plan_version(plan_id, text, note, parts=parts)
         return plan_id
 
+    def running_command(self) -> dict | None:
+        """The dashboard run working in this session now, if any."""
+        if self.session_id == "unknown":
+            return None
+        rows = [c for c in self.store.where("commands", "sessionId", self.session_id)
+                if c.get("status") == "running" and c.get("action") in ("message", "start", "plan")]
+        return max(rows, key=lambda c: c.get("startedAt", ""), default=None)
+
     def plan_version(self, plan_id: str, text: str, note: str = "", parent: int | None = None,
-                     answers: list[str] | None = None) -> int:
+                     answers: list[str] | None = None, parts: dict | None = None, change: str = "") -> int:
         """Saves the next version of a plan and returns its number. Questions asked from now on are its round.
 
         parent: the version this one grows from (default: the current one; an older one makes a branch).
@@ -76,6 +180,15 @@ class Inbox:
         plan = self.store.get(f"plans/{plan_id}")
         if not plan:
             raise ValueError(f"no plan {plan_id}")
+        run = self.running_command()
+        if run and run.get("kind") == "qa" and not run.get("switchedTo"):
+            raise ValueError("This is a Q&A message: it never changes the plan. If the answer needs a change, ask the "
+                             "owner with plan_switch first.")
+        if run and run.get("kind") in KINDS and not change:
+            change = run.get("switchedTo") or run["kind"]
+        if parts is not None:
+            parts = clean_parts(parts)
+            text = text if text.strip() else parts_markdown(parts)
         current = int(plan.get("current", 0))
         parent = current if parent is None else parent
         if not 0 <= parent <= current:
@@ -87,14 +200,65 @@ class Inbox:
                     "text": (asked[k].get("answer") or {}).get("text", "")} for k in answers if k in asked]
         # a plan's numbers only grow, so a branch from an old version still gets the next number
         n = int(plan.get("last", current)) + 1
-        self.store.put_many({f"planVersions/{plan_id}_v{n}": {
+        version = {
             "id": f"{plan_id}_v{n}", "planId": plan_id, "n": n, "parent": parent, "madeBy": made_by,
             "text": redact(text, 30000), "note": redact(note, 400), "createdAt": now_iso(),
-        }})
+        }
+        if parts is not None:
+            version["parts"] = parts
+        if change in KINDS:
+            version["change"] = {"kind": change, "message": redact((run or {}).get("ownerText") or (run or {}).get("prompt", ""), 2000)}
+        self.store.put_many({f"planVersions/{plan_id}_v{n}": version})
         self.store.update(f"plans/{plan_id}", {"current": n, "last": n, "chosen": n, "updatedAt": now_iso()})
         if self.push is not None:
             self.push.notify(f"Plan v{n}: {plan.get('title', '')}", note or "New version.", f"/?plan={plan_id}", f"plan-{plan_id}")
         return n
+
+    def step_update(self, plan_id: str, step_id: str, state: str, reply: str) -> int:
+        """A step version: the step's state and the session's reply on it. Never a plan version (the owner's words:
+        "not moving step"). Questions asked while a step is "now" join that step. Returns the step version number."""
+        if state not in STEP_STATES:
+            raise ValueError("state is one of " + ", ".join(STEP_STATES))
+        plan = self.store.get(f"plans/{plan_id}")
+        if not plan:
+            raise ValueError(f"no plan {plan_id}")
+        v = self.store.get(f"planVersions/{plan_id}_v{plan.get('current', 0)}") or {}
+        steps = {st["id"]: st for st in (v.get("parts") or {}).get("steps") or []}
+        if step_id not in steps:
+            raise ValueError(f"plan v{plan.get('current', 0)} has no step {step_id}; its steps: " + ", ".join(steps))
+        path = f"planSteps/{plan_id}_{step_id}"
+        versions = list((self.store.get(path) or {}).get("versions") or [])
+        n = len(versions) + 1
+        versions.append({"n": n, "state": state, "reply": redact(reply, 8000), "at": now_iso(),
+                         "planVersion": int(plan.get("current", 0))})
+        self.store.put_many({path: {"id": f"{plan_id}_{step_id}", "planId": plan_id, "stepId": step_id, "state": state,
+                                    "versions": versions, "updatedAt": now_iso()}})
+        active = step_id if state == "now" else (None if plan.get("activeStep") == step_id else plan.get("activeStep"))
+        self.store.update(f"plans/{plan_id}", {"activeStep": active, "updatedAt": now_iso()})
+        if self.push is not None and state in ("done", "failed"):
+            self.push.notify(f"Step {state}: {steps[step_id]['title']}", (reply.splitlines() or [""])[0][:160],
+                             f"/?plan={plan_id}", f"plan-{plan_id}-{step_id}")
+        return n
+
+    def ask_switch(self, to: str, change: str, why: str) -> str:
+        """A Q&A run asks the owner to switch to a kind that changes the plan. Returns the question's id."""
+        if to not in KINDS or to == "qa":
+            raise ValueError("switch to one of: " + ", ".join(k for k in KINDS if k != "qa"))
+        run = self.running_command() or {}
+        opts = [{"label": f"Switch to {KINDS[to]}", "detail": "the session makes this change as a new plan version",
+                 "example": {"type": "text", "draft": change}},
+                {"label": "Keep Q&A", "detail": "nothing changes", "example": {"type": "text", "draft": "No change to the plan."}}]
+        return self.post("question", f"Switch to {KINDS[to]}?", why, opts, 0,
+                         extra={"switch": {"to": to, "commandId": run.get("id", "")}})
+
+    def confirm_switch(self, item_id: str) -> bool:
+        """After the owner answered a switch question: unlocks plan_version for the run when the owner chose the switch."""
+        item = self.store.get(f"inbox/{item_id}") or {}
+        sw = item.get("switch") or {}
+        ok = ((item.get("answer") or {}).get("choice") or "").startswith("Switch to")
+        if ok and sw.get("commandId"):
+            self.store.update(f"commands/{sw['commandId']}", {"switchedTo": sw.get("to")})
+        return ok
 
     def plan_close(self, plan_id: str, note: str = "") -> None:
         self.store.update(f"plans/{plan_id}", {"status": "done", "closeNote": redact(note, 400), "updatedAt": now_iso()})
@@ -107,7 +271,15 @@ class Inbox:
             plan = self.open_plan()
             if plan:
                 extra.update(planId=plan["id"], round=int(plan.get("current", 0)))
-        opts = [{"label": redact(o.get("label", ""), 120), "detail": redact(o.get("detail", ""), 400)} for o in options or []]
+                if plan.get("activeStep"):
+                    extra["stepId"] = plan["activeStep"]
+        if kind == "question" and extra.get("planId"):
+            bad = [f'"{o.get("label", "")}": {why}' for o in options or [] if (why := check_example(o.get("example")))]
+            if not options or bad:
+                raise ValueError("Every option of a plan question needs an example (the owner's rule). "
+                                 + ("; ".join(bad) if bad else "Give options, each with an example."))
+        opts = [{"label": redact(o.get("label", ""), 120), "detail": redact(o.get("detail", ""), 400),
+                 **({"example": clean_example(o["example"])} if o.get("example") else {})} for o in options or []]
         if recommended is not None and not 0 <= recommended < len(opts):
             recommended = None
         self.store.put_many({f"inbox/{item_id}": {
@@ -230,7 +402,10 @@ def server():
             "The owner's dashboard inbox. Post a decision the owner must make with inbox_ask (give options and mark "
             "the one you recommend), a result to review with inbox_result, and an idea with inbox_suggest. For planning "
             "with rounds of questions, open a plan with plan_start, post each new version with plan_version, and close "
-            "it with plan_close: every question you ask while it is open joins the round of its current version."
+            "it with plan_close: every question you ask while it is open joins the round of its current version. "
+            "While a plan is open, every option of every question carries an example (before and after pictures, a "
+            "code diff with a benchmark, or a draft). A plan with parts makes a new version only when its data "
+            "changes; report work on a step with step_update, which never makes a plan version."
         ),
     )
 
@@ -260,11 +435,21 @@ def server():
                         recommended: int | None = None, context: str = "", wait_minutes: float = MAX_WAIT_MINUTES) -> str:
         """Ask the owner a question on the dashboard and wait for the answer.
 
-        options: a list of {"label": short choice, "detail": one line}. recommended: the index of the option you
-        recommend. context: the facts the owner needs to decide. wait_minutes: up to 25; then call inbox_wait.
+        options: a list of {"label": short choice, "detail": one line, "example": {...}}. recommended: the index of
+        the option you recommend. context: the facts the owner needs to decide. wait_minutes: up to 25; then call
+        inbox_wait.
+
+        example (required on every option while a plan is open), one of:
+        {"type": "image", "before": file path, "after": file path, "note": what to look at} (same view, with markers);
+        {"type": "code", "diff": unified diff, "bench": [{"name", "before", "after", "measured": true|false,
+         "source": the run that measured it}]} (say measured false for an estimate);
+        {"type": "text", "draft": the draft text}.
         """
-        item_id = await asyncio.to_thread(inbox.post, "question", title or question[:80],
-                                          (context + "\n\n" + question).strip(), options, recommended)
+        try:
+            item_id = await asyncio.to_thread(inbox.post, "question", title or question[:80],
+                                              (context + "\n\n" + question).strip(), options, recommended)
+        except ValueError as e:
+            return f"Not asked: {e}"
         return await wait_for(item_id, wait_minutes, ctx)
 
     @mcp.tool()
@@ -297,26 +482,62 @@ def server():
         return approval_reply(None, input)
 
     @mcp.tool()
-    async def plan_start(title: str, text: str = "", note: str = "") -> str:
+    async def plan_start(title: str, text: str = "", note: str = "", parts: dict | None = None, source: str = "") -> str:
         """Open a plan on the dashboard. text: version 1 (markdown), if you have one. Questions you ask with inbox_ask
-        (or your question box) while the plan is open join it, in the round of its current version."""
-        plan_id = await asyncio.to_thread(inbox.plan_start, title, text, note)
+        (or your question box) while the plan is open join it, in the round of its current version.
+
+        parts: the six parts of a plan from a session, in this order: {"goal": markdown (quote the owner), "summary":
+        markdown (cite log entries as #n), "rules": [{"rule", "source"}], "lessons": [{"lesson", "taught_by",
+        "applied_in"}], "leftover": [text], "steps": [{"id", "title", "does", "check"}]}. source: the command id the
+        dashboard gave you when it asked for a plan from a session."""
+        try:
+            plan_id = await asyncio.to_thread(inbox.plan_start, title, text, note, parts, source)
+        except ValueError as e:
+            return f"Not opened: {e}"
         plan = await asyncio.to_thread(inbox.store.get, f"plans/{plan_id}")
         return f"Opened plan {plan_id} at version {plan.get('current', 0)}."
 
     @mcp.tool()
-    async def plan_version(text: str, note: str, plan_id: str = "", parent: int = -1) -> str:
-        """Post the next version of the plan (the whole text, markdown). note: one line on what changed and which
-        answers caused it. plan_id: this session's open plan when empty. parent: the version it grows from; leave it
-        out for the current one, or give an older one when the owner reopened an answer (a branch)."""
+    async def plan_version(note: str, text: str = "", plan_id: str = "", parent: int = -1, parts: dict | None = None) -> str:
+        """Post the next version of the plan (the whole text, markdown, or for a plan with parts the whole six parts).
+        Only when the plan's data changes; a step moving is step_update. note: one line on what changed and which
+        answers or message caused it. plan_id: this session's open plan when empty. parent: the version it grows
+        from; leave it out for the current one, or give an older one when the owner reopened an answer (a branch)."""
         plan_id = plan_id or ((await asyncio.to_thread(inbox.open_plan)) or {}).get("id", "")
         if not plan_id:
             return "No open plan in this session. Open one with plan_start."
         try:
-            n = await asyncio.to_thread(inbox.plan_version, plan_id, text, note, None if parent < 0 else parent)
+            n = await asyncio.to_thread(inbox.plan_version, plan_id, text, note, None if parent < 0 else parent, None, parts)
         except ValueError as e:
             return str(e)
         return f"Saved version {n} of plan {plan_id}. Questions asked from now on are round {n}."
+
+    @mcp.tool()
+    async def step_update(step_id: str, state: str, reply: str, plan_id: str = "") -> str:
+        """Report on one step of the plan: state next, now, done or failed, and your reply (what was done, the
+        numbers, what is open). A step version; never a plan version. Questions asked while a step is now join it."""
+        plan_id = plan_id or ((await asyncio.to_thread(inbox.open_plan)) or {}).get("id", "")
+        if not plan_id:
+            return "No open plan in this session."
+        try:
+            n = await asyncio.to_thread(inbox.step_update, plan_id, step_id, state, reply)
+        except ValueError as e:
+            return str(e)
+        return f"Saved step version {n} of {step_id} ({state})."
+
+    @mcp.tool()
+    async def plan_switch(to: str, change: str, why: str, ctx: Context) -> str:
+        """In a Q&A message, when the answer needs the plan changed: ask the owner to switch the message to another
+        kind (goal, step, rule or lesson). change: the exact change you would make (the owner sees it as the draft).
+        Waits for the answer; only after the owner confirms may you post plan_version."""
+        try:
+            item_id = await asyncio.to_thread(inbox.ask_switch, to, change, why)
+        except ValueError as e:
+            return str(e)
+        text = await wait_for(item_id, MAX_WAIT_MINUTES, ctx)
+        ok = await asyncio.to_thread(inbox.confirm_switch, item_id)
+        return text + ("\nThe owner confirmed the switch: make the change now with plan_version." if ok else
+                       "\nNo switch: answer only, change nothing.")
 
     @mcp.tool()
     async def plan_close(note: str = "", plan_id: str = "") -> str:

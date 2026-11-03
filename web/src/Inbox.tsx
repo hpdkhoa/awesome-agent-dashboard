@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { answerItem, cancelAnswer, forceAnswer, type InboxItem, type Plan, type Session } from "./data";
+import { Example } from "./Example";
 import { Md } from "./Markdown";
 import { openFile } from "./FileView";
 import { Section } from "./Section";
@@ -116,13 +117,13 @@ export function InboxView({ item, session, plan, onOpenPlan }: {
 
       {item.options.length > 0 && item.kind !== "approval" && (
         <Section id="inbox.options" title="Options" extra={item.options.length}>
-          <div className="options">
+          <div className={item.options.some((o) => o.example) ? "options wide" : "options"}>
             {item.options.map((o, n) => {
               const picked = (open ? choice : item.answer?.choice ?? "").split(", ");
               const on = item.multi ? picked.includes(o.label) : (open ? choice : item.answer?.choice) === o.label;
               return (
+                <div key={n} className="option-wrap">
                 <button
-                  key={n}
                   className={on ? "option on" : "option"}
                   disabled={!open}
                   onClick={() => {
@@ -140,6 +141,8 @@ export function InboxView({ item, session, plan, onOpenPlan }: {
                   </span>
                   {o.detail && <span className="muted small">{o.detail}</span>}
                 </button>
+                {o.example && <Example e={o.example} cwd={item.cwd} />}
+                </div>
               );
             })}
           </div>

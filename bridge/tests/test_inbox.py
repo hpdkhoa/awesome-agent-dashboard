@@ -140,9 +140,9 @@ def test_plan_rounds_follow_its_versions():
     store = FakeStore()
     ib = make(store)
     pid = ib.plan_start("Plans tab")
-    q0 = ib.post("question", "Scope?", "which", [{"label": "A"}])
+    q0 = ib.post("question", "Scope?", "which", [{"label": "A", "example": {"type": "text", "draft": "x"}}])
     assert ib.plan_version(pid, "# v1", "first draft") == 1
-    q1 = ib.post("question", "Graph?", "which", [{"label": "B"}])
+    q1 = ib.post("question", "Graph?", "which", [{"label": "B", "example": {"type": "text", "draft": "x"}}])
     assert ib.plan_version(pid, "# v2", "Q1 picked B") == 2
     assert store.docs[f"inbox/{q0}"]["planId"] == pid and store.docs[f"inbox/{q0}"]["round"] == 0
     assert store.docs[f"inbox/{q1}"]["round"] == 1
@@ -158,7 +158,7 @@ def test_only_this_sessions_open_plan_takes_questions():
     ib = make(store)
     assert "planId" not in store.docs[f"inbox/{ib.post('question', 'q', 'x')}"]
     pid = ib.plan_start("mine", "# v1")
-    assert store.docs[f"inbox/{ib.post('question', 'q', 'x')}"]["planId"] == pid
+    assert store.docs[f"inbox/{ib.post('question', 'q', 'x', [{'label': 'A', 'example': {'type': 'text', 'draft': 'x'}}])}"]["planId"] == pid
     assert store.docs[f"plans/{pid}"]["current"] == 1
     assert store.docs[f"inbox/{ib.post('suggestion', 's', 'x')}"].get("planId") is None
 
@@ -167,7 +167,7 @@ def test_reopened_answer_branches_and_old_branch_keeps_its_answer():
     store = FakeStore()
     ib = make(store)
     pid = ib.plan_start("p", "# v1")
-    q = ib.post("question", "List or graph?", "x", [{"label": "List"}, {"label": "Graph"}])
+    q = ib.post("question", "List or graph?", "x", [{"label": "List", "example": {"type": "text", "draft": "x"}}, {"label": "Graph", "example": {"type": "text", "draft": "x"}}])
     owner_answers(store, q, "List")
     assert ib.plan_version(pid, "# v2 list", "Q: List") == 2
     assert store.docs[f"planVersions/{pid}_v2"]["parent"] == 1
