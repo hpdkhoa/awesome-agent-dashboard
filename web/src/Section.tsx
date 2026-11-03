@@ -17,12 +17,14 @@ export function Section({
   title,
   extra,
   open = true,
+  tools,
   children,
 }: {
   id: string;
   title: ReactNode;
   extra?: ReactNode;
   open?: boolean;
+  tools?: ReactNode; // beside the header, outside its button (a button cannot hold another)
   children: ReactNode;
 }) {
   const [isOpen, setOpen] = useState<boolean>(() => remembered()[id] ?? open);
@@ -39,13 +41,16 @@ export function Section({
 
   return (
     <section className={isOpen ? "sec open" : "sec"}>
-      <button className="sec-head" onClick={toggle} aria-expanded={isOpen}>
-        <span className="chev" aria-hidden="true">
-          ▸
-        </span>
-        <span className="sec-title">{title}</span>
-        {extra && <span className="sec-extra">{extra}</span>}
-      </button>
+      <div className="sec-wrap">
+        <button className="sec-head" onClick={toggle} aria-expanded={isOpen}>
+          <span className="chev" aria-hidden="true">
+            ▸
+          </span>
+          <span className="sec-title">{title}</span>
+          {extra && <span className="sec-extra">{extra}</span>}
+        </button>
+        {tools}
+      </div>
       {isOpen && <div className="sec-body">{children}</div>}
     </section>
   );

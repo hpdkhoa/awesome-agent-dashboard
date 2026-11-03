@@ -452,7 +452,13 @@ class Runs:
             self.reading.pop(cid, None)
 
     def _stop(self, c: dict) -> str:
+        """Stops a run. A stop sent by Delete (the owner's choice, 2026-11-03: "Delete also stops the session's work")
+        aims at a run whose record is already gone; the stop then deletes itself too, so nothing of the run is left."""
         target = c.get("target", "")
+        if c.get("deleting"):
+            self._kill(target)
+            self.store.delete(f"commands/{c['id']}")
+            return f"{c['id']}: stopped deleted run {target}"
         if target in self.reading:  # a plan still reading pages: stop after killing the page run
             r = self.reading[target]
             r["stop"] = True
@@ -468,6 +474,16 @@ class Runs:
         self.store.update(f"commands/{target}", {"status": "stopping"})
         self.store.update(f"commands/{c['id']}", {"status": "done", "endedAt": now_iso()})
         return f"{c['id']}: stopped {target}"
+
+    def _kill(self, target: str) -> None:
+        r = self.reading.get(target)
+        if r is not None:
+            r["stop"] = True
+            if r["proc"] is not None and r["proc"].poll() is None:
+                _kill_tree(r["proc"])
+        p = self.procs.get(target)
+        if p is not None and p.poll() is None:
+            _kill_tree(p)
 
     def _finish(self, cid: str, p: subprocess.Popen) -> str:
         del self.procs[cid]

@@ -5,6 +5,7 @@ import {
 } from "./data";
 import { usd } from "./Dashboard";
 import { Md } from "./Markdown";
+import { MoreMenu } from "./MoreMenu";
 import { Section } from "./Section";
 
 const LIVE = new Set(["new", "waiting", "running", "stopping"]);
@@ -213,6 +214,7 @@ export function RunList({ runs, title = "Runs from the dashboard" }: { runs: Run
           key={r.id}
           id={"run." + r.id}
           open={LIVE.has(r.status)}
+          tools={<MoreMenu path={`commands/${r.id}`} />}
           title={
             <span className="run-head">
               <span className={"status " + r.status}>{r.status === "waiting" ? WAIT_LABEL[r.waitReason ?? "turn"] : r.status}</span>

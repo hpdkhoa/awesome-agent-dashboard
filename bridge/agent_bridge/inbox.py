@@ -131,6 +131,7 @@ class Inbox:
         # a push.Pusher: tells the owner's phone about each question, suggestion, result and plan version (the owner's
         # choice, 2026-11-01, "do #1 and #2"); approvals push from inbox_approve with the call in the body
         self.push = push
+        self.beats = 0  # the heartbeat is made once; after that it is only updated, so a deleted one stays deleted
 
     def open_plan(self) -> dict | None:
         """This session's open plan, the newest if there are several."""
@@ -308,9 +309,16 @@ class Inbox:
         return item_id
 
     def beat(self) -> None:
-        if self.session_id != "unknown":
-            self.store.put_many({f"liveSessions/{self.session_id}": {
-                "sessionId": self.session_id, "machine": self.machine, "cwd": self.cwd, "beatAt": now_iso()}})
+        if self.session_id == "unknown" or self.beats < 0:
+            return
+        path = f"liveSessions/{self.session_id}"
+        if self.beats == 0:
+            self.store.put_many({path: {"sessionId": self.session_id, "machine": self.machine, "cwd": self.cwd,
+                                        "beatAt": now_iso()}})
+        elif not self.store.update(path, {"beatAt": now_iso()}):
+            self.beats = -1  # the owner deleted it: no more beats from this session
+            return
+        self.beats += 1
 
     def take_answer(self, item_id: str) -> str | None:
         """The owner's answer as text for the session, marking the item delivered; None while it is still open."""

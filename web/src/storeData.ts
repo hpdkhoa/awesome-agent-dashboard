@@ -6,10 +6,12 @@ import { db } from "./firebase";
 
 // Every collection the page and the bridge write. `bridge`: the bridge writes it again from Claude Code's logs, so a
 // delete also goes on meta/deleted and the bridge skips that path from then on (the owner's choice, 2026-11-01, "B1").
-// liveSessions is a heartbeat the inbox server rewrites every minute, so it is not kept deleted.
+// The bridge and the inbox server only update records that exist, so a deleted run, plan, inbox item or heartbeat
+// stays deleted (the owner's choice, 2026-11-03).
 export const COLLECTIONS: { name: string; label: string; order?: string; bridge?: boolean; show: string[] }[] = [
   { name: "inbox", label: "Inbox items", order: "createdAt", show: ["title", "kind", "status", "createdAt"] },
   { name: "plans", label: "Plans", order: "updatedAt", show: ["title", "status", "current", "updatedAt"] },
+  { name: "planSteps", label: "Plan steps", order: "updatedAt", show: ["planId", "stepId", "state", "updatedAt"] },
   { name: "planVersions", label: "Plan versions", order: "createdAt", show: ["planId", "n", "note", "createdAt"] },
   { name: "pushSubs", label: "Phones for notifications", order: "createdAt", show: ["device", "createdAt"] },
   { name: "commands", label: "Runs and messages", order: "createdAt", show: ["action", "status", "prompt", "createdAt"] },

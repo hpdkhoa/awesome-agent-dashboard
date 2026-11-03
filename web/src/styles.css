@@ -39,6 +39,22 @@ td { padding: 4px 0; border-bottom: 1px solid var(--line); }
 .muted { color: var(--muted); }
 .small { font-size: 12px; }
 .bad { color: var(--bad); }
+.more { position: relative; display: inline-block; flex: none; }
+.more-btn { padding: 0 8px; line-height: 1.4; border-color: transparent; color: var(--muted); }
+.more-btn:hover { border-color: var(--line); }
+.more-menu { position: absolute; right: 0; top: 100%; z-index: 20; display: flex; flex-direction: column; min-width: 150px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 4px; }
+.more-menu button { border: 0; text-align: left; }
+.modal-back { position: fixed; inset: 0; z-index: 50; background: rgba(0, 0, 0, 0.55); display: flex; align-items: center;
+  justify-content: center; padding: 16px; cursor: default; }
+.modal { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px;
+  width: min(560px, 100%); max-height: 80vh; overflow: auto; text-align: left; }
+.modal h3 { margin: 0 0 8px; }
+.del-list { padding-left: 18px; margin: 6px 0; overflow-wrap: anywhere; }
+.row-btns { display: flex; gap: 8px; justify-content: flex-end; }
+button.danger { border-color: var(--bad); color: var(--bad); }
+.sec-wrap { display: flex; align-items: flex-start; gap: 4px; }
+.sec-wrap > .sec-head { flex: 1; min-width: 0; }
 .tiles { display: flex; flex-wrap: wrap; gap: 12px; margin: 8px 0 16px; }
 .tiles > div { flex: 1 1 200px; padding: 10px 14px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
 .tiles p { margin: 0; }

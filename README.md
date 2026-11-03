@@ -104,6 +104,13 @@ against its page and marks any that differ; the run shows how many it checked an
 - **Plan versions** change only with the plan's data. A step moving (next, now, done, failed) is a step version: each
   step shows its last reply like a message, older ones folded.
 - **Run step** on a step sends "Work on step sN" to the plan's session as a normal message.
+- **"..." on every record** (session, run, inbox item, plan, plan version, step, money entry, Storage row) has
+  Delete record. It lists the record and the records linked below it (a session's runs, plans and inbox items; a
+  run's questions and the plan it made; a plan's versions, steps, questions and messages) and deletes them after
+  you confirm. The bridge and the inbox server only update records that exist, so a deleted record stays deleted.
+  Files on your PC and Claude Code's logs stay.
+  A run still running is stopped first (the list says how many). A session open in the Claude app can't be
+  stopped from the dashboard; the list warns about it.
 - **Messages on a plan** have a kind: Q&A, Shift goal, Add step, Change rule, Audit lesson. Q&A changes nothing; when
   its answer needs a change, the session asks you to switch first.
 - **Examples:** every option of a plan question carries one: before and after pictures, a code diff with benchmarks

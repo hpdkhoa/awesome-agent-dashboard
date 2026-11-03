@@ -299,3 +299,28 @@ def test_check_now_writes_what_the_rule_sees(tmp_path, monkeypatch):
     assert c["status"] == "done" and c["check"]["lastFrom"] == "claude-desktop"
     # no claude process carries this made-up id, so the turn with no end counts as cut off
     assert c["check"]["open"] is False and c["check"]["turn"] is False
+
+
+def test_a_run_deleted_while_it_runs_is_not_written_back(tmp_path, monkeypatch):
+    store, runs, work = setup(tmp_path, monkeypatch)
+    cmd(store, "c1", action="start", folder=str(work), prompt="hello")
+    runs.step()
+    store.delete("commands/c1")
+    end = time.time() + 20
+    while runs.procs and time.time() < end:
+        runs.step()
+        time.sleep(0.2)
+    assert not runs.procs and store.get("commands/c1") is None
+
+
+def test_a_stop_sent_by_delete_kills_the_run_and_leaves_no_record(tmp_path, monkeypatch):
+    store, runs, work = setup(tmp_path, monkeypatch)
+    cmd(store, "c1", action="start", folder=str(work), prompt="sleep")
+    runs.step()
+    assert runs.procs["c1"].poll() is None
+    store.delete("commands/c1")
+    cmd(store, "x1", action="stop", target="c1", deleting=True)
+    runs.step()
+    assert runs.procs.get("c1") is None or runs.procs["c1"].wait(10) is not None
+    runs.step()
+    assert not runs.procs and store.get("commands/c1") is None and store.get("commands/x1") is None

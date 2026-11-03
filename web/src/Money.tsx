@@ -1,8 +1,9 @@
 import { useState } from "react";
 import {
-  addEntry, ASSET_LABEL, ASSET_SHORT, ASSETS, assetOf, fmt, holdings, parseAmount, removeEntry, syncAll, UNIT, valuations, vnd,
+  addEntry, ASSET_LABEL, ASSET_SHORT, ASSETS, assetOf, fmt, holdings, parseAmount, syncAll, UNIT, valuations, vnd,
   type Asset, type Entry, type FxSnapshot, type GoldPrice, type SyncLine,
 } from "./moneyData";
+import { MoreMenu } from "./MoreMenu";
 
 const today = () => new Date().toLocaleDateString("en-CA");
 
@@ -176,9 +177,7 @@ export function MoneyView({ entries, fx, gold }: { entries: Entry[]; fx: FxSnaps
               <td className="num small muted">{e.price != null ? `at ${vnd(e.price)}` : ""}</td>
               <td className="muted small">{e.note}</td>
               <td className="num">
-                <button className="link" onClick={() => confirm(`Delete this ${ASSET_LABEL[assetOf(e)]} entry?`) && removeEntry(e.id)}>
-                  delete
-                </button>
+                <MoreMenu path={`moneyEntries/${e.id}`} />
               </td>
             </tr>
           ))}

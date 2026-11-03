@@ -2,6 +2,7 @@ import { useState } from "react";
 import { answerItem, cancelAnswer, forceAnswer, type InboxItem, type Plan, type Session } from "./data";
 import { Example } from "./Example";
 import { Md } from "./Markdown";
+import { MoreMenu } from "./MoreMenu";
 import { openFile } from "./FileView";
 import { Section } from "./Section";
 
@@ -37,6 +38,7 @@ export function InboxList({ items, picked, onPick }: { items: InboxItem[]; picke
               {KIND[i.kind]} · {i.workType} · {ago(i.createdAt)} · {STATUS[i.status]}
             </div>
           </div>
+          <MoreMenu path={`inbox/${i.id}`} />
         </li>
       ))}
       {items.length === 0 && (

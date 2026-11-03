@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { usePlanVersions, type InboxItem, type Plan, type Run, type Session } from "./data";
+import { MoreMenu } from "./MoreMenu";
 import { PartsView } from "./PlanParts";
 import { isWaiting } from "./Inbox";
 import { Md } from "./Markdown";
@@ -27,6 +28,7 @@ export function PlanList({ plans, items, picked, onPick }: { plans: Plan[]; item
                 {waiting > 0 && ` · ${waiting} waiting for you`}
               </div>
             </div>
+            <MoreMenu path={`plans/${p.id}`} />
           </li>
         );
       })}
@@ -75,7 +77,7 @@ export function PlanView({ plan, items, session, runs = [], onOpenItem }: {
           <div key={n}>
             {v && (
               <Section id={`plan.v.${n === plan.current ? "latest" : "old"}`} title={`v${n} · ${v.note || "no note"}`} extra={when(v.createdAt)}
-                open={n === plan.current}>
+                open={n === plan.current} tools={<MoreMenu path={`planVersions/${plan.id}_v${n}`} />}>
                 <Md text={v.text} cwd={plan.cwd} />
               </Section>
             )}

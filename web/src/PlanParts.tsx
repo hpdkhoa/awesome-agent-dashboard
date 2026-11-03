@@ -6,6 +6,7 @@ import {
 import { isWaiting } from "./Inbox";
 import { openFile } from "./FileView";
 import { Md } from "./Markdown";
+import { MoreMenu } from "./MoreMenu";
 import { diffLines, linkEntries, PART_NAMES, partLines } from "./planDiff";
 import { RunList } from "./Runs";
 import { Section } from "./Section";
@@ -138,7 +139,7 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
       </div>
       <p className="change-note small">
         v{v.n} · {when(v.createdAt)} · {v.change ? <b>{KIND_NAME[v.change.kind]}</b> : null}
-        {v.change ? `: ${v.change.message}` : v.note}
+        {v.change ? `: ${v.change.message}` : v.note} <MoreMenu path={`planVersions/${plan.id}_v${v.n}`} />
       </p>
 
       {PART_NAMES.filter(([k]) => k !== "steps").map(([k, name]) => (
@@ -159,6 +160,7 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
                 <span className={"step-state " + (sv?.state ?? "next")}>{sv?.state ?? "next"}</span>
                 <b>{st.id} · {st.title}</b>{" "}
                 <RunStep plan={plan} step={st} runs={runs} />
+                {sv && <MoreMenu path={`planSteps/${plan.id}_${st.id}`} />}
               </div>
               <Md text={linkEntries(`${st.does}\n\n**Check:** ${st.check}`, plan)} cwd={plan.cwd} />
               {last && (

@@ -21,7 +21,11 @@ class FakeStore:
         return self.docs.get(path)
 
     def update(self, path, fields):
-        self.docs.setdefault(path, {}).update(fields)
+        """Like Firestore with currentDocument.exists: a missing document is not made."""
+        if path not in self.docs:
+            return False
+        self.docs[path].update(fields)
+        return True
 
     def delete(self, path):
         self.docs.pop(path, None)
@@ -183,3 +187,15 @@ def test_reopened_answer_branches_and_old_branch_keeps_its_answer():
     assert v4["parent"] == 1 and v4["madeBy"][0]["choice"] == "Graph"
     assert store.docs[f"planVersions/{pid}_v2"]["madeBy"][0]["choice"] == "List"
     assert store.docs[f"plans/{pid}"]["chosen"] == 4
+
+
+def test_a_deleted_heartbeat_stays_deleted():
+    store = FakeStore()
+    inbox = make(store)
+    inbox.beat()
+    inbox.beat()
+    assert store.get("liveSessions/s1")["sessionId"] == "s1"
+    store.delete("liveSessions/s1")
+    inbox.beat()
+    inbox.beat()
+    assert store.get("liveSessions/s1") is None

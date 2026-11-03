@@ -78,12 +78,20 @@ class Firestore:
             raise
         return {k: from_value(v) for k, v in d.get("fields", {}).items()}
 
-    def update(self, path: str, fields: dict) -> None:
-        """Sets only the given top-level fields of one document, leaving the rest as they are."""
+    def update(self, path: str, fields: dict) -> bool:
+        """Sets only the given top-level fields of one document, leaving the rest as they are. A document the owner
+        deleted stays deleted (the owner's choice, 2026-11-03: "The bridge stops writing to a deleted record"): the
+        write needs the document to exist, and returns False when it does not."""
         mask = "&".join(f"updateMask.fieldPaths={k}" for k in fields)
         body = {"fields": to_value(fields)["mapValue"]["fields"]}
-        req_url = f"{self.base}/{path}?{mask}"
-        self._call(req_url, body, method="PATCH")
+        req_url = f"{self.base}/{path}?{mask}&currentDocument.exists=true"
+        try:
+            self._call(req_url, body, method="PATCH")
+        except SystemExit as e:
+            if "(404)" in str(e):
+                return False
+            raise
+        return True
 
     def where(self, collection: str, field: str, value) -> list[dict]:
         """Documents of one collection whose field equals value."""

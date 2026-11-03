@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { QueryDocumentSnapshot } from "firebase/firestore";
+import { MoreMenu } from "./MoreMenu";
 import { COLLECTIONS, countAll, listPage, removeRows, type Row } from "./storeData";
 
 const kb = (n: number) => (n < 1024 ? n + " B" : (n / 1024).toFixed(1) + " KB");
@@ -117,6 +118,7 @@ export function StorageView({ name }: { name: string }) {
               <td key={f}>{f}</td>
             ))}
             <td className="num">size</td>
+            <td></td>
           </tr>
         </thead>
         <tbody>
@@ -132,6 +134,9 @@ export function StorageView({ name }: { name: string }) {
                 </td>
               ))}
               <td className="num small">{kb(r.bytes)}</td>
+              {/* a heartbeat goes only with its session: deleted alone, the bridge would take an open session as closed
+                  (the owner's choice, 2026-11-03: "take heartbeats off the menu") */}
+              <td>{name !== "liveSessions" && <MoreMenu path={r.path} onDeleted={() => page()} />}</td>
             </tr>
           ))}
         </tbody>

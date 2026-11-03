@@ -6,6 +6,7 @@ import { MessageBox, ModeSwitch, PlanFromSession, RunList, StartForm } from "./R
 import { PlanList, PlanView } from "./Plans";
 import { usePush, type PushState } from "./notify";
 import { FileViewer } from "./FileView";
+import { MoreMenu } from "./MoreMenu";
 
 // A tap on a push opens /?item=<inbox id>, /?run=<command id> or /?plan=<plan id> (bridge/agent_bridge/push.py).
 const opened = new URLSearchParams(window.location.search);
@@ -179,6 +180,7 @@ export function Dashboard() {
                   {s.workType} · {ago(s.lastAt)} · {num(s.tokens.total)} tok · {usd(s.tokens.costUsd)}
                 </div>
               </div>
+              <MoreMenu path={`sessions/${s.id}`} />
             </li>
           ))}
           {shown.length === 0 && <li className="muted">No sessions in the last {RECENT_DAYS} days.</li>}
