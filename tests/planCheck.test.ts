@@ -1,41 +1,44 @@
-// The plan-start check behind the Check button: mockup and picture examples counted, and what the button sends.
+// Generate and check on a plan: the owner's last order, what came back for it, and what the buttons send.
 import { describe, expect, it } from "vitest";
-import type { InboxItem, Plan } from "../web/src/data";
-import { checkPlan, checkPrompt } from "../web/src/planCheck";
+import type { InboxItem, Plan, Run } from "../web/src/data";
+import { checkGenerate, generatePrompt, lastOrder } from "../web/src/planCheck";
 
 const plan = { id: "p1", sessionId: "s1", createdAt: "2026-11-04T01:00:00Z", status: "open" } as Plan;
-const item = (f: Partial<InboxItem>) =>
-  ({ id: "i", kind: "question", sessionId: "s1", createdAt: "2026-11-04T02:00:00Z", files: [], options: [], ...f }) as InboxItem;
-const text = { label: "A", detail: "", example: { type: "text" as const, draft: "d" } };
-const pic = { label: "B", detail: "", example: { type: "image" as const, before: "a.png", after: "b.png" } };
+const run = (f: Partial<Run>) => ({ id: "r", action: "message", planId: "p1", createdAt: "2026-11-04T02:00:00Z", ...f }) as Run;
+const result = (title: string, files: string[], f: Partial<InboxItem> = {}) =>
+  ({ id: title, kind: "result", sessionId: "s1", title, files, createdAt: "2026-11-04T03:00:00Z", ...f }) as InboxItem;
 
-describe("plan check", () => {
-  it("finds nothing in a plan with only text examples and no mockup (the KPI plan, 2026-11-04)", () => {
-    const c = checkPlan(plan, [item({ planId: "p1", options: [text, text] })]);
-    expect(c).toEqual({ mockup: null, questions: 1, options: 2, pictures: 0, missing: ["mockup", "pictures"] });
-    const msg = checkPrompt(c);
-    expect(msg).toContain("mockup missing; 0 of 2 options in 1 questions");
-    expect(msg).toContain("PNG or SVG") ;
-    expect(msg).toContain("Ask those questions again");
-  });
-
-  it("takes the mockup only from the plan's own session, after the plan opened, as a picture", () => {
-    const items = [
-      item({ kind: "result", sessionId: "other", files: ["x.png"] }),
-      item({ kind: "result", createdAt: "2026-11-04T00:00:00Z", files: ["old.png"] }),
-      item({ kind: "result", files: ["notes.md", "mock.svg"] }),
-      item({ planId: "p1", options: [text, pic] }),
+describe("generate and check", () => {
+  it("takes the newest Generate order on this plan", () => {
+    const runs = [
+      run({ generate: { kinds: ["mockup"], note: "old" }, createdAt: "2026-11-04T01:30:00Z" }),
+      run({ generate: { kinds: ["mockup", "diagram"], note: "delete flow" } }),
+      run({ planId: "other", generate: { kinds: ["data"] }, createdAt: "2026-11-04T05:00:00Z" }),
+      run({}),
     ];
-    const c = checkPlan(plan, items);
-    expect(c.mockup).toBe("mock.svg");
-    expect(c.pictures).toBe(1);
-    expect(c.missing).toEqual([]);
-    expect(checkPrompt(c)).toBe("Go on with the plan from where it stopped.");
+    expect(lastOrder(plan, runs)).toEqual({ kinds: ["mockup", "diagram"], note: "delete flow", at: "2026-11-04T02:00:00Z" });
+    expect(lastOrder(plan, [run({})])).toBeNull();
   });
 
-  it("asks for picture examples only once questions exist", () => {
-    const c = checkPlan(plan, [item({ kind: "result", files: ["m.png"] })]);
-    expect(c.missing).toEqual([]);
-    expect(checkPlan(plan, [item({ kind: "result", files: ["m.png"] }), item({ planId: "p1", options: [text] })]).missing).toEqual(["pictures"]);
+  it("finds each asked kind from this session's results after the order, and lists what is missing", () => {
+    const order = { kinds: ["mockup", "diagram", "chart"] as const, note: "", at: "2026-11-04T02:00:00Z" };
+    const items = [
+      result("Generated mockup: the delete flow", ["delete.svg"]),
+      result("Generated graph: reads per day", ["reads.svg"]),
+      result("Generated diagram", ["old.svg"], { createdAt: "2026-11-04T01:00:00Z" }), // before the order
+      result("Generated diagram", ["other.svg"], { sessionId: "s2" }), // another session
+      result("Generated diagram", []), // no file
+    ];
+    const c = checkGenerate(plan, { ...order, kinds: [...order.kinds] }, items);
+    expect(c.got).toEqual({ mockup: ["delete.svg"], chart: ["reads.svg"] });
+    expect(c.missing).toEqual(["diagram"]);
+  });
+
+  it("asks for each kind as a file and one result per kind, with the owner's note", () => {
+    const t = generatePrompt(["mockup", "data"], "phone width");
+    expect(t).toContain("- Mockup:");
+    expect(t).toContain("- Data: sample or measured data, as CSV or JSON");
+    expect(t).toContain('The owner\'s note: "phone width"');
+    expect(t).toContain('inbox_result(title="Generated <kind>');
   });
 });

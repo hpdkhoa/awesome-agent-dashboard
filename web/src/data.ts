@@ -1,5 +1,6 @@
 import type { Phase } from "./phases";
 import { itemHash, type HarnessItem, type HarnessTicks } from "./harness";
+import type { Kind } from "./planCheck";
 import { useEffect, useState } from "react";
 import { collection, doc, limit, onSnapshot, orderBy, query, setDoc, updateDoc, where, type QueryConstraint } from "firebase/firestore";
 import { db } from "./firebase";
@@ -140,6 +141,7 @@ export type Run = {
   ownerText?: string;
   stepId?: string; // a Run step message
   planCheck?: boolean; // sent by the plan's Check button (planCheck.ts)
+  generate?: { kinds: Kind[]; note?: string }; // the owner's Generate order (planCheck.ts)
   phaseOrder?: boolean; // the owner's order to move the plan's phase (phases.ts)
   quotes?: { checked: number; marked: number }; // plan from a session: quotes in the notes not found on their page
   waitReason?: "turn" | "app";
@@ -321,7 +323,17 @@ export const sendPhaseOrder = (plan: Plan, text: string, order: string) => {
   });
 };
 
-// The plan's Check button (planCheck.ts): makes what is missing, or resumes the plan, as a plain message to its session.
+// The owner's Generate order (planCheck.ts): a plain message to the plan's session, with the kinds asked.
+export const sendGenerate = (plan: Plan, kinds: string[], note: string, text: string) => {
+  const id = newId();
+  const order = `Generate: ${kinds.join(", ")}${note.trim() ? `. Note: ${note.trim()}` : ""}`;
+  return setDoc(doc(db, "commands", id), {
+    id, action: "message", machine: plan.machine, sessionId: plan.sessionId, cwd: plan.cwd, prompt: text, ownerText: order,
+    planId: plan.id, generate: { kinds, note: note.trim() }, status: "new", createdAt: new Date().toISOString(),
+  });
+};
+
+// The plan's Resume (planCheck.ts): makes what is missing, or resumes the plan, as a plain message to its session.
 export const sendPlanCheck = (plan: Plan, text: string) => {
   const id = newId();
   return setDoc(doc(db, "commands", id), {

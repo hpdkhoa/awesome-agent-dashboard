@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { sendPhaseOrder, sendPlanCheck, usePlanVersions, type InboxItem, type Plan, type Run, type Session } from "./data";
-import { checkPlan, checkPrompt, type PlanCheck } from "./planCheck";
+import { sendGenerate, sendPhaseOrder, sendPlanCheck, usePlanVersions, type InboxItem, type Plan, type Run, type Session } from "./data";
+import { checkGenerate, generatePrompt, KINDS, kindName, lastOrder, resumePrompt, type GenerateCheck, type Kind } from "./planCheck";
+import { openFile } from "./FileView";
 import { HarnessSection } from "./HarnessView";
 import { PHASES, phaseName, phaseOf, phaseOrder, phasePrompt, phaseStarts } from "./phases";
 import { MoreMenu } from "./MoreMenu";
@@ -42,33 +43,54 @@ export function PlanList({ plans, items, picked, onPick }: { plans: Plan[]; item
   );
 }
 
-// The Check button (the owner's words, 2026-11-04: "the button to manual trigger the check and generate missing or
-// resume it"): counts the mockup and the picture examples, then sends the session what is missing, or resumes it.
-function PlanCheckBox({ plan, items, runs }: { plan: Plan; items: InboxItem[]; runs: Run[] }) {
-  const [c, setC] = useState<PlanCheck | null>(null);
+// Generate and check, on every plan (planCheck.ts): the owner ticks kinds and writes a note; Generate sends the order.
+// Check shows what came back for the last order; Make the missing sends the missing kinds again; else Resume.
+function GenerateBox({ plan, items, runs }: { plan: Plan; items: InboxItem[]; runs: Run[] }) {
+  const [kinds, setKinds] = useState<Kind[]>([]);
+  const [note, setNote] = useState("");
+  const [c, setC] = useState<GenerateCheck | null>(null);
   const [error, setError] = useState("");
-  const going = runs.some((r) => r.planId === plan.id && r.planCheck && (r.status === "new" || r.status === "running"));
-  const send = () => c && sendPlanCheck(plan, checkPrompt(c)).catch((e) => setError(String(e?.code ?? e)));
+  const going = runs.some((r) => r.planId === plan.id && (r.generate || r.planCheck) && (r.status === "new" || r.status === "running"));
+  const order = lastOrder(plan, runs);
+  const fail = (e: unknown) => setError(String((e as { code?: string })?.code ?? e));
+  const generate = (ks: Kind[], n: string) => sendGenerate(plan, ks, n, generatePrompt(ks, n)).then(() => setC(null)).catch(fail);
   return (
-    <Section id="plan.check" title="Check mockup and pictures" open>
-      <button className="chip" onClick={() => setC(checkPlan(plan, items))}>Check</button>
+    <Section id="plan.generate" title="Generate and check" extra={order ? `last: ${order.kinds.map(kindName).join(", ")}` : ""} open>
+      <div className="chips">
+        {KINDS.map((k) => (
+          <label key={k.id} className="chip" title={k.makes}>
+            <input type="checkbox" checked={kinds.includes(k.id)}
+              onChange={(e) => setKinds(e.target.checked ? [...kinds, k.id] : kinds.filter((x) => x !== k.id))} /> {k.name}
+          </label>
+        ))}
+      </div>
+      <textarea rows={2} value={note} placeholder="What it is for (optional), e.g. the delete flow, phone width" onChange={(e) => setNote(e.target.value)} />
+      <div className="chips">
+        <button className="primary" disabled={going || kinds.length === 0} onClick={() => generate(kinds, note)}>{going ? "Sent" : "Generate"}</button>
+        <button className="chip" disabled={!order} onClick={() => order && setC(checkGenerate(plan, order, items))}>Check</button>
+      </div>
       {c && (
         <>
           <table>
             <tbody>
-              <tr><td>Mockup</td><td className={c.mockup ? "small ok-fg" : "small bad"}>{c.mockup ?? "missing"}</td></tr>
-              <tr>
-                <td>Picture examples</td>
-                <td className={c.missing.includes("pictures") ? "small bad" : "small"}>
-                  {c.pictures} of {c.options} options · {c.questions} questions
-                </td>
-              </tr>
+              {c.order.kinds.map((k) => (
+                <tr key={k}>
+                  <td>{kindName(k)}</td>
+                  <td className={c.got[k]?.length ? "small ok-fg" : "small bad"}>
+                    {c.got[k]?.length
+                      ? c.got[k]!.map((f) => <code key={f} className="file-link" role="button" onClick={() => openFile(f, plan.cwd)}>{f} </code>)
+                      : "missing"}
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
           {c.missing.length > 0 ? (
-            <button className="primary" disabled={going} onClick={send}>{going ? "Sent" : "Make the missing"}</button>
+            <button className="primary" disabled={going} onClick={() => generate(c.missing, c.order.note)}>{going ? "Sent" : "Make the missing"}</button>
           ) : (
-            plan.status === "open" && <button className="primary" disabled={going} onClick={send}>{going ? "Sent" : "Resume the plan"}</button>
+            plan.status === "open" && (
+              <button className="primary" disabled={going} onClick={() => sendPlanCheck(plan, resumePrompt).catch(fail)}>{going ? "Sent" : "Resume the plan"}</button>
+            )
           )}
         </>
       )}
@@ -133,7 +155,7 @@ export function PlanView({ plan, items, session, runs = [], onOpenItem }: {
         ))}
       </div>
       <PhaseBar plan={plan} runs={runs} />
-      {plan.kind !== "parts" && <PlanCheckBox plan={plan} items={items} runs={runs} />}
+      <GenerateBox plan={plan} items={items} runs={runs} />
       {versions && plan.kind !== "parts" && (() => {
         const cur = versions.find((x) => x.n === plan.current);
         return cur ? <HarnessSection plan={plan} v={cur} parent={versions.find((x) => x.n === (cur.parent ?? cur.n - 1))} /> : null;

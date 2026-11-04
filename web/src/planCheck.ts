@@ -1,42 +1,55 @@
-// The plan-start check (the owner's words, 2026-11-04: "for fix 1 I will need the button to manual trigger the check and
-// generate missing or resume it"). Fix 1 is the "Start a plan" prompt (Runs.tsx planPrompt): one mockup before round 1,
-// posted with inbox_result, and image examples for the options the owner will see. The check counts what the plan has;
-// the session judges which options need a picture, since only it knows what each option changes.
-import type { InboxItem, Plan } from "./data";
+// Generate and check, on every plan (the owner's words, 2026-11-04: "the button to manual check and generate in the
+// existing plan session, not only in start new plan"; "the flow must be I start the plan, then explore the plan, when
+// almost good or whenever I need I will ask to generate the images, diagrams, graph, screenshot, mockup, data"; choice
+// "Kinds to tick + a note, one Generate"). The owner's order is a plain message to the plan's session; the session
+// posts each kind with inbox_result(title "Generated <kind>", files). Check reads what came back for the last order and
+// sends again only what is missing; with nothing missing, it resumes the plan.
+import type { InboxItem, Plan, Run } from "./data";
 
-const PIC = /\.(png|jpe?g|gif|webp|svg|avif|bmp)$/i;
+export type Kind = "mockup" | "diagram" | "image" | "chart" | "screenshot" | "data";
+export const KINDS: { id: Kind; name: string; makes: string }[] = [
+  { id: "mockup", name: "Mockup", makes: "how the user stories will look, as a PNG or SVG picture" },
+  { id: "diagram", name: "Diagram", makes: "a flow, structure or sequence diagram, as SVG" },
+  { id: "image", name: "Image", makes: "a picture of what the plan changes, PNG or SVG" },
+  { id: "chart", name: "Chart / graph", makes: "a chart of the plan's numbers, as SVG or PNG" },
+  { id: "screenshot", name: "Screenshot", makes: "a screenshot of the real page or app, PNG" },
+  { id: "data", name: "Data", makes: "sample or measured data, as CSV or JSON" },
+];
+export const kindName = (k: Kind) => KINDS.find((x) => x.id === k)?.name ?? k;
 
-export type PlanCheck = {
-  mockup: string | null; // the first picture the plan's session posted with inbox_result after the plan opened
-  questions: number;
-  options: number;
-  pictures: number; // options whose example is an image (before and after)
-  missing: ("mockup" | "pictures")[];
-};
+export type GenerateOrder = { kinds: Kind[]; note: string; at: string };
 
-export function checkPlan(plan: Plan, items: InboxItem[]): PlanCheck {
-  const results = items
-    .filter((i) => i.kind === "result" && i.sessionId === plan.sessionId && i.createdAt >= plan.createdAt)
-    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  const mockup = results.flatMap((i) => i.files ?? []).find((f) => PIC.test(f)) ?? null;
-  const qs = items.filter((i) => i.kind === "question" && i.planId === plan.id);
-  const opts = qs.flatMap((q) => q.options ?? []);
-  const pictures = opts.filter((o) => o.example?.type === "image").length;
-  const missing: PlanCheck["missing"] = [];
-  if (!mockup) missing.push("mockup");
-  if (opts.length > 0 && pictures === 0) missing.push("pictures");
-  return { mockup, questions: qs.length, options: opts.length, pictures, missing };
+// The owner's last Generate order on this plan.
+export function lastOrder(plan: Plan, runs: Run[]): GenerateOrder | null {
+  const r = runs
+    .filter((x) => x.planId === plan.id && x.generate?.kinds?.length)
+    .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""))[0];
+  return r?.generate ? { kinds: r.generate.kinds, note: r.generate.note ?? "", at: r.createdAt ?? "" } : null;
 }
 
-// The message the button sends to the plan's session: make what is missing, or go on where it stopped.
-export function checkPrompt(c: PlanCheck): string {
-  if (c.missing.length === 0) return "Go on with the plan from where it stopped.";
-  const found = `The owner pressed Check on this plan: mockup ${c.mockup ? "found" : "missing"}; ${c.pictures} of ${c.options} options in ${c.questions} questions have an image example.`;
-  const make = [
-    c.missing.includes("mockup") &&
-      "Make one mockup of how the user stories in this plan will look, as a PNG or SVG picture in this folder, and post it with inbox_result.",
-    c.missing.includes("pictures") &&
-      "Check every option asked so far: each option that changes what the owner will see (a screen, a layout, a picture) needs an image example with before and after pictures (the mockup as it is, and the mockup with that option). Ask those questions again with the pictures.",
-  ].filter(Boolean);
-  return [found, ...make, "Then go on with the plan."].join("\n\n");
+export type GenerateCheck = { order: GenerateOrder; got: Partial<Record<Kind, string[]>>; missing: Kind[] };
+
+// What came back for the order: the plan session's "Generated <kind>" results with files, posted after the order.
+export function checkGenerate(plan: Plan, order: GenerateOrder, items: InboxItem[]): GenerateCheck {
+  const got: Partial<Record<Kind, string[]>> = {};
+  for (const i of items) {
+    if (i.kind !== "result" || i.sessionId !== plan.sessionId || i.createdAt < order.at || !i.files?.length) continue;
+    const word = /^generated\s+(.+?)(?:[:\s]|$)/i.exec(i.title)?.[1]?.toLowerCase() ?? "";
+    const k = KINDS.find((x) => x.id === word || x.name.toLowerCase().startsWith(word) || (word === "graph" && x.id === "chart"))?.id;
+    if (k && order.kinds.includes(k)) got[k] = [...(got[k] ?? []), ...i.files];
+  }
+  return { order, got, missing: order.kinds.filter((k) => !got[k]?.length) };
 }
+
+// The order the Generate button sends, and Make the missing sends again for the kinds still missing.
+export function generatePrompt(kinds: Kind[], note: string): string {
+  const list = kinds.map((k) => `- ${kindName(k)}: ${KINDS.find((x) => x.id === k)?.makes}`).join("\n");
+  return [
+    "The owner asks you to generate these for this plan:",
+    list,
+    note.trim() ? `The owner's note: "${note.trim()}"` : "",
+    'Make each as a file in this folder. Post each kind with inbox_result(title="Generated <kind>: what it shows", files=[the paths]), one result per kind. Then go on with the plan; do not change the plan unless the owner asks.',
+  ].filter(Boolean).join("\n\n");
+}
+
+export const resumePrompt = "Go on with the plan from where it stopped.";
