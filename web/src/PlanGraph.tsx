@@ -2,6 +2,7 @@ import { useState } from "react";
 import { chooseVersion, reopenItem, type InboxItem, type Plan, type PlanVersion } from "./data";
 import { Md } from "./Markdown";
 import { chip, chosenLine, layout, lineDiff, parentOf, steps, type Step } from "./planTree";
+import { phaseName, phaseOf, phaseStarts } from "./phases";
 import { Section } from "./Section";
 
 // The graph version of a plan (approved 2026-11-01): step cards with your answers (the session's work on hover), the
@@ -69,6 +70,7 @@ function Tree({ plan, versions, asked, pick, onPick }: {
 }) {
   const { nodes, lanes } = layout(versions);
   const line = chosenLine(plan, versions);
+  const starts = phaseStarts(versions); // the phase divider: where each phase begins
   const at = new Map(nodes.map((d) => [d.v.n, d]));
   const roundOf = (n: number) => asked.filter((q) => (q.round ?? 0) === n);
   const width = Math.max(...nodes.map((d) => X(d.depth)), 0) + 200;
@@ -95,9 +97,10 @@ function Tree({ plan, versions, asked, pick, onPick }: {
           <g key={v.n}>
             {qs.length > 0 && <path className={on ? "edge" : "edge off"} d={`M${x + 70} ${y} H${x + 90}`} />}
             <g className={`node${on ? "" : " off"}${pick?.kind === "v" && pick.n === v.n ? " picked" : ""}`} onClick={() => onPick({ kind: "v", n: v.n })}>
-              <title>{`v${v.n}: ${v.note}`}</title>
+              <title>{`v${v.n} · ${phaseName(phaseOf(v))}: ${v.note}${v.parts?.steps.some((s) => s.new) ? ` · ${v.parts.steps.filter((s) => s.new).length} new steps` : ""}`}</title>
               <rect x={x} y={y - 20} width={70} height={40} rx={8} />
               <text x={x + 35} y={y + 5}>v{v.n}</text>
+              {starts.has(v.n) && <text className="tag-t phase-t" x={x + 35} y={y - 26}>{phaseName(starts.get(v.n)!)}</text>}
               {v.n === plan.current && <text className="tag-t" x={x + 35} y={y + 34}>newest</text>}
               {on && v.n === (plan.chosen ?? plan.current) && v.n !== plan.current && <text className="tag-t" x={x + 35} y={y + 34}>chosen</text>}
             </g>

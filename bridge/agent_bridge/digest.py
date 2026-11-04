@@ -10,7 +10,8 @@ Kept, each as one numbered entry (#n, in log order):
 - CALL <tool>: each tool call with its whole input;
 - OUTPUT <tool>: each tool's whole output (an image is named, not copied);
 - SUBAGENT: each subagent's task and its final report;
-- SESSION: where the record of one session starts, when the session continues an earlier one.
+- SESSION: where the record of one session starts, when the session continues an earlier one;
+- SUBAGENT (hand-back report), AGENT MESSAGE and SYSTEM: user-side text the owner did not write (user_label).
 A session that continues an earlier one (a resume or fork copies the earlier log's tail into a new log) is read with
 the earlier sessions first, oldest first, cut where the new log branches off, and with no entry twice (validation of
 plan 94d6777a, 2026-11-04: the plan from f44878ef missed 19e4cbd1, the session it continues).
@@ -116,6 +117,44 @@ def _final_report(path: Path) -> str:
     return last
 
 
+HANDBACK = "SUBAGENT (hand-back report, not the owner)"
+AGENT = "AGENT MESSAGE (another session, not the owner)"
+SYSTEM = "SYSTEM (not the owner)"
+# The app's auto-continue after a usage limit (the owner, 2026-11-04: "is the auto continue message not my typing, can
+# keep it as 1 entry, but can optimize to note that the result of that message is belong to previous message"; choice:
+# "Keep 1 entry, note where it belongs"). Only the exact text: the owner sometimes adds words after it, and those stay OWNER.
+AUTO_CONTINUE = "I hit my usage limit while you were working, but it has reset now. Please continue from where you left off."
+AUTO = "SYSTEM (auto continue, not the owner)"
+
+
+def note_auto_continue(rec: list[tuple[str, str, str]]) -> list[tuple[str, str, str]]:
+    """Names the owner's message an auto-continue belongs to: the last OWNER entry before it (#n is the list index + 1)."""
+    out, last = [], 0
+    for n, (at, label, text) in enumerate(rec, 1):
+        if label == "OWNER":
+            last = n
+        elif label == AUTO and last:
+            label = f"SYSTEM (auto continue of #{last}, not the owner)"
+        out.append((at, label, text))
+    return out
+
+
+def user_label(e: dict, text: str) -> str:
+    """Who wrote a user-side text, read from the entry's own fields (owner's choice 2026-11-04, "do the fix label"):
+    a message from another agent has origin kind "peer" (a subagent's hand-back says so in its frame); a note the app
+    adds is isMeta, or "[Request interrupted by user...]" with no origin. Everything else is the owner's."""
+    origin = e.get("origin") if isinstance(e.get("origin"), dict) else {}
+    if origin.get("kind") == "peer" or e.get("turnOrigin") == "peer":
+        return HANDBACK if "[Subagent hand-back]" in (origin.get("body", "") + text[:400]) else AGENT
+    if e.get("isMeta"):
+        return SYSTEM
+    if text.lstrip().startswith("[Request interrupted by user") and not e.get("turnOrigin") and not e.get("promptSource"):
+        return SYSTEM
+    if text.strip() == AUTO_CONTINUE:
+        return AUTO
+    return "OWNER"
+
+
 def records(log: Path, stop: str = "", skip: frozenset = frozenset()) -> list[tuple[str, str, str]]:
     """(time, label, text) for each entry of the real record, in log order, then the subagents' final reports.
 
@@ -148,9 +187,9 @@ def records(log: Path, stop: str = "", skip: frozenset = frozenset()) -> list[tu
                 elif part["text"].lstrip().startswith("<"):
                     continue  # hook output, reminders and slash-command records, not the owner's words
                 else:
-                    out.append((at, "OWNER", part["text"]))
+                    out.append((at, user_label(e, part["text"]), part["text"]))
             elif t == "image" and kind == "user":
-                out.append((at, "OWNER", "[image]"))
+                out.append((at, user_label(e, ""), "[image]"))
             elif t == "tool_use":
                 tools[part.get("id", "")] = part.get("name", "")
                 out.append((at, f"CALL {part.get('name', '')}", json.dumps(part.get("input"), ensure_ascii=False, indent=1)))
@@ -174,7 +213,7 @@ def records(log: Path, stop: str = "", skip: frozenset = frozenset()) -> list[tu
 def session_record(logs: list[tuple[Path, str]]) -> list[tuple[str, str, str]]:
     """The real record across a chain of logs (chain()), oldest first, each log's part opened by a SESSION entry."""
     if len(logs) == 1:
-        return records(logs[0][0])
+        return note_auto_continue(records(logs[0][0]))
     out: list[tuple[str, str, str]] = []
     later: set[str] = set()
     parts = []
@@ -185,7 +224,7 @@ def session_record(logs: list[tuple[Path, str]]) -> list[tuple[str, str, str]]:
         how = "the session this plan is from" if i == len(parts) - 1 else "an earlier session that the next one continues"
         out.append(("", f"SESSION {log.stem}", f"The record of session {log.stem} starts here: {how}."))
         out += records(log, stop, skip)
-    return out
+    return note_auto_continue(out)
 
 
 def write_pages(log: Path, folder: Path, page_bytes: int = PAGE_BYTES) -> list[dict]:

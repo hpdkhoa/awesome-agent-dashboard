@@ -12,6 +12,7 @@ export const COLLECTIONS: { name: string; label: string; order?: string; bridge?
   { name: "inbox", label: "Inbox items", order: "createdAt", show: ["title", "kind", "status", "createdAt"] },
   { name: "plans", label: "Plans", order: "updatedAt", show: ["title", "status", "current", "updatedAt"] },
   { name: "planSteps", label: "Plan steps", order: "updatedAt", show: ["planId", "stepId", "state", "updatedAt"] },
+  { name: "planHarness", label: "Harness ticks", show: ["planId"] },
   { name: "planVersions", label: "Plan versions", order: "createdAt", show: ["planId", "n", "note", "createdAt"] },
   { name: "pushSubs", label: "Phones for notifications", order: "createdAt", show: ["device", "createdAt"] },
   { name: "commands", label: "Runs and messages", order: "createdAt", show: ["action", "status", "prompt", "createdAt"] },

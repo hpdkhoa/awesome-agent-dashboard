@@ -1,6 +1,8 @@
 import { useState } from "react";
-import { sendPlanCheck, usePlanVersions, type InboxItem, type Plan, type Run, type Session } from "./data";
+import { sendPhaseOrder, sendPlanCheck, usePlanVersions, type InboxItem, type Plan, type Run, type Session } from "./data";
 import { checkPlan, checkPrompt, type PlanCheck } from "./planCheck";
+import { HarnessSection } from "./HarnessView";
+import { PHASES, phaseName, phaseOf, phaseOrder, phasePrompt, phaseStarts } from "./phases";
 import { MoreMenu } from "./MoreMenu";
 import { PartsView } from "./PlanParts";
 import { isWaiting } from "./Inbox";
@@ -75,6 +77,33 @@ function PlanCheckBox({ plan, items, runs }: { plan: Plan; items: InboxItem[]; r
   );
 }
 
+// Where the plan is, and the owner's buttons to move it, forward or back (phases.ts). Only the owner moves a phase.
+function PhaseBar({ plan, runs }: { plan: Plan; runs: Run[] }) {
+  const [error, setError] = useState("");
+  const now = phaseOf(plan);
+  const at = PHASES.findIndex((p) => p.id === now);
+  const going = runs.some((r) => r.planId === plan.id && r.phaseOrder && (r.status === "new" || r.status === "running"));
+  return (
+    <div className="phase-bar">
+      <p className="small">
+        <b>Phase: {phaseName(now)}</b> <span className="muted">· {PHASES[at]?.means}</span>
+      </p>
+      {plan.status === "open" && (
+        <div className="chips">
+          {PHASES.filter((p) => p.id !== now).map((p, i) => (
+            <button key={p.id} className="chip" disabled={going} title={p.means}
+              onClick={() => sendPhaseOrder(plan, phasePrompt(p.id), phaseOrder(p.id)).catch((e) => setError(String(e?.code ?? e)))}>
+              {PHASES.findIndex((x) => x.id === p.id) < at ? `Back to ${p.name}` : `Move to ${p.name}`}
+            </button>
+          ))}
+          {going && <span className="small muted">Order sent</span>}
+        </div>
+      )}
+      {error && <p className="bad small">{error}</p>}
+    </div>
+  );
+}
+
 export function PlanView({ plan, items, session, runs = [], onOpenItem }: {
   plan: Plan; items: InboxItem[]; session?: Session; runs?: Run[]; onOpenItem: (id: string) => void;
 }) {
@@ -103,15 +132,22 @@ export function PlanView({ plan, items, session, runs = [], onOpenItem }: {
           </button>
         ))}
       </div>
+      <PhaseBar plan={plan} runs={runs} />
       {plan.kind !== "parts" && <PlanCheckBox plan={plan} items={items} runs={runs} />}
+      {versions && plan.kind !== "parts" && (() => {
+        const cur = versions.find((x) => x.n === plan.current);
+        return cur ? <HarnessSection plan={plan} v={cur} parent={versions.find((x) => x.n === (cur.parent ?? cur.n - 1))} /> : null;
+      })()}
       {versions === null && <p className="muted">Loading</p>}
       {versions && view === "parts" && <PartsView plan={plan} versions={versions} items={items} runs={runs} onOpenItem={onOpenItem} />}
       {versions && view === "graph" && <PlanGraph plan={plan} versions={versions} asked={asked} onOpenItem={onOpenItem} />}
       {view === "list" && rounds.map((n) => {
         const v = versions?.find((x) => x.n === n);
         const qs = asked.filter((i) => (i.round ?? 0) === n);
+        const starts = v && versions ? phaseStarts(versions).get(v.n) : undefined;
         return (
           <div key={n}>
+            {starts && <h3 className="phase-div">Phase: {phaseName(starts)}</h3>}
             {v && (
               <Section id={`plan.v.${n === plan.current ? "latest" : "old"}`} title={`v${n} · ${v.note || "no note"}`} extra={when(v.createdAt)}
                 open={n === plan.current} tools={<MoreMenu path={`planVersions/${plan.id}_v${n}`} />}>

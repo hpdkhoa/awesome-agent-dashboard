@@ -51,7 +51,7 @@ from pathlib import Path
 from .aggregate import work_type_of
 from .digest import find_log, write_pages
 from .inbox import KINDS, now_iso
-from .planfrom import NO_EDITS, PLAN_PROMPT, kind_args, mark_quotes, note_command
+from .planfrom import NO_EDITS, kind_args, mark_quotes, note_command, plan_prompt
 from .redact import redact
 
 APPROVAL_TOOL = "mcp__agent-inbox__inbox_approve"
@@ -442,7 +442,7 @@ class Runs:
                 self.store.update(path, {"status": "stopped", "endedAt": now_iso()})
                 return
             sid = str(uuid.uuid4())
-            prompt = PLAN_PROMPT.format(source=c.get("sourceSessionId", ""), folder=folder, last=len(pages), command=cid)
+            prompt = plan_prompt(c.get("sourceSessionId", ""), folder, len(pages), cid, str(c.get("goal") or "")[:2000])
             cmd = start_command(self.claude, prompt, sid, self.mode()) + ["--add-dir", str(folder), "--disallowedTools", NO_EDITS]
             p = self._spawn(cid, cmd, c.get("cwd", ""))
             self.store.update(path, {"sessionId": sid, "pid": p.pid, "stage": "Writing the plan", "prompt": prompt})

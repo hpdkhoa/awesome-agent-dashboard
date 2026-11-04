@@ -1,3 +1,5 @@
+import type { Phase } from "./phases";
+import { itemHash, type HarnessItem, type HarnessTicks } from "./harness";
 import { useEffect, useState } from "react";
 import { collection, doc, limit, onSnapshot, orderBy, query, setDoc, updateDoc, where, type QueryConstraint } from "firebase/firestore";
 import { db } from "./firebase";
@@ -85,6 +87,7 @@ export type Plan = {
   kind?: "parts"; // a plan with six parts (plan from a session, 2026-11-03)
   source?: { sessionId: string; commandId: string; pagesDir: string; pages: { file: string; first: number; last: number }[] };
   activeStep?: string | null;
+  phase?: Phase; // where the plan is (phases.ts); none = Explore
 };
 // The six parts, in the owner's order (2026-11-03): goal, summary, rules, lessons and how each was applied, leftover, steps.
 export type Parts = {
@@ -92,7 +95,7 @@ export type Parts = {
   rules: { rule: string; source: string }[];
   lessons: { lesson: string; taughtBy: string; appliedIn: string }[];
   leftover: string[];
-  steps: { id: string; title: string; does: string; check: string }[];
+  steps: { id: string; title: string; does: string; check: string; new?: boolean }[]; // new: work the record does not hold
 };
 // The message kinds on a plan: four change it (a new plan version), Q&A never does.
 export type PlanKind = "qa" | "goal" | "step" | "rule" | "lesson";
@@ -109,6 +112,8 @@ export type Decision = { id: string; title: string; choice: string; text: string
 export type PlanVersion = {
   id: string; planId: string; n: number; text: string; note: string; createdAt: string; parent?: number; madeBy?: Decision[];
   parts?: Parts; change?: { kind: PlanKind; message: string };
+  phase?: Phase; phaseMove?: { from: Phase; to: Phase; order: string }; // phases.ts
+  harness?: HarnessItem[]; // harness.ts: the list as it is in this version
 };
 
 export type Machine = {
@@ -135,6 +140,7 @@ export type Run = {
   ownerText?: string;
   stepId?: string; // a Run step message
   planCheck?: boolean; // sent by the plan's Check button (planCheck.ts)
+  phaseOrder?: boolean; // the owner's order to move the plan's phase (phases.ts)
   quotes?: { checked: number; marked: number }; // plan from a session: quotes in the notes not found on their page
   waitReason?: "turn" | "app";
   force?: boolean;
@@ -264,11 +270,26 @@ export function usePlanSteps(planId: string | undefined): PlanStep[] | null {
   return rows;
 }
 
+// The owner's ticks on the harness (harness.ts): one small record per plan, never a plan version.
+export function useHarness(planId: string | undefined): HarnessTicks | null {
+  const [t, setT] = useState<HarnessTicks | null>(null);
+  useEffect(() => {
+    if (!planId) return;
+    return onSnapshot(doc(db, "planHarness", planId), (s) => setT((s.data() as HarnessTicks) ?? { planId, items: {} }));
+  }, [planId]);
+  return t;
+}
+export const tickHarness = (planId: string, h: HarnessItem, ok: boolean, v: number) =>
+  setDoc(doc(db, "planHarness", planId),
+    { planId, items: { [h.id]: { ok, at: new Date().toISOString(), hash: itemHash(h), v } } }, { merge: true });
+
 // Plan from a session: the bridge reads its real record and a new session writes the plan (bridge planfrom.py).
-export const planFromSession = (s: Session) => {
+// goal: the goal box (the owner's words, 2026-11-04: "a text box to input what is the goal for the new plan"); blank = as before.
+export const planFromSession = (s: Session, goal = "") => {
   const id = newId();
   return setDoc(doc(db, "commands", id), {
     id, action: "plan", machine: s.machine, sourceSessionId: s.id, cwd: s.cwd, prompt: `Plan from session: ${s.title}`,
+    ...(goal.trim() ? { goal: goal.trim() } : {}),
     status: "new", createdAt: new Date().toISOString(),
   });
 };
@@ -282,12 +303,21 @@ export const sendPlanMessage = (plan: Plan, kind: PlanKind, text: string) => {
 };
 
 // Run step (the owner's words, 2026-11-03: "Add Ren step button"): a plain message to the plan's session.
-export const runStep = (plan: Plan, step: Parts["steps"][number]) => {
+export const runStep = (plan: Plan, step: Parts["steps"][number], harness = "") => {
   const id = newId();
-  const text = `Work on step ${step.id}: ${step.title}. Report it with step_update.`;
+  const text = `Work on step ${step.id}: ${step.title}. Report it with step_update.${harness}`;
   return setDoc(doc(db, "commands", id), {
     id, action: "message", machine: plan.machine, sessionId: plan.sessionId, cwd: plan.cwd, prompt: text, ownerText: text,
     planId: plan.id, stepId: step.id, status: "new", createdAt: new Date().toISOString(),
+  });
+};
+
+// The owner's order to move the plan's phase (phases.ts): a plain message; the session records a plain version.
+export const sendPhaseOrder = (plan: Plan, text: string, order: string) => {
+  const id = newId();
+  return setDoc(doc(db, "commands", id), {
+    id, action: "message", machine: plan.machine, sessionId: plan.sessionId, cwd: plan.cwd, prompt: text, ownerText: order,
+    planId: plan.id, phaseOrder: true, status: "new", createdAt: new Date().toISOString(),
   });
 };
 

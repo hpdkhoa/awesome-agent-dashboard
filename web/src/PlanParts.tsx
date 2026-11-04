@@ -1,6 +1,6 @@
 import { useState } from "react";
 import {
-  PLAN_KINDS, runStep, sendPlanMessage, usePlanSteps,
+  PLAN_KINDS, runStep, sendPlanMessage, useHarness, usePlanSteps,
   type InboxItem, type Parts, type Plan, type PlanKind, type PlanVersion, type Run,
 } from "./data";
 import { isWaiting } from "./Inbox";
@@ -8,6 +8,9 @@ import { openFile } from "./FileView";
 import { Md } from "./Markdown";
 import { MoreMenu } from "./MoreMenu";
 import { diffLines, linkEntries, PART_NAMES, partLines } from "./planDiff";
+import { phaseName, phaseOf, phaseStarts } from "./phases";
+import { HarnessSection } from "./HarnessView";
+import { buildNote } from "./harness";
 import { RunList } from "./Runs";
 import { Section } from "./Section";
 
@@ -55,12 +58,13 @@ function PlanMessage({ plan }: { plan: Plan }) {
   );
 }
 
-function RunStep({ plan, step, runs }: { plan: Plan; step: Parts["steps"][number]; runs: Run[] }) {
+function RunStep({ plan, step, runs, harness }: { plan: Plan; step: Parts["steps"][number]; runs: Run[]; harness: string }) {
   const [error, setError] = useState("");
   const going = runs.some((r) => r.planId === plan.id && r.stepId === step.id && (r.status === "new" || r.status === "running"));
+  const explore = phaseOf(plan) === "explore"; // no step runs before the owner moves the plan to Build
   return (
     <>
-      <button className="chip" disabled={going} onClick={() => runStep(plan, step).catch((e) => setError(String(e?.code ?? e)))}>
+      <button className="chip" disabled={going || explore} title={explore ? "Off in Explore: move the plan to Build first" : undefined} onClick={() => runStep(plan, step, harness).catch((e) => setError(String(e?.code ?? e)))}>
         {going ? "Running" : "Run step"}
       </button>
       {error && <span className="bad small"> {error}</span>}
@@ -116,6 +120,8 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
   plan: Plan; versions: PlanVersion[]; items: InboxItem[]; runs: Run[]; onOpenItem: (id: string) => void;
 }) {
   const steps = usePlanSteps(plan.id) ?? [];
+  const ticks = useHarness(plan.id);
+  const harnessNote = buildNote(versions.find((x) => x.n === plan.current)?.harness, ticks);
   const withParts = versions.filter((v) => v.parts).sort((a, b) => a.n - b.n);
   const [picked, setPicked] = useState<number | null>(null);
   const [diff, setDiff] = useState(false);
@@ -128,11 +134,17 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
   return (
     <>
       <div className="chips">
-        {withParts.map((x) => (
-          <button key={x.n} className={x.n === v.n ? "chip on" : "chip"} onClick={() => setPicked(x.n)}>
-            v{x.n}{x.n === plan.current ? " · current" : ""}
-          </button>
-        ))}
+        {withParts.map((x) => {
+          const starts = phaseStarts(withParts).get(x.n);
+          return (
+            <span key={x.n} className="chip-group">
+              {starts && <span className="phase-div small">{phaseName(starts)}</span>}
+              <button className={x.n === v.n ? "chip on" : "chip"} onClick={() => setPicked(x.n)}>
+                v{x.n}{x.n === plan.current ? " · current" : ""}
+              </button>
+            </span>
+          );
+        })}
         {parent?.parts && (
           <button className={diff ? "chip on" : "chip"} onClick={() => setDiff(!diff)}>Changes from v{parent.n}</button>
         )}
@@ -141,6 +153,8 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
         v{v.n} · {when(v.createdAt)} · {v.change ? <b>{KIND_NAME[v.change.kind]}</b> : null}
         {v.change ? `: ${v.change.message}` : v.note} <MoreMenu path={`planVersions/${plan.id}_v${v.n}`} />
       </p>
+
+      <HarnessSection plan={plan} v={v} parent={parent} />
 
       {PART_NAMES.filter(([k]) => k !== "steps").map(([k, name]) => (
         <Section key={k} id={`plan.part.${k}`} title={name}>
@@ -158,8 +172,8 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
             <div key={st.id} className="step-row">
               <div>
                 <span className={"step-state " + (sv?.state ?? "next")}>{sv?.state ?? "next"}</span>
-                <b>{st.id} · {st.title}</b>{" "}
-                <RunStep plan={plan} step={st} runs={runs} />
+                <b>{st.id} · {st.title}</b>{st.new && <span className="tag" title="Work the session's record does not hold">new</span>}{" "}
+                <RunStep plan={plan} step={st} runs={runs} harness={harnessNote} />
                 {sv && <MoreMenu path={`planSteps/${plan.id}_${st.id}`} />}
               </div>
               <Md text={linkEntries(`${st.does}\n\n**Check:** ${st.check}`, plan)} cwd={plan.cwd} />

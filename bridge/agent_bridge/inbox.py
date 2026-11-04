@@ -46,6 +46,11 @@ PUSH_TITLE = {"question": "Question", "suggestion": "Suggestion", "result": "Res
 PARTS = ("goal", "summary", "rules", "lessons", "leftover", "steps")
 KINDS = {"qa": "Q&A", "goal": "Shift goal", "step": "Add step", "rule": "Change rule", "lesson": "Audit lesson"}
 STEP_STATES = ("next", "now", "done", "failed")
+# The plan's phases (the owner's words, 2026-11-04: "In my mind having these phases: 1. Explore 2. Build 3. Verify
+# 4. Remove 5. Optimize. Then in any phase can rollback to previous phases at any step"; "Every plan starts in Explore";
+# "I will be the one who trigger the move in every phase, I give order and decisions, you note it down as a plain
+# version to change the phase, and I want the version is included the phase").
+PHASES = ("explore", "build", "verify", "remove", "optimize")
 
 
 def check_example(e) -> str | None:
@@ -96,7 +101,51 @@ def parts_markdown(parts: dict) -> str:
     """The six parts as one markdown text, for the list and graph views and the push."""
     names = {"goal": "1. Goal", "summary": "2. Summary", "rules": "3. Rules", "lessons": "4. Lessons",
              "leftover": "5. Leftover", "steps": "6. Steps"}
-    return "\n\n".join(f"## {names[k]}\n\n{_lines(parts.get(k))}" for k in PARTS)
+    def shown(k):  # a new step (work the record does not hold) is marked in the text, so the graph's diff shows it
+        if k != "steps":
+            return parts.get(k)
+        return [{**{x: y for x, y in st.items() if x != "new"}, "title": ("[new] " if st.get("new") else "") + str(st.get("title", ""))}
+                if isinstance(st, dict) else st for st in parts.get(k) or []]
+    return "\n\n".join(f"## {names[k]}\n\n{_lines(shown(k))}" for k in PARTS)
+
+
+# The harness (the owner's words, 2026-11-04: "for the harness in here I need the list as a section in the plan so I can
+# review and see the diff everytime the plan change what harness will be change, and at last I'll need to approve every
+# single harness item"; harness = "Both": the tools and context each step needs, and each step's check). The list rides
+# on every plan version, so versions diff it; the owner's ticks live in planHarness/<plan id> (the owner's choice:
+# "Small approvals record"), written by the page.
+HARNESS_KINDS = ("tool", "check")
+
+
+def clean_harness(items) -> list[dict]:
+    out, seen = [], set()
+    for i, h in enumerate(items or [], 1):
+        if not isinstance(h, dict) or not str(h.get("item", "")).strip():
+            continue
+        hid = str(h.get("id") or f"h{i}")[:20]
+        if hid in seen:
+            raise ValueError(f"two harness items have the id {hid}")
+        seen.add(hid)
+        kind = str(h.get("kind", "check")).lower()
+        out.append({"id": hid, "item": redact(str(h["item"]), 400), "kind": kind if kind in HARNESS_KINDS else "check"})
+    return out[:100]
+
+
+def item_hash(h: dict) -> str:
+    """FNV-1a, 32 bits, over the item's kind and text: the same as the page's harness.ts itemHash."""
+    x = 0x811C9DC5
+    for c in f"{h.get('kind', '')}:{h.get('item', '')}":
+        x = ((x ^ ord(c)) * 0x01000193) & 0xFFFFFFFF
+    return f"{x:08x}"
+
+
+def harness_split(harness: list[dict], ticks: dict | None) -> dict:
+    """Which items go into Build (the owner's words, 2026-11-04: "unticked harness items mean not approve that item to
+    go through build so Move to Build button still be able to click but the unticked item won't be used or added into
+    build phase"): an item is approved when its tick is on and its hash matches the item as it is now."""
+    items = (ticks or {}).get("items") or {}
+    ok = [h["id"] for h in harness if (items.get(h["id"]) or {}).get("ok") and items[h["id"]].get("hash") == item_hash(h)]
+    return {"approved": ok, "notApproved": [h["id"] for h in harness if h["id"] not in ok]}
 
 
 def clean_parts(parts: dict) -> dict:
@@ -113,7 +162,8 @@ def clean_parts(parts: dict) -> dict:
                       for r in parts["lessons"] or [] if isinstance(r, dict)]
     out["leftover"] = [redact(str(x), 400) for x in parts["leftover"] or []]
     out["steps"] = [{"id": str(st.get("id") or f"s{i}")[:20], "title": redact(str(st.get("title", "")), 200),
-                     "does": redact(str(st.get("does", "")), 1000), "check": redact(str(st.get("check", "")), 600)}
+                     "does": redact(str(st.get("does", "")), 1000), "check": redact(str(st.get("check", "")), 600),
+                     **({"new": True} if st.get("new") else {})}
                     for i, st in enumerate(parts["steps"] or [], 1) if isinstance(st, dict)]
     return out
 
@@ -140,13 +190,14 @@ class Inbox:
         plans = [p for p in self.store.where("plans", "sessionId", self.session_id) if p.get("status") == "open"]
         return max(plans, key=lambda p: p.get("createdAt", ""), default=None)
 
-    def plan_start(self, title: str, text: str = "", note: str = "", parts: dict | None = None, source: str = "") -> str:
+    def plan_start(self, title: str, text: str = "", note: str = "", parts: dict | None = None, source: str = "",
+                   harness: list | None = None) -> str:
         """parts: the six parts of v1. source: the id of the dashboard command that read a session for this plan."""
         plan_id = uuid.uuid4().hex[:20]
         doc = {
             "id": plan_id, "title": redact(title, 200), "sessionId": self.session_id, "machine": self.machine,
             "cwd": self.cwd, "workType": work_type_of(self.cwd, self.roots), "status": "open", "current": 0,
-            "createdAt": now_iso(), "updatedAt": now_iso(),
+            "createdAt": now_iso(), "updatedAt": now_iso(), "phase": PHASES[0],
         }
         if parts is not None:
             parts = clean_parts(parts)
@@ -159,7 +210,7 @@ class Inbox:
                 self.store.update(f"commands/{source}", {"planId": plan_id})
         self.store.put_many({f"plans/{plan_id}": doc})
         if parts is not None or text.strip():
-            self.plan_version(plan_id, text, note, parts=parts)
+            self.plan_version(plan_id, text, note, parts=parts, harness=harness)
         return plan_id
 
     def running_command(self) -> dict | None:
@@ -171,12 +222,16 @@ class Inbox:
         return max(rows, key=lambda c: c.get("startedAt", ""), default=None)
 
     def plan_version(self, plan_id: str, text: str, note: str = "", parent: int | None = None,
-                     answers: list[str] | None = None, parts: dict | None = None, change: str = "") -> int:
+                     answers: list[str] | None = None, parts: dict | None = None, change: str = "",
+                     phase: str = "", order: str = "", harness: list | None = None) -> int:
         """Saves the next version of a plan and returns its number. Questions asked from now on are its round.
 
         parent: the version this one grows from (default: the current one; an older one makes a branch).
         answers: the inbox ids of the answers that made it (default: the answered questions asked on the parent).
         Each answer is kept as it was then, so a branch made before a reopen still shows the old answer.
+        phase: a move to another phase, only on the owner's order: order is the owner's words (a dashboard message's
+        own text is used when there is one). With no text and no parts, the version copies its parent's (a plain version).
+        Every version carries the plan's phase. harness: the whole harness list; left out, the parent's list is kept.
         """
         plan = self.store.get(f"plans/{plan_id}")
         if not plan:
@@ -187,13 +242,27 @@ class Inbox:
                              "owner with plan_switch first.")
         if run and run.get("kind") in KINDS and not change:
             change = run.get("switchedTo") or run["kind"]
-        if parts is not None:
-            parts = clean_parts(parts)
-            text = text if text.strip() else parts_markdown(parts)
+        was = plan.get("phase") or PHASES[0]
+        phase = (phase or "").strip().lower() or was
+        if phase not in PHASES:
+            raise ValueError(f"no phase {phase!r}; the phases are {', '.join(PHASES)}")
+        order = (order or (run or {}).get("ownerText") or "").strip()
+        if phase != was and not order:
+            raise ValueError("Only the owner moves a phase. Move it when the owner orders it, and give the owner's "
+                             "words as order.")
         current = int(plan.get("current", 0))
         parent = current if parent is None else parent
         if not 0 <= parent <= current:
             raise ValueError(f"plan {plan_id} has no version {parent}")
+        if parts is None and not text.strip() and phase != was:  # a plain version: the parent's data, a new phase
+            base = self.store.get(f"planVersions/{plan_id}_v{parent}") or {}
+            parts, text = base.get("parts"), base.get("text", "")
+        if harness is None:  # kept from the version it grows from, so a plain or a data version keeps the list
+            harness = (self.store.get(f"planVersions/{plan_id}_v{parent}") or {}).get("harness") if current else None
+        harness = clean_harness(harness)
+        if parts is not None:
+            parts = clean_parts(parts)
+            text = text if text.strip() else parts_markdown(parts)
         asked = {i["id"]: i for i in self.store.where("inbox", "planId", plan_id)}
         if answers is None:
             answers = [k for k, i in asked.items() if int(i.get("round", 0)) == parent and i.get("answer")]
@@ -203,14 +272,20 @@ class Inbox:
         n = int(plan.get("last", current)) + 1
         version = {
             "id": f"{plan_id}_v{n}", "planId": plan_id, "n": n, "parent": parent, "madeBy": made_by,
-            "text": redact(text, 30000), "note": redact(note, 400), "createdAt": now_iso(),
+            "text": redact(text, 30000), "note": redact(note, 400), "createdAt": now_iso(), "phase": phase,
         }
+        if phase != was:
+            version["phaseMove"] = {"from": was, "to": phase, "order": redact(order, 2000)}
+            if phase == "build" and harness:
+                version["phaseMove"]["harness"] = harness_split(harness, self.store.get(f"planHarness/{plan_id}"))
         if parts is not None:
             version["parts"] = parts
+        if harness:
+            version["harness"] = harness
         if change in KINDS:
             version["change"] = {"kind": change, "message": redact((run or {}).get("ownerText") or (run or {}).get("prompt", ""), 2000)}
         self.store.put_many({f"planVersions/{plan_id}_v{n}": version})
-        self.store.update(f"plans/{plan_id}", {"current": n, "last": n, "chosen": n, "updatedAt": now_iso()})
+        self.store.update(f"plans/{plan_id}", {"current": n, "last": n, "chosen": n, "updatedAt": now_iso(), "phase": phase})
         if self.push is not None:
             self.push.notify(f"Plan v{n}: {plan.get('title', '')}", note or "New version.", f"/?plan={plan_id}", f"plan-{plan_id}")
         return n
@@ -413,7 +488,11 @@ def server():
             "it with plan_close: every question you ask while it is open joins the round of its current version. "
             "While a plan is open, every option of every question carries an example (before and after pictures, a "
             "code diff with a benchmark, or a draft). A plan with parts makes a new version only when its data "
-            "changes; report work on a step with step_update, which never makes a plan version."
+            "changes; report work on a step with step_update, which never makes a plan version. A plan has a phase: "
+            "explore, build, verify, remove, optimize. Every plan starts in explore, where no step runs. Only the "
+            "owner moves the phase, forward or back: record each move with plan_version(phase=..., order=the owner's "
+            "words), a plain version. In explore, list the harness with plan_version(harness=[...]): the tools and "
+            "context each step needs and each step's check; the owner approves every item on the page."
         ),
     )
 
@@ -490,35 +569,48 @@ def server():
         return approval_reply(None, input)
 
     @mcp.tool()
-    async def plan_start(title: str, text: str = "", note: str = "", parts: dict | None = None, source: str = "") -> str:
+    async def plan_start(title: str, text: str = "", note: str = "", parts: dict | None = None, source: str = "",
+                         harness: list | None = None) -> str:
         """Open a plan on the dashboard. text: version 1 (markdown), if you have one. Questions you ask with inbox_ask
         (or your question box) while the plan is open join it, in the round of its current version.
 
         parts: the six parts of a plan from a session, in this order: {"goal": markdown (quote the owner), "summary":
         markdown (cite log entries as #n), "rules": [{"rule", "source"}], "lessons": [{"lesson", "taught_by",
-        "applied_in"}], "leftover": [text], "steps": [{"id", "title", "does", "check"}]}. source: the command id the
+        "applied_in"}], "leftover": [text], "steps": [{"id", "title", "does", "check", "new": true for work the record does not hold}]}. source: the command id the
         dashboard gave you when it asked for a plan from a session."""
         try:
-            plan_id = await asyncio.to_thread(inbox.plan_start, title, text, note, parts, source)
+            plan_id = await asyncio.to_thread(inbox.plan_start, title, text, note, parts, source, harness)
         except ValueError as e:
             return f"Not opened: {e}"
         plan = await asyncio.to_thread(inbox.store.get, f"plans/{plan_id}")
         return f"Opened plan {plan_id} at version {plan.get('current', 0)}."
 
     @mcp.tool()
-    async def plan_version(note: str, text: str = "", plan_id: str = "", parent: int = -1, parts: dict | None = None) -> str:
+    async def plan_version(note: str, text: str = "", plan_id: str = "", parent: int = -1, parts: dict | None = None,
+                           phase: str = "", order: str = "", harness: list | None = None) -> str:
         """Post the next version of the plan (the whole text, markdown, or for a plan with parts the whole six parts).
         Only when the plan's data changes; a step moving is step_update. note: one line on what changed and which
         answers or message caused it. plan_id: this session's open plan when empty. parent: the version it grows
-        from; leave it out for the current one, or give an older one when the owner reopened an answer (a branch)."""
+        from; leave it out for the current one, or give an older one when the owner reopened an answer (a branch).
+        phase: explore, build, verify, remove or optimize. Only the owner moves a phase, forward or back: when the owner
+        orders a move, call this with phase and order (the owner's words), and leave text and parts out for a plain
+        version that keeps the data. harness: the whole harness list, each {"id": "h1", "item", "kind": "tool" or
+        "check"}: the tools and context each step needs, and each step's check; the owner approves every item on the
+        page. Left out, the list stays as it was."""
         plan_id = plan_id or ((await asyncio.to_thread(inbox.open_plan)) or {}).get("id", "")
         if not plan_id:
             return "No open plan in this session. Open one with plan_start."
         try:
-            n = await asyncio.to_thread(inbox.plan_version, plan_id, text, note, None if parent < 0 else parent, None, parts)
+            n = await asyncio.to_thread(inbox.plan_version, plan_id, text, note, None if parent < 0 else parent, None, parts,
+                                      "", phase, order, harness)
         except ValueError as e:
             return str(e)
-        return f"Saved version {n} of plan {plan_id}. Questions asked from now on are round {n}."
+        out = f"Saved version {n} of plan {plan_id}. Questions asked from now on are round {n}."
+        split = ((await asyncio.to_thread(inbox.store.get, f"planVersions/{plan_id}_v{n}")) or {}).get("phaseMove", {}).get("harness")
+        if split:
+            out += (" Build uses only the approved harness items: " + (", ".join(split["approved"]) or "none")
+                    + ". Not approved, left out of Build: " + (", ".join(split["notApproved"]) or "none") + ".")
+        return out
 
     @mcp.tool()
     async def step_update(step_id: str, state: str, reply: str, plan_id: str = "") -> str:

@@ -19,7 +19,7 @@ export function partLines(parts: Parts, k: keyof Parts): string[] {
     case "leftover":
       return parts.leftover;
     case "steps":
-      return parts.steps.map((s) => `${s.id} ${s.title}: ${s.does} · check: ${s.check}`);
+      return parts.steps.map((s) => `${s.id} ${s.new ? "[new] " : ""}${s.title}: ${s.does} · check: ${s.check}`);
   }
 }
 

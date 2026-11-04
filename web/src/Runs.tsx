@@ -189,6 +189,7 @@ export function ModeSwitch() {
 // start a plan"): the bridge reads the whole log in pages, notes each page, and a new session writes the plan.
 export function PlanFromSession({ s, runs }: { s: Session; runs: Run[] }) {
   const [error, setError] = useState("");
+  const [goal, setGoal] = useState("");
   const mine = runs.filter((r) => r.action === "plan" && r.sourceSessionId === s.id);
   const going = mine.some((r) => r.status === "new" || r.status === "running");
   return (
@@ -198,8 +199,10 @@ export function PlanFromSession({ s, runs }: { s: Session; runs: Run[] }) {
         subagent's final report. It writes notes per page, then a new session writes the plan: goal, summary, rules,
         lessons and where they were applied, leftover, and steps. Nothing is changed.
       </p>
+      <textarea rows={3} value={goal} placeholder="Goal for the new plan (optional). The session's record is read as data and the plan focuses on this goal."
+        onChange={(e) => (setGoal(e.target.value), setError(""))} />
       {error && <p className="bad small">{error}</p>}
-      <button className="primary" disabled={going} onClick={() => planFromSession(s).catch((e) => setError(String(e?.code ?? e)))}>
+      <button className="primary" disabled={going} onClick={() => planFromSession(s, goal).then(() => setGoal("")).catch((e) => setError(String(e?.code ?? e)))}>
         {going ? "Reading" : "Plan from this session"}
       </button>
       {mine.length > 0 && <RunList runs={mine} title="Plans from this session" />}

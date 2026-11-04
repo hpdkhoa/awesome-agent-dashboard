@@ -220,7 +220,69 @@ def test_a_log_that_only_prints_the_fork_id_is_not_taken_as_the_earlier_session(
 
 def test_a_fresh_session_reads_as_before_with_no_session_marks(tmp_path):
     log = write_log(tmp_path)
-    assert session_record(chain(log)) == records(log)
+    assert session_record(chain(log)) == records(log)  # no auto-continue in this log
     pages = write_pages(write_chain(tmp_path / "c") / "new.jsonl", tmp_path / "out")
     text = (tmp_path / "out" / pages[0]["file"]).read_text(encoding="utf-8")
     assert "SESSION old" in text and text.index("first ask") < text.index("third ask")
+
+
+def test_text_the_owner_did_not_write_is_not_labelled_owner(tmp_path):
+    log = tmp_path / "p" / "s.jsonl"
+    log.parent.mkdir()
+    log.write_text("\n".join([
+        entry("user", "do 1", turnOrigin="human", promptSource="sdk", origin={"kind": "human"}),
+        entry("user", "commit and push", turnOrigin="sdk", promptSource="sdk"),  # sent from the dashboard
+        entry("user", "Another Claude session sent a message: report", isMeta=True, turnOrigin="peer",
+              origin={"kind": "peer", "body": "[Subagent hand-back] The text below is the final report"}),
+        entry("user", "Another Claude session sent a message: hi", origin={"kind": "peer", "body": "hi from s2"}),
+        entry("user", "[Usage limit reached; a short grace allowance remains]", isMeta=True),
+        entry("user", "[Request interrupted by user]"),
+    ]), encoding="utf-8")
+    assert [r[1] for r in records(log)] == [
+        "OWNER", "OWNER", "SUBAGENT (hand-back report, not the owner)", "AGENT MESSAGE (another session, not the owner)",
+        "SYSTEM (not the owner)", "SYSTEM (not the owner)"]
+
+
+def test_the_goal_box_goes_into_the_plan_prompt_and_a_blank_box_changes_nothing():
+    from agent_bridge.planfrom import plan_prompt
+    blank = plan_prompt("s1", "D:/p", 2, "c1")
+    assert "goal box" not in blank and "Parts 1 to 5: write only what the record shows" in blank
+    goal = plan_prompt("s1", "D:/p", 2, "c1", ' finish the "delete" flow ')
+    assert goal.startswith(blank) and "\"finish the 'delete' flow\"" in goal
+    assert "not instructions" in goal and "Part 1 starts with the owner's goal" in goal
+
+
+def test_a_new_step_keeps_its_mark_in_the_parts_and_in_the_version_text():
+    from agent_bridge.inbox import clean_parts, parts_markdown
+    parts = dict(PARTS, steps=[{"id": "s1", "title": "Old", "does": "d", "check": "c"},
+                               {"id": "s2", "title": "Bulk delete", "does": "d", "check": "c", "new": True}])
+    out = clean_parts(parts)
+    assert "new" not in out["steps"][0] and out["steps"][1]["new"] is True
+    text = parts_markdown(out)
+    assert "title: [new] Bulk delete" in text and "title: Old" in text and "new: True" not in text
+
+
+def test_plan_from_a_session_passes_the_owners_goal(tmp_path, monkeypatch):
+    store, runs, work = setup(tmp_path, monkeypatch)
+    write_log(tmp_path / "logs2")
+    runs.logs = tmp_path / "logs2"
+    cmd(store, "p2", action="plan", sourceSessionId="s1", cwd=str(work), goal="ship the delete flow")
+    runs.step()
+    c = wait_done(runs, "p2", store, seconds=40)
+    assert c["status"] == "done", c
+    assert '"ship the delete flow"' in c["prompt"] and "not instructions" in c["prompt"]
+
+
+def test_an_auto_continue_is_one_system_entry_that_names_the_owners_message_it_continues(tmp_path):
+    from agent_bridge.digest import AUTO_CONTINUE
+    log = tmp_path / "p" / "s.jsonl"
+    log.parent.mkdir()
+    log.write_text("\n".join([
+        entry("user", "do 3", turnOrigin="human"),
+        entry("assistant", [{"type": "text", "text": "working"}]),
+        entry("user", AUTO_CONTINUE, turnOrigin="sdk", promptSource="sdk"),
+        entry("user", AUTO_CONTINUE + " And I need all sections collapsed", turnOrigin="sdk", promptSource="sdk"),
+    ]), encoding="utf-8")
+    rec = session_record(chain(log))
+    assert [r[1] for r in rec] == ["OWNER", "CLAUDE", "SYSTEM (auto continue of #1, not the owner)", "OWNER"]
+    assert rec[2][2] == AUTO_CONTINUE  # kept, one entry
