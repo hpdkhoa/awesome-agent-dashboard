@@ -134,6 +134,7 @@ export type Run = {
   stage?: string; // plan from a session: where the reading is
   ownerText?: string;
   stepId?: string; // a Run step message
+  planCheck?: boolean; // sent by the plan's Check button (planCheck.ts)
   quotes?: { checked: number; marked: number }; // plan from a session: quotes in the notes not found on their page
   waitReason?: "turn" | "app";
   force?: boolean;
@@ -287,6 +288,15 @@ export const runStep = (plan: Plan, step: Parts["steps"][number]) => {
   return setDoc(doc(db, "commands", id), {
     id, action: "message", machine: plan.machine, sessionId: plan.sessionId, cwd: plan.cwd, prompt: text, ownerText: text,
     planId: plan.id, stepId: step.id, status: "new", createdAt: new Date().toISOString(),
+  });
+};
+
+// The plan's Check button (planCheck.ts): makes what is missing, or resumes the plan, as a plain message to its session.
+export const sendPlanCheck = (plan: Plan, text: string) => {
+  const id = newId();
+  return setDoc(doc(db, "commands", id), {
+    id, action: "message", machine: plan.machine, sessionId: plan.sessionId, cwd: plan.cwd, prompt: text, ownerText: text,
+    planId: plan.id, planCheck: true, status: "new", createdAt: new Date().toISOString(),
   });
 };
 

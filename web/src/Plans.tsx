@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { usePlanVersions, type InboxItem, type Plan, type Run, type Session } from "./data";
+import { sendPlanCheck, usePlanVersions, type InboxItem, type Plan, type Run, type Session } from "./data";
+import { checkPlan, checkPrompt, type PlanCheck } from "./planCheck";
 import { MoreMenu } from "./MoreMenu";
 import { PartsView } from "./PlanParts";
 import { isWaiting } from "./Inbox";
@@ -39,6 +40,41 @@ export function PlanList({ plans, items, picked, onPick }: { plans: Plan[]; item
   );
 }
 
+// The Check button (the owner's words, 2026-11-04: "the button to manual trigger the check and generate missing or
+// resume it"): counts the mockup and the picture examples, then sends the session what is missing, or resumes it.
+function PlanCheckBox({ plan, items, runs }: { plan: Plan; items: InboxItem[]; runs: Run[] }) {
+  const [c, setC] = useState<PlanCheck | null>(null);
+  const [error, setError] = useState("");
+  const going = runs.some((r) => r.planId === plan.id && r.planCheck && (r.status === "new" || r.status === "running"));
+  const send = () => c && sendPlanCheck(plan, checkPrompt(c)).catch((e) => setError(String(e?.code ?? e)));
+  return (
+    <Section id="plan.check" title="Check mockup and pictures" open>
+      <button className="chip" onClick={() => setC(checkPlan(plan, items))}>Check</button>
+      {c && (
+        <>
+          <table>
+            <tbody>
+              <tr><td>Mockup</td><td className={c.mockup ? "small ok-fg" : "small bad"}>{c.mockup ?? "missing"}</td></tr>
+              <tr>
+                <td>Picture examples</td>
+                <td className={c.missing.includes("pictures") ? "small bad" : "small"}>
+                  {c.pictures} of {c.options} options · {c.questions} questions
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          {c.missing.length > 0 ? (
+            <button className="primary" disabled={going} onClick={send}>{going ? "Sent" : "Make the missing"}</button>
+          ) : (
+            plan.status === "open" && <button className="primary" disabled={going} onClick={send}>{going ? "Sent" : "Resume the plan"}</button>
+          )}
+        </>
+      )}
+      {error && <p className="bad small">{error}</p>}
+    </Section>
+  );
+}
+
 export function PlanView({ plan, items, session, runs = [], onOpenItem }: {
   plan: Plan; items: InboxItem[]; session?: Session; runs?: Run[]; onOpenItem: (id: string) => void;
 }) {
@@ -67,6 +103,7 @@ export function PlanView({ plan, items, session, runs = [], onOpenItem }: {
           </button>
         ))}
       </div>
+      {plan.kind !== "parts" && <PlanCheckBox plan={plan} items={items} runs={runs} />}
       {versions === null && <p className="muted">Loading</p>}
       {versions && view === "parts" && <PartsView plan={plan} versions={versions} items={items} runs={runs} onOpenItem={onOpenItem} />}
       {versions && view === "graph" && <PlanGraph plan={plan} versions={versions} asked={asked} onOpenItem={onOpenItem} />}

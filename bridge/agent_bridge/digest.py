@@ -9,7 +9,11 @@ Kept, each as one numbered entry (#n, in log order):
 - CLAUDE: Claude's replies;
 - CALL <tool>: each tool call with its whole input;
 - OUTPUT <tool>: each tool's whole output (an image is named, not copied);
-- SUBAGENT: each subagent's task and its final report.
+- SUBAGENT: each subagent's task and its final report;
+- SESSION: where the record of one session starts, when the session continues an earlier one.
+A session that continues an earlier one (a resume or fork copies the earlier log's tail into a new log) is read with
+the earlier sessions first, oldest first, cut where the new log branches off, and with no entry twice (validation of
+plan 94d6777a, 2026-11-04: the plan from f44878ef missed 19e4cbd1, the session it continues).
 Left out: the app's own records (file history, API request copies, queue and title records) and thinking, which is
 signed and mostly hidden.
 """
@@ -17,6 +21,7 @@ signed and mostly hidden.
 from __future__ import annotations
 
 import json
+import mmap
 from pathlib import Path
 
 PAGE_BYTES = 600_000  # about 150k tokens at 4 bytes per token (an estimate; the owner's choice "do 1")
@@ -26,6 +31,64 @@ def find_log(logs: Path | None, session_id: str) -> Path | None:
     if logs is None or not session_id:
         return None
     return next(iter(logs.glob(f"*/{session_id}.jsonl")), None)
+
+
+def _entries(log: Path):
+    for raw in log.open(encoding="utf-8", errors="replace"):
+        try:
+            yield json.loads(raw)
+        except ValueError:
+            continue
+
+
+def _first_parent(log: Path) -> str:
+    """The parent of the log's first user or assistant entry: empty for a session that starts fresh."""
+    for e in _entries(log):
+        if e.get("type") in ("user", "assistant"):
+            return e.get("parentUuid") or ""
+    return ""
+
+
+def _holds(path: Path, needle: bytes) -> bool:
+    try:
+        with path.open("rb") as f, mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as m:
+            return m.find(needle) != -1
+    except (OSError, ValueError):  # an empty or locked file
+        return False
+
+
+def earlier_log(log: Path) -> tuple[Path, str] | None:
+    """The log this one continues and the entry it branches from, or None.
+
+    The first entry's parent is an entry of the earlier log. Other logs can hold a copy of it (another fork, or a tool
+    output that printed the id), so the earlier log is the one that holds it as an entry with the most entries before
+    it: the original keeps the whole history, a copy only a tail.
+    """
+    parent = _first_parent(log)
+    if not parent:
+        return None
+    needle, best = parent.encode(), None
+    for other in sorted(log.parent.glob("*.jsonl")):
+        if other == log or not _holds(other, needle):
+            continue
+        for n, e in enumerate(_entries(other)):
+            if e.get("uuid") == parent:
+                if best is None or n > best[0]:
+                    best = (n, other)
+                break
+    return (best[1], parent) if best else None
+
+
+def chain(log: Path, limit: int = 50) -> list[tuple[Path, str]]:
+    """The session's logs, oldest first: (log, the entry where the next log branches off; empty for the last)."""
+    out, seen = [(log, "")], {log}
+    while len(out) < limit:
+        up = earlier_log(out[0][0])
+        if up is None or up[0] in seen:
+            break
+        seen.add(up[0])
+        out.insert(0, up)
+    return out
 
 
 def _text(content) -> str:
@@ -53,14 +116,19 @@ def _final_report(path: Path) -> str:
     return last
 
 
-def records(log: Path) -> list[tuple[str, str, str]]:
-    """(time, label, text) for each entry of the real record, in log order, then the subagents' final reports."""
+def records(log: Path, stop: str = "", skip: frozenset = frozenset()) -> list[tuple[str, str, str]]:
+    """(time, label, text) for each entry of the real record, in log order, then the subagents' final reports.
+
+    stop: the entry where a later log branches off; nothing after it is read. skip: entries a later log holds too.
+    """
     out: list[tuple[str, str, str]] = []
     tools: dict[str, str] = {}
-    for raw in log.open(encoding="utf-8", errors="replace"):
-        try:
-            e = json.loads(raw)
-        except ValueError:
+    for e in _entries(log):
+        if stop and e.get("uuid") == stop:
+            stop = "reached"
+        elif stop == "reached":
+            break
+        if e.get("uuid") in skip:
             continue
         kind, at = e.get("type"), (e.get("timestamp") or "")[:19]
         if kind not in ("user", "assistant") or e.get("isSidechain"):
@@ -103,6 +171,23 @@ def records(log: Path) -> list[tuple[str, str, str]]:
     return out
 
 
+def session_record(logs: list[tuple[Path, str]]) -> list[tuple[str, str, str]]:
+    """The real record across a chain of logs (chain()), oldest first, each log's part opened by a SESSION entry."""
+    if len(logs) == 1:
+        return records(logs[0][0])
+    out: list[tuple[str, str, str]] = []
+    later: set[str] = set()
+    parts = []
+    for log, stop in reversed(logs):  # newest first, so each earlier log skips what a later one holds
+        parts.append((log, stop, frozenset(later)))
+        later |= {e["uuid"] for e in _entries(log) if e.get("uuid")}
+    for i, (log, stop, skip) in enumerate(reversed(parts)):
+        how = "the session this plan is from" if i == len(parts) - 1 else "an earlier session that the next one continues"
+        out.append(("", f"SESSION {log.stem}", f"The record of session {log.stem} starts here: {how}."))
+        out += records(log, stop, skip)
+    return out
+
+
 def write_pages(log: Path, folder: Path, page_bytes: int = PAGE_BYTES) -> list[dict]:
     """Writes page-NN.txt files to folder; returns [{file, first, last, bytes}] with the entry numbers each holds.
 
@@ -124,7 +209,7 @@ def write_pages(log: Path, folder: Path, page_bytes: int = PAGE_BYTES) -> list[d
         buf, size = [], 0
 
     n = 0
-    for n, (at, label, text) in enumerate(records(log), 1):
+    for n, (at, label, text) in enumerate(session_record(chain(log)), 1):
         block = f"\n#{n} {at} {label}\n{text}\n"
         b = len(block.encode("utf-8"))
         if size and size + b > page_bytes:

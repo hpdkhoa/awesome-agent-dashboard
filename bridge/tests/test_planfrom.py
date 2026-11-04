@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from agent_bridge.digest import records, write_pages
+from agent_bridge.digest import chain, records, session_record, write_pages
 from agent_bridge.inbox import Inbox, check_example
 from agent_bridge.planfrom import kind_args, mark_quotes
 from agent_bridge.runs import message_command
@@ -173,3 +173,54 @@ def test_a_quote_in_the_notes_that_differs_from_the_page_is_marked():
     out, seen, off = mark_quotes(notes, page, 9)
     assert (seen, off) == (3, 1)
     assert out.count("[quote differs from page 09") == 1 and out.index("[quote differs") > out.index("tell me")
+
+
+def msg(kind, text, uid, parent=None, **f):
+    return entry(kind, text, uuid=uid, parentUuid=parent, **f)
+
+
+def write_chain(folder):
+    """An old session, a new one forked from it (copying its tail), and a decoy log that only prints the fork id."""
+    proj = folder / "proj"
+    proj.mkdir(parents=True)
+    (proj / "old.jsonl").write_text("\n".join([
+        msg("user", "first ask", "u1"), msg("assistant", "did the first", "u2", "u1"),
+        msg("user", "second ask", "u3", "u2"), msg("assistant", "did the second", "u4", "u3"),
+        msg("user", "branch ask that the new log never got", "u9", "u4"),
+    ]), encoding="utf-8")
+    (proj / "decoy.jsonl").write_text("\n".join([
+        msg("user", "look at u4", "d1"), msg("assistant", [{"type": "text", "text": "u4"}], "u4-not", "d1"),
+        json.dumps({"type": "user", "uuid": "d2", "message": {"content": [{"type": "tool_result", "content": "u4"}]}}),
+    ]), encoding="utf-8")
+    (proj / "new.jsonl").write_text("\n".join([
+        msg("user", "summary of before", "c1", "u4", isCompactSummary=True),
+        msg("assistant", "did the second", "u4", "u3"),  # a copy of the old tail
+        msg("user", "third ask", "n1", "c1"), msg("assistant", "did the third", "n2", "n1"),
+    ]), encoding="utf-8")
+    return proj
+
+
+def test_a_session_that_continues_an_earlier_one_is_read_with_it_first(tmp_path):
+    proj = write_chain(tmp_path)
+    logs = chain(proj / "new.jsonl")
+    assert [(p.stem, stop) for p, stop in logs] == [("old", "u4"), ("new", "")]
+    rec = session_record(logs)
+    texts = [r[2] for r in rec]
+    assert [r[1] for r in rec][0] == "SESSION old" and "SESSION new" in [r[1] for r in rec]
+    assert texts.index("first ask") < texts.index("summary of before") < texts.index("third ask")
+    assert texts.count("did the second") == 1  # the copied tail is read once
+    assert "branch ask that the new log never got" not in texts  # after the fork point, not on this session's path
+
+
+def test_a_log_that_only_prints_the_fork_id_is_not_taken_as_the_earlier_session(tmp_path):
+    proj = write_chain(tmp_path)
+    (proj / "old.jsonl").unlink()
+    assert chain(proj / "new.jsonl")[0][0].stem == "new"
+
+
+def test_a_fresh_session_reads_as_before_with_no_session_marks(tmp_path):
+    log = write_log(tmp_path)
+    assert session_record(chain(log)) == records(log)
+    pages = write_pages(write_chain(tmp_path / "c") / "new.jsonl", tmp_path / "out")
+    text = (tmp_path / "out" / pages[0]["file"]).read_text(encoding="utf-8")
+    assert "SESSION old" in text and text.index("first ask") < text.index("third ask")

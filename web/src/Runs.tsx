@@ -19,11 +19,17 @@ function ago(iso?: string) {
   return Math.floor(s / 86400) + "d ago";
 }
 
-// The prompt behind "Start a plan" (the owner's choice, 2026-11-02: "Do 1"): one session runs the whole plan.
+// The prompt behind "Start a plan" (the owner's choice, 2026-11-02: "Do 1"): one session runs the whole plan. The
+// mockup and the picture examples: the owner's words, 2026-11-03, "show me a demo or visualize first to see that you can
+// get my idea or not, also a mockup to see how the user stories in this plan will be", and "images ... will need to show
+// me the before and after" (validation of plan 6d5d3d3b, 2026-11-04: only text examples, no mockup).
 export const planPrompt = (topic: string) =>
   `Plan this with the owner: ${topic}
 
-Open the plan with plan_start (a short title). Ask each round of questions with inbox_ask, with options and one marked
+Open the plan with plan_start (a short title). Before round 1, make one mockup of how the user stories in this plan
+will look, as a PNG or SVG picture in this folder, and post it with inbox_result so the owner can check you got the
+idea. When an option changes what the owner will see (a screen, a layout, a picture), its example is an image example
+with before and after pictures: the mockup as it is, and the mockup with that option. Ask each round of questions with inbox_ask, with options and one marked
 recommended. After each round, post the whole plan with plan_version and one line on what changed. Keep asking until
 the owner agrees, then close it with plan_close. Keep the whole plan in this one session.`;
 
