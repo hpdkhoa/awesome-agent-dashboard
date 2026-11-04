@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { sendGenerate, sendPhaseOrder, sendPlanCheck, usePlanVersions, type InboxItem, type Plan, type Run, type Session } from "./data";
-import { checkGenerate, generatePrompt, KINDS, kindName, lastOrder, resumePrompt, type GenerateCheck, type Kind } from "./planCheck";
+import { checkGenerate, generateFolder, generatePrompt, KINDS, kindName, lastOrder, resumePrompt, type GenerateCheck, type Kind } from "./planCheck";
 import { openFile } from "./FileView";
 import { HarnessSection } from "./HarnessView";
 import { PHASES, phaseName, phaseOf, phaseOrder, phasePrompt, phaseStarts } from "./phases";
@@ -53,7 +53,7 @@ function GenerateBox({ plan, items, runs }: { plan: Plan; items: InboxItem[]; ru
   const going = runs.some((r) => r.planId === plan.id && (r.generate || r.planCheck) && (r.status === "new" || r.status === "running"));
   const order = lastOrder(plan, runs);
   const fail = (e: unknown) => setError(String((e as { code?: string })?.code ?? e));
-  const generate = (ks: Kind[], n: string) => sendGenerate(plan, ks, n, generatePrompt(ks, n)).then(() => setC(null)).catch(fail);
+  const generate = (ks: Kind[], n: string) => sendGenerate(plan, ks, n, generatePrompt(ks, n, generateFolder(plan))).then(() => setC(null)).catch(fail);
   return (
     <Section id="plan.generate" title="Generate and check" extra={order ? `last: ${order.kinds.map(kindName).join(", ")}` : ""} open>
       <div className="chips">

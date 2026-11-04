@@ -224,6 +224,28 @@ def start_command(claude: str, prompt: str, session_id: str, mode: str = "manual
             "--permission-prompt-tool", APPROVAL_TOOL, *mode_args(mode)]
 
 
+# Generated files (the owner's choice, 2026-11-04: "use The project folder and add .gitignore"; approved: named by
+# plan id, never overwritten inside a version, kept when a plan is deleted): <project>/.plan_data/<plan id>/v<n>/.
+PLAN_DATA = ".plan_data/"
+
+
+def ensure_plan_data_ignored(cwd: str) -> bool:
+    """Adds .plan_data/ to the project's .gitignore when the folder is in a git work tree and the line is missing.
+    Only appends a line; returns whether it wrote."""
+    folder = Path(cwd)
+    if not any((d / ".git").exists() for d in (folder, *folder.parents)):
+        return False
+    gi = folder / ".gitignore"
+    old = gi.read_text(encoding="utf-8", errors="replace") if gi.exists() else ""
+    if any(line.strip() in (PLAN_DATA, PLAN_DATA.rstrip("/"), "/" + PLAN_DATA) for line in old.splitlines()):
+        return False
+    sep = "" if not old or old.endswith("\n") else "\n"
+    note = "# Files a plan's Generate makes (agent dashboard), one folder per plan version"
+    with gi.open("a", encoding="utf-8") as f:  # appends only: the lines already there are never rewritten
+        f.write(f"{sep}\n{note}\n{PLAN_DATA}\n")
+    return True
+
+
 def message_command(claude: str, message: str, session_id: str, mode: str = "manual", kind: str = "") -> list[str]:
     """kind: a plan message's kind (qa, goal, step, rule, lesson); it goes as an appended system prompt."""
     return [claude, "-p", message, "--output-format", "json", "--resume", session_id,
@@ -379,6 +401,11 @@ class Runs:
                 return f"{c['id']}: session {sid} {'is in a turn' if why == 'turn' else 'is open in the app or a terminal'}, the message waits"
             return None
         mode, kind = self.mode(), c.get("kind") if c.get("kind") in KINDS else ""
+        if c.get("generate"):
+            try:
+                ensure_plan_data_ignored(cwd)
+            except OSError:
+                pass  # a read-only .gitignore never stops the order; the session's files still go to .plan_data
         p = self._spawn(c["id"], message_command(self.claude, text, sid, mode, kind), cwd)
         self.store.update(path, {"status": "running", "workType": wt, "pid": p.pid, "startedAt": now_iso(),
                                  "permissionMode": mode})

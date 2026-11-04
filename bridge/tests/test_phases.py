@@ -82,3 +82,18 @@ def test_build_takes_only_the_ticked_harness_items_and_a_changed_item_needs_a_ne
         "h3": {"ok": True, "hash": item_hash(stale)}}}})
     n = ib.plan_version(pid, "", "Build", phase="build", order="Move the plan to phase Build.")
     assert store.docs[f"planVersions/{pid}_v{n}"]["phaseMove"]["harness"] == {"approved": ["h1"], "notApproved": ["h2", "h3"]}
+
+
+def test_a_generate_order_adds_plan_data_to_the_projects_gitignore_once(tmp_path):
+    from agent_bridge.runs import ensure_plan_data_ignored
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    (repo / ".gitignore").write_text("node_modules/", encoding="utf-8")  # no newline at the end
+    assert ensure_plan_data_ignored(str(repo)) is True
+    text = (repo / ".gitignore").read_text(encoding="utf-8")
+    assert text.startswith("node_modules/\n") and text.rstrip().endswith(".plan_data/")
+    assert ensure_plan_data_ignored(str(repo)) is False  # already there: nothing written twice
+    assert (repo / ".gitignore").read_text(encoding="utf-8") == text
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    assert ensure_plan_data_ignored(str(plain)) is False and not (plain / ".gitignore").exists()  # not a git folder

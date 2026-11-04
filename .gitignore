@@ -23,3 +23,6 @@ __pycache__/
 .venv/
 *.egg-info/
 .pytest_cache/
+
+# Files a plan's Generate makes (agent dashboard), one folder per plan version
+.plan_data/

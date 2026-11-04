@@ -41,14 +41,20 @@ export function checkGenerate(plan: Plan, order: GenerateOrder, items: InboxItem
   return { order, got, missing: order.kinds.filter((k) => !got[k]?.length) };
 }
 
+// Where the files go (the owner's choice, 2026-11-04: "use The project folder and add .gitignore"; approved: "Name the
+// folder by plan id, not session id", "Never overwrite inside a version", "Delete keeps the files"): one folder per
+// plan version, inside the plan's project folder. The bridge adds .plan_data/ to the project's .gitignore.
+export const generateFolder = (plan: Pick<Plan, "id" | "current">) => `.plan_data/${plan.id}/v${plan.current}`;
+
 // The order the Generate button sends, and Make the missing sends again for the kinds still missing.
-export function generatePrompt(kinds: Kind[], note: string): string {
+export function generatePrompt(kinds: Kind[], note: string, folder: string): string {
   const list = kinds.map((k) => `- ${kindName(k)}: ${KINDS.find((x) => x.id === k)?.makes}`).join("\n");
   return [
     "The owner asks you to generate these for this plan:",
     list,
     note.trim() ? `The owner's note: "${note.trim()}"` : "",
-    'Make each as a file in this folder. Post each kind with inbox_result(title="Generated <kind>: what it shows", files=[the paths]), one result per kind. Then go on with the plan; do not change the plan unless the owner asks.',
+    `Save each file in ${folder}/ (make the folder), named <kind>-<what>.<ext>. Never overwrite: if the name is taken, add -2, -3.`,
+    'Post each kind with inbox_result(title="Generated <kind>: what it shows", files=[the paths]), one result per kind. Then go on with the plan; do not change the plan unless the owner asks.',
   ].filter(Boolean).join("\n\n");
 }
 
