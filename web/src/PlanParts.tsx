@@ -10,6 +10,7 @@ import { MoreMenu } from "./MoreMenu";
 import { diffLines, linkEntries, PART_NAMES, partLines } from "./planDiff";
 import { phaseName, phaseOf, phaseStarts } from "./phases";
 import { HarnessSection } from "./HarnessView";
+import { GeneratedSection } from "./GeneratedView";
 import { buildNote } from "./harness";
 import { RunList } from "./Runs";
 import { Section } from "./Section";
@@ -202,6 +203,8 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
           );
         })}
       </Section>
+
+      <GeneratedSection plan={plan} v={v} />
 
       <PlanMessage plan={plan} />
       {msgs.length > 0 && <RunList runs={msgs} title="Messages on this plan" />}

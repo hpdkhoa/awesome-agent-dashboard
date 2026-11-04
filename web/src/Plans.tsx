@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { sendGenerate, sendPhaseOrder, sendPlanCheck, usePlanVersions, type InboxItem, type Plan, type Run, type Session } from "./data";
-import { checkGenerate, generateFolder, generatePrompt, KINDS, kindName, lastOrder, resumePrompt, type GenerateCheck, type Kind } from "./planCheck";
+import { sendApproveGenerated, sendGenerate, sendPhaseOrder, sendPlanCheck, usePlanVersions, type InboxItem, type Plan, type Run, type Session } from "./data";
+import { approvals, checkGenerate, generateFolder, generatePrompt, tmpFolderOf, KINDS, kindName, lastOrder, resumePrompt, type GenerateCheck, type Kind } from "./planCheck";
 import { openFile } from "./FileView";
 import { HarnessSection } from "./HarnessView";
+import { GeneratedSection } from "./GeneratedView";
 import { PHASES, phaseName, phaseOf, phaseOrder, phasePrompt, phaseStarts } from "./phases";
 import { MoreMenu } from "./MoreMenu";
 import { PartsView } from "./PlanParts";
@@ -54,6 +55,12 @@ function GenerateBox({ plan, items, runs }: { plan: Plan; items: InboxItem[]; ru
   const order = lastOrder(plan, runs);
   const fail = (e: unknown) => setError(String((e as { code?: string })?.code ?? e));
   const generate = (ks: Kind[], n: string) => sendGenerate(plan, ks, n, generatePrompt(ks, n, generateFolder(plan))).then(() => setC(null)).catch(fail);
+  const [ticked, setTicked] = useState<string[]>([]);
+  const pending = c ? approvals(c, ticked) : [];
+  const approving = runs.some((r) => r.planId === plan.id && r.action === "approve_generated" && (r.status === "new" || r.status === "running"));
+  const approved = runs.filter((r) => r.planId === plan.id && r.action === "approve_generated" && r.status === "done").flatMap((r) => (r.moved ?? []).map((m) => m.to));
+  const approve = () =>
+    Promise.all(pending.map((a) => sendApproveGenerated(plan, a))).then(() => (setC(null), setTicked([]))).catch(fail);
   return (
     <Section id="plan.generate" title="Generate and check" extra={order ? `last: ${order.kinds.map(kindName).join(", ")}` : ""} open>
       <div className="chips">
@@ -71,29 +78,52 @@ function GenerateBox({ plan, items, runs }: { plan: Plan; items: InboxItem[]; ru
       </div>
       {c && (
         <>
-          <table>
-            <tbody>
-              {c.order.kinds.map((k) => (
-                <tr key={k}>
-                  <td>{kindName(k)}</td>
-                  <td className={c.got[k]?.length ? "small ok-fg" : "small bad"}>
-                    {c.got[k]?.length
-                      ? c.got[k]!.map((f) => <code key={f} className="file-link" role="button" onClick={() => openFile(f, plan.cwd)}>{f} </code>)
-                      : "missing"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {c.missing.length > 0 ? (
-            <button className="primary" disabled={going} onClick={() => generate(c.missing, c.order.note)}>{going ? "Sent" : "Make the missing"}</button>
-          ) : (
-            plan.status === "open" && (
-              <button className="primary" disabled={going} onClick={() => sendPlanCheck(plan, resumePrompt).catch(fail)}>{going ? "Sent" : "Resume the plan"}</button>
-            )
-          )}
+          {c.order.kinds.map((k) => {
+            const files = c.got[k] ?? [];
+            return (
+              <details key={k} className="gen-kind" open={files.length === 0}>
+                <summary>
+                  <b>{kindName(k)}</b>{" "}
+                  <span className={files.length ? "small ok-fg" : "small bad"}>
+                    {files.length ? `${files.length} file${files.length > 1 ? "s" : ""}` : "missing"}
+                  </span>
+                </summary>
+                <ul className="gen-files">
+                  {files.map((f) => {
+                    const waiting = tmpFolderOf(f) !== null;
+                    return (
+                      <li key={f}>
+                        <label>
+                          <input type="checkbox" disabled={!waiting} checked={!waiting || ticked.includes(f)}
+                            onChange={(e) => setTicked(e.target.checked ? [...ticked, f] : ticked.filter((x) => x !== f))} />{" "}
+                          <code className="file-link" role="button" onClick={(e) => (e.preventDefault(), openFile(f, plan.cwd))}>{f}</code>
+                          <span className="small muted">{waiting ? " · waiting for approval" : " · approved"}</span>
+                        </label>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </details>
+            );
+          })}
+          <div className="chips">
+            {c.missing.length > 0 ? (
+              <button className="primary" disabled={going} onClick={() => generate(c.missing, c.order.note)}>{going ? "Sent" : "Make the missing"}</button>
+            ) : (
+              plan.status === "open" && (
+                <button className="chip" disabled={going} onClick={() => sendPlanCheck(plan, resumePrompt).catch(fail)}>{going ? "Sent" : "Resume the plan"}</button>
+              )
+            )}
+            {pending.length > 0 && (
+              <button className="primary" disabled={approving} onClick={approve}>
+                {approving ? "Approving" : `Approve the final result (${pending.reduce((n, a) => n + a.keep.length, 0)} kept)`}
+              </button>
+            )}
+          </div>
+          {pending.length > 0 && <p className="muted small">Ticked files move into the plan's version folder. The rest, the tmp folder and their results on the dashboard are removed.</p>}
         </>
       )}
+      {approved.length > 0 && <p className="muted small">{approved.length} approved file(s): see the plan's Generated section.</p>}
       {error && <p className="bad small">{error}</p>}
     </Section>
   );
@@ -203,6 +233,10 @@ export function PlanView({ plan, items, session, runs = [], onOpenItem }: {
           </div>
         );
       })}
+      {versions && plan.kind !== "parts" && (() => {
+        const cur = versions.find((x) => x.n === plan.current);
+        return cur ? <GeneratedSection plan={plan} v={cur} /> : null;
+      })()}
     </article>
   );
 }

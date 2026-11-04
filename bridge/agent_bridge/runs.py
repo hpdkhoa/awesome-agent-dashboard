@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import re
 import time
 from datetime import datetime, timezone
@@ -327,7 +328,8 @@ class Runs:
             action = c.get("action")
             line = (self._start(c) if action == "start" else self._message(c) if action == "message"
                     else self._stop(c) if action == "stop" else self._check(c) if action == "check"
-                    else self._plan(c) if action == "plan" else self._unknown(c))
+                    else self._plan(c) if action == "plan" else self._approve_generated(c) if action == "approve_generated"
+                    else self._unknown(c))
             if line:
                 log.append(line)
         for cid, p in list(self.procs.items()):
@@ -411,6 +413,59 @@ class Runs:
                                  "permissionMode": mode})
         self._answer_back(c, {"waitReason": None})
         return f"{c['id']}: sent to session {sid}"
+
+    def _approve_generated(self, c: dict) -> str:
+        """The owner approves the final result of a Generate (the owner's words, 2026-11-04: "the generated files I'm not
+        approved must stay in a tmp folder inside current folder structure of generated files; then when I approve the
+        final result of the generated step then only approved items go to plan, tmp files need to be removed (tmp
+        folder and dashboard)"). Moves the approved files from <version>/tmp/ to <version>/ (never overwriting),
+        removes the tmp folder, and deletes the plan session's "Generated" results that pointed into it."""
+        path, cwd = f"commands/{c['id']}", c.get("cwd", "")
+        folder = str(c.get("folder") or "")
+        plan = self.store.get(f"plans/{c.get('planId', '')}") or {}
+        why = ("No such plan." if not plan else "The plan's folder is not under a registered folder on this machine."
+               if work_type_of(cwd, self.roots) == "other" or not os.path.isdir(cwd)
+               else "The folder is not a plan version folder." if not re.fullmatch(r"\.plan_data/[A-Za-z0-9]+/v\d+", folder)
+               or folder.split("/")[1] != plan.get("id") else "")
+        if why:
+            self.store.update(path, {"status": "failed", "endedAt": now_iso(), "error": why})
+            return f"{c['id']}: refused, {why}"
+        base = (Path(cwd) / folder).resolve()
+        tmp = base / "tmp"
+        moved, skipped = [], []
+        for rel in c.get("keep") or []:
+            src = (Path(cwd) / str(rel)).resolve()
+            if not src.is_file() or tmp not in src.parents:
+                skipped.append(str(rel))
+                continue
+            dest, n = base / src.name, 2
+            while dest.exists():  # never overwrite: -2, -3
+                dest = base / f"{src.stem}-{n}{src.suffix}"
+                n += 1
+            shutil.move(str(src), str(dest))
+            moved.append({"from": str(rel), "to": dest.relative_to(Path(cwd).resolve()).as_posix()})
+        if tmp.is_dir():
+            shutil.rmtree(tmp)
+        if moved:  # the plan's Generated section (the owner, 2026-11-04: "not new version because the generated just is
+            # the artifact to visualize the plan, it is the supplement for the current version"): one small record per
+            # plan, the approved files per version folder; never a plan version
+            rec = self.store.get(f"planGenerated/{plan['id']}") or {"planId": plan["id"], "versions": {}}
+            key = folder.rsplit("/", 1)[1]
+            rec.setdefault("versions", {}).setdefault(key, [])
+            for m in moved:
+                name = m["to"].rsplit("/", 1)[-1]
+                rec["versions"][key].append({"file": m["to"], "kind": name.split("-", 1)[0], "at": now_iso()})
+            self.store.put_many({f"planGenerated/{plan['id']}": rec})
+        removed = 0
+        for item_id in c.get("drop") or []:
+            item = self.store.get(f"inbox/{item_id}") or {}
+            if (item.get("kind") == "result" and item.get("sessionId") == plan.get("sessionId")
+                    and str(item.get("title", "")).lower().startswith("generated")):
+                self.store.delete(f"inbox/{item_id}")
+                removed += 1
+        self.store.update(path, {"status": "done", "endedAt": now_iso(), "moved": moved, "skipped": skipped,
+                                 "removed": removed})
+        return f"{c['id']}: approved {len(moved)} generated file(s), removed tmp and {removed} result(s)"
 
     def _check(self, c: dict) -> str:
         """"Check now" on a session page: writes what the wait rule sees, once, on the command itself."""

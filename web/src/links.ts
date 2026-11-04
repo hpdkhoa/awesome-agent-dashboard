@@ -18,7 +18,7 @@ const newId = () => crypto.randomUUID().replace(/-/g, "").slice(0, 20);
 const LINKS: Record<string, [string, string][]> = {
   sessions: [["commands", "sessionId"], ["commands", "sourceSessionId"], ["inbox", "sessionId"], ["plans", "sessionId"]],
   commands: [["inbox", "commandId"], ["commands", "target"], ["plans", "source.commandId"]],
-  plans: [["planVersions", "planId"], ["planSteps", "planId"], ["planHarness", "planId"], ["inbox", "planId"], ["commands", "planId"]],
+  plans: [["planVersions", "planId"], ["planSteps", "planId"], ["planHarness", "planId"], ["planGenerated", "planId"], ["inbox", "planId"], ["commands", "planId"]],
 };
 
 const text = (d: Record<string, unknown>) =>

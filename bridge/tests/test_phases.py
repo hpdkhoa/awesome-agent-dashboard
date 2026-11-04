@@ -97,3 +97,44 @@ def test_a_generate_order_adds_plan_data_to_the_projects_gitignore_once(tmp_path
     plain = tmp_path / "plain"
     plain.mkdir()
     assert ensure_plan_data_ignored(str(plain)) is False and not (plain / ".gitignore").exists()  # not a git folder
+
+
+def test_approving_the_generated_result_moves_the_approved_files_and_cleans_tmp_and_the_dashboard(tmp_path, monkeypatch):
+    from test_runs import cmd, setup
+    store, runs, work = setup(tmp_path, monkeypatch)
+    store.put_many({"plans/pl1": {"id": "pl1", "sessionId": "s1"},
+                    "inbox/r1": {"id": "r1", "kind": "result", "sessionId": "s1", "title": "Generated diagram: a"},
+                    "inbox/r2": {"id": "r2", "kind": "result", "sessionId": "s1", "title": "Generated mockup: b"},
+                    "inbox/q1": {"id": "q1", "kind": "question", "sessionId": "s1", "title": "Generated? no"},
+                    "inbox/o1": {"id": "o1", "kind": "result", "sessionId": "other", "title": "Generated diagram"}})
+    tmp = work / ".plan_data" / "pl1" / "v3" / "tmp"
+    tmp.mkdir(parents=True)
+    for name in ("diagram-a.svg", "mockup-b.svg"):
+        (tmp / name).write_text(name, encoding="utf-8")
+    (tmp.parent / "diagram-a.svg").write_text("approved earlier", encoding="utf-8")  # taken: the new one gets -2
+    outside = work / "secret.txt"
+    outside.write_text("keep", encoding="utf-8")
+    cmd(store, "a1", action="approve_generated", planId="pl1", cwd=str(work), folder=".plan_data/pl1/v3",
+        keep=[".plan_data/pl1/v3/tmp/diagram-a.svg", "secret.txt", "../x.svg"], drop=["r1", "r2", "q1", "o1"])
+    runs.step()
+    c = store.get("commands/a1")
+    assert c["status"] == "done", c
+    assert c["moved"] == [{"from": ".plan_data/pl1/v3/tmp/diagram-a.svg", "to": ".plan_data/pl1/v3/diagram-a-2.svg"}]
+    assert c["skipped"] == ["secret.txt", "../x.svg"] and outside.exists()  # nothing outside tmp is touched
+    assert (tmp.parent / "diagram-a.svg").read_text(encoding="utf-8") == "approved earlier"  # never overwritten
+    assert not tmp.exists()  # the unapproved mockup went with the tmp folder
+    assert c["removed"] == 2 and "inbox/r1" not in store.docs and "inbox/r2" not in store.docs
+    assert "inbox/q1" in store.docs and "inbox/o1" in store.docs  # only this session's Generated results
+    gen = store.get("planGenerated/pl1")["versions"]["v3"]
+    assert [(g["file"], g["kind"]) for g in gen] == [(".plan_data/pl1/v3/diagram-a-2.svg", "diagram")]
+    assert "planVersions/pl1_v4" not in store.docs  # a supplement, never a plan version
+
+
+def test_approving_refuses_a_folder_that_is_not_the_plans_version_folder(tmp_path, monkeypatch):
+    from test_runs import cmd, setup
+    store, runs, work = setup(tmp_path, monkeypatch)
+    store.put_many({"plans/pl1": {"id": "pl1", "sessionId": "s1"}})
+    for i, folder in enumerate([".", ".plan_data/other/v1", ".plan_data/pl1/v1/../../.."]):
+        cmd(store, f"b{i}", action="approve_generated", planId="pl1", cwd=str(work), folder=folder, keep=[], drop=[])
+    runs.step()
+    assert all(store.get(f"commands/b{i}")["status"] == "failed" for i in range(3))

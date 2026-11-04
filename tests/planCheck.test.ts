@@ -1,7 +1,7 @@
 // Generate and check on a plan: the owner's last order, what came back for it, and what the buttons send.
 import { describe, expect, it } from "vitest";
 import type { InboxItem, Plan, Run } from "../web/src/data";
-import { checkGenerate, generateFolder, generatePrompt, lastOrder } from "../web/src/planCheck";
+import { approvals, checkGenerate, generateFolder, generatePrompt, lastOrder, tmpFolderOf } from "../web/src/planCheck";
 
 const plan = { id: "p1", sessionId: "s1", createdAt: "2026-11-04T01:00:00Z", status: "open" } as Plan;
 const run = (f: Partial<Run>) => ({ id: "r", action: "message", planId: "p1", createdAt: "2026-11-04T02:00:00Z", ...f }) as Run;
@@ -36,11 +36,28 @@ describe("generate and check", () => {
 
   it("asks for each kind as a file and one result per kind, with the owner's note", () => {
     const t = generatePrompt(["mockup", "data"], "phone width", generateFolder({ id: "p1", current: 3 }));
-    expect(t).toContain("Save each file in .plan_data/p1/v3/");
+    expect(t).toContain("Save each file in .plan_data/p1/v3/tmp/");
+    expect(t).toContain("stay in tmp/ until the owner approves");
     expect(t).toContain("Never overwrite: if the name is taken, add -2, -3.");
     expect(t).toContain("- Mockup:");
     expect(t).toContain("- Data: sample or measured data, as CSV or JSON");
     expect(t).toContain('The owner\'s note: "phone width"');
     expect(t).toContain('inbox_result(title="Generated <kind>');
+  });
+
+  it("groups an approval per version folder: ticked files kept, every tmp result dropped", () => {
+    expect(tmpFolderOf(".plan_data/p1/v3/tmp/diagram-a.svg")).toBe(".plan_data/p1/v3");
+    expect(tmpFolderOf(".plan_data\\p1\\v3\\tmp\\a.svg")).toBe(".plan_data/p1/v3"); // Windows separators
+    expect(tmpFolderOf(".plan_data/p1/v3/diagram-a.svg")).toBeNull(); // already approved
+    const order = { kinds: ["diagram", "mockup"] as ("diagram" | "mockup")[], note: "", at: "2026-11-04T02:00:00Z" };
+    const c = checkGenerate(plan, order, [
+      result("Generated diagram: a", [".plan_data/p1/v3/tmp/diagram-a.svg", ".plan_data/p1/v3/tmp/diagram-b.svg"]),
+      result("Generated mockup: m", [".plan_data/p1/v3/tmp/mockup-m.svg"]),
+      result("Generated diagram: old", [".plan_data/p1/v2/diagram-old.svg"]),
+    ]);
+    expect(approvals(c, [".plan_data/p1/v3/tmp/diagram-b.svg"])).toEqual([
+      { folder: ".plan_data/p1/v3", keep: [".plan_data/p1/v3/tmp/diagram-b.svg"],
+        drop: ["Generated diagram: a", "Generated mockup: m"] },
+    ]);
   });
 });

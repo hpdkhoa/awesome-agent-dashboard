@@ -201,3 +201,13 @@ td + td { padding-left: 12px; }
 .harness { list-style: none; padding-left: 0; }
 .harness li { margin: 6px 0; }
 .harness input[type="checkbox"] { width: 1.1em; height: 1.1em; vertical-align: middle; }
+
+/* Generate and check (Plans.tsx): one fold per kind, one checkbox per file waiting in tmp/. */
+.gen-kind { margin: 6px 0; border: 1px solid var(--line, #3a3a3a); border-radius: 8px; padding: 4px 10px; }
+.gen-kind summary { cursor: pointer; }
+.gen-files { list-style: none; padding-left: 4px; }
+.gen-files li { margin: 4px 0; overflow-wrap: anywhere; }
+
+/* The plan's Generated section (GeneratedView.tsx): approved files, pictures inline. */
+.gen-figure { margin: 10px 0; }
+.gen-figure img { max-width: 100%; height: auto; border: 1px solid var(--line, #3a3a3a); border-radius: 8px; background: #1a1a1a; }

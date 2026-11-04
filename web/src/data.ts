@@ -133,7 +133,8 @@ export type Run = {
   target?: string;
   cwd?: string;
   status: "new" | "waiting" | "running" | "stopping" | "done" | "stopped" | "failed" | "lost" | "cancelled";
-  action: "start" | "stop" | "message" | "check" | "plan";
+  action: "start" | "stop" | "message" | "check" | "plan" | "approve_generated";
+  moved?: { from: string; to: string }[]; // approve_generated: the approved files, where they went
   kind?: PlanKind; // a message on a plan
   planId?: string;
   sourceSessionId?: string; // plan from a session: the session it reads
@@ -272,6 +273,17 @@ export function usePlanSteps(planId: string | undefined): PlanStep[] | null {
   return rows;
 }
 
+// The plan's Generated section (GeneratedView.tsx): the approved files per version folder, written by the bridge.
+export type PlanGenerated = { planId: string; versions: Record<string, { file: string; kind: string; at: string }[]> };
+export function usePlanGenerated(planId: string | undefined): PlanGenerated | null {
+  const [g, setG] = useState<PlanGenerated | null>(null);
+  useEffect(() => {
+    if (!planId) return;
+    return onSnapshot(doc(db, "planGenerated", planId), (s) => setG((s.data() as PlanGenerated) ?? { planId, versions: {} }));
+  }, [planId]);
+  return g;
+}
+
 // The owner's ticks on the harness (harness.ts): one small record per plan, never a plan version.
 export function useHarness(planId: string | undefined): HarnessTicks | null {
   const [t, setT] = useState<HarnessTicks | null>(null);
@@ -330,6 +342,16 @@ export const sendGenerate = (plan: Plan, kinds: string[], note: string, text: st
   return setDoc(doc(db, "commands", id), {
     id, action: "message", machine: plan.machine, sessionId: plan.sessionId, cwd: plan.cwd, prompt: text, ownerText: order,
     planId: plan.id, generate: { kinds, note: note.trim() }, status: "new", createdAt: new Date().toISOString(),
+  });
+};
+
+// The owner's approval of a Generate result (planCheck.ts approvals): the bridge moves the ticked files out of tmp/,
+// removes tmp/ and deletes the "Generated" results that pointed into it.
+export const sendApproveGenerated = (plan: Plan, a: { folder: string; keep: string[]; drop: string[] }) => {
+  const id = newId();
+  return setDoc(doc(db, "commands", id), {
+    id, action: "approve_generated", machine: plan.machine, cwd: plan.cwd, planId: plan.id, ...a,
+    status: "new", createdAt: new Date().toISOString(),
   });
 };
 
