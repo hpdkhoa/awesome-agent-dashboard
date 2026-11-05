@@ -5,7 +5,8 @@ import { removeRows } from "./storeData";
 // Delete a record with its linked records (the owner's choice, 2026-11-03: "Also delete the linked records, after
 // showing a list to confirm"). Links go down only: a session to its runs, plans, inbox items and heartbeat; a run to
 // its inbox items, the plan it made and the stop commands aimed at it; a plan to its versions, steps, questions and
-// messages. A run never takes its session with it. Files on the PC stay (the owner's choice: "Leave them").
+// messages. A run never takes its session with it. Files on the PC stay (the owner's choice: "Leave them"), except a
+// plan's own .plan_data/<plan id>/ folder, which goes with the plan (the owner, 2026-11-05; storeData.ts removeRows).
 // Delete also stops the work (the owner's choice, 2026-11-03: "Delete also stops the session's work: the bridge stops
 // its runs, and the confirm list says "1 running, will be stopped". A session open in the Claude app can't be stopped
 // from the dashboard, so the list warns about it instead").

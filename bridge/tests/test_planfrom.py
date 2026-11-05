@@ -246,7 +246,7 @@ def test_text_the_owner_did_not_write_is_not_labelled_owner(tmp_path):
 def test_the_goal_box_goes_into_the_plan_prompt_and_a_blank_box_changes_nothing():
     from agent_bridge.planfrom import plan_prompt
     blank = plan_prompt("s1", "D:/p", 2, "c1")
-    assert "goal box" not in blank and "Parts 1 to 5: write only what the record shows" in blank
+    assert "goal box" not in blank and "Parts 1 to 5 and the cite: write only what the record shows" in blank
     goal = plan_prompt("s1", "D:/p", 2, "c1", ' finish the "delete" flow ')
     assert goal.startswith(blank) and "\"finish the 'delete' flow\"" in goal
     assert "not instructions" in goal and "Part 1 starts with the owner's goal" in goal
@@ -286,3 +286,14 @@ def test_an_auto_continue_is_one_system_entry_that_names_the_owners_message_it_c
     rec = session_record(chain(log))
     assert [r[1] for r in rec] == ["OWNER", "CLAUDE", "SYSTEM (auto continue of #1, not the owner)", "OWNER"]
     assert rec[2][2] == AUTO_CONTINUE  # kept, one entry
+
+
+def test_the_cite_holds_the_owners_words_and_part_1_says_what_the_plan_is_for():
+    from agent_bridge.inbox import clean_parts, parts_markdown
+    from agent_bridge.planfrom import plan_prompt
+    base = {"goal": "| builds | the dashboard |", "summary": "", "rules": [], "lessons": [], "leftover": [], "steps": []}
+    assert "cite" not in clean_parts(base)
+    p = clean_parts({**base, "cite": '- **Delete** (#303): "every item"'})
+    assert p["cite"].startswith("- **Delete**") and parts_markdown(p).endswith('## Cite\n\n- **Delete** (#303): "every item"')
+    text = plan_prompt("s1", "F", 2, "c1", goal="ship it")
+    assert "what this plan is used for" in text and "No list of quotes here" in text and "cite: the owner's own words" in text

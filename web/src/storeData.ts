@@ -1,5 +1,5 @@
 import {
-  collection, doc, getCountFromServer, getDocs, limit, orderBy, query, startAfter, writeBatch,
+  collection, doc, getCountFromServer, getDoc, getDocs, limit, orderBy, query, setDoc, startAfter, writeBatch,
   type QueryConstraint, type QueryDocumentSnapshot,
 } from "firebase/firestore";
 import { db } from "./firebase";
@@ -67,8 +67,17 @@ export async function listPage(name: string, after?: QueryDocumentSnapshot) {
 }
 
 // Deletes in batches of 400; a bridge path also goes on meta/deleted in the same batch, so the two never disagree.
+// A deleted plan takes its own folder on the PC with it (the owner's words, 2026-11-05: "confirmed, deleting a plan will
+// also remove that plan's own folder, <project>\.plan_data\<plan id>\, and nothing outside it"; this replaces
+// "Leave them" for plan files only). The page can't touch the PC, so it asks the plan's bridge, after the delete.
+export const planFolder = (id: string) => `.plan_data/${id}`;
+
 export async function removeRows(name: string, paths: string[]) {
   const bridge = COLLECTIONS.find((x) => x.name === name)?.bridge;
+  const plans = name === "plans"
+    ? (await Promise.all(paths.map((p) => getDoc(doc(db, p))))).filter((s) => s.exists()).map((s) => ({ id: s.id, ...s.data() }) as {
+        id: string; machine?: string; cwd?: string })
+    : [];
   const at = new Date().toISOString();
   for (let i = 0; i < paths.length; i += 400) {
     const part = paths.slice(i, i + 400);
@@ -76,5 +85,10 @@ export async function removeRows(name: string, paths: string[]) {
     for (const p of part) b.delete(doc(db, p));
     if (bridge) b.set(doc(db, "meta", "deleted"), { paths: Object.fromEntries(part.map((p) => [p, at])) }, { merge: true });
     await b.commit();
+  }
+  for (const p of plans.filter((x) => x.machine && x.cwd)) {
+    const id = crypto.randomUUID().replace(/-/g, "").slice(0, 20);
+    await setDoc(doc(db, "commands", id), { id, action: "delete_plan_files", machine: p.machine, cwd: p.cwd, plan: p.id,
+      status: "new", createdAt: new Date().toISOString() });
   }
 }

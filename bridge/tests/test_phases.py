@@ -138,3 +138,23 @@ def test_approving_refuses_a_folder_that_is_not_the_plans_version_folder(tmp_pat
         cmd(store, f"b{i}", action="approve_generated", planId="pl1", cwd=str(work), folder=folder, keep=[], drop=[])
     runs.step()
     assert all(store.get(f"commands/b{i}")["status"] == "failed" for i in range(3))
+
+
+def test_a_deleted_plan_takes_only_its_own_plan_data_folder(tmp_path, monkeypatch):
+    from test_runs import cmd, setup
+    store, runs, work = setup(tmp_path, monkeypatch)
+    mine = work / ".plan_data" / "pl1" / "v3"
+    other = work / ".plan_data" / "pl2" / "v1"
+    for d in (mine, other):
+        d.mkdir(parents=True)
+        (d / "diagram-a.svg").write_text("x", encoding="utf-8")
+    (work / "keep.txt").write_text("keep", encoding="utf-8")
+    store.put_many({"plans/pl2": {"id": "pl2"}})  # pl1 is deleted, pl2 still exists
+    cmd(store, "d1", action="delete_plan_files", cwd=str(work), plan="pl1")
+    cmd(store, "d2", action="delete_plan_files", cwd=str(work), plan="pl2")
+    cmd(store, "d3", action="delete_plan_files", cwd=str(work), plan="..")
+    runs.step()
+    assert not (work / ".plan_data" / "pl1").exists() and "commands/d1" not in store.docs
+    assert other.exists() and store.get("commands/d2")["status"] == "failed"  # a plan that exists keeps its files
+    assert store.get("commands/d3")["status"] == "failed" and (work / "keep.txt").exists()
+    assert (work / ".plan_data").exists()  # only the plan's own folder goes

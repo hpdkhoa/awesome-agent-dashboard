@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { deleteRecords, linkedRecords, stopRunning, type Linked } from "./links";
+import { planFolder } from "./storeData";
 
 // The "..." button on every record the page stores in Firestore (the owner's words, 2026-11-03: "every item that store
 // in firestore will have a "..." button, inside it will have the first button is delete record from firestore").
@@ -42,6 +43,7 @@ export function MoreMenu({ path, onDeleted }: { path: string; onDeleted?: () => 
 
   const running = list?.filter((x) => x.running !== undefined).length ?? 0;
   const inApp = list?.filter((x) => x.openInApp).length ?? 0;
+  const plansIn = (list ?? []).filter((x) => x.path.startsWith("plans/")).map((x) => x.path.split("/")[1]);
   return (
     <span className="more" ref={box} onClick={(e) => e.stopPropagation()}>
       <button className="more-btn" aria-label="More" disabled={busy} onClick={() => setOpen(!open)}>…</button>
@@ -56,6 +58,9 @@ export function MoreMenu({ path, onDeleted }: { path: string; onDeleted?: () => 
           <div className="modal" role="dialog" aria-label="Delete records" onClick={(e) => e.stopPropagation()}>
             <h3>Delete {list.length === 1 ? "this record" : `${list.length} records`}?</h3>
             {running > 0 && <p className="wait-fg">{running} running, will be stopped.</p>}
+            {plansIn.length > 0 && (
+              <p className="wait-fg">On your PC: {plansIn.map((p) => `${planFolder(p)}/`).join(", ")} in the plan's project folder will be deleted too.</p>
+            )}
             {inApp > 0 && (
               <p className="bad small">
                 {inApp === 1 ? "1 session is" : `${inApp} sessions are`} open in the Claude app. The dashboard can't stop

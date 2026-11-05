@@ -97,6 +97,7 @@ export type Parts = {
   lessons: { lesson: string; taughtBy: string; appliedIn: string }[];
   leftover: string[];
   steps: { id: string; title: string; does: string; check: string; new?: boolean }[]; // new: work the record does not hold
+  cite?: string; // the owner's words the plan reads, in log order (2026-11-05); part 1 says what the plan is for
 };
 // The message kinds on a plan: four change it (a new plan version), Q&A never does.
 export type PlanKind = "qa" | "goal" | "step" | "rule" | "lesson";

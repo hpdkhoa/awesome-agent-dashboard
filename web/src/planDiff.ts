@@ -11,7 +11,8 @@ export function partLines(parts: Parts, k: keyof Parts): string[] {
   switch (k) {
     case "goal":
     case "summary":
-      return parts[k].split("\n").filter((l) => l.trim());
+    case "cite":
+      return (parts[k] ?? "").split("\n").filter((l) => l.trim());
     case "rules":
       return parts.rules.map((r) => `${r.rule} (${r.source})`);
     case "lessons":

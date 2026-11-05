@@ -106,7 +106,8 @@ def parts_markdown(parts: dict) -> str:
             return parts.get(k)
         return [{**{x: y for x, y in st.items() if x != "new"}, "title": ("[new] " if st.get("new") else "") + str(st.get("title", ""))}
                 if isinstance(st, dict) else st for st in parts.get(k) or []]
-    return "\n\n".join(f"## {names[k]}\n\n{_lines(shown(k))}" for k in PARTS)
+    out = "\n\n".join(f"## {names[k]}\n\n{_lines(shown(k))}" for k in PARTS)
+    return out + (f"\n\n## Cite\n\n{parts['cite']}" if parts.get("cite") else "")
 
 
 # The harness (the owner's words, 2026-11-04: "for the harness in here I need the list as a section in the plan so I can
@@ -154,6 +155,10 @@ def clean_parts(parts: dict) -> dict:
     if missing:
         raise ValueError("a plan needs all six parts; missing: " + ", ".join(missing))
     out = {k: redact(_lines(parts[k]), 12000) for k in ("goal", "summary")}
+    # the cite (the owner's words, 2026-11-05: "move what the plan read (current inside the goal section) out into the
+    # cite section like generated section"): the owner's quotes the plan reads; part 1 says what the plan is for
+    if str(parts.get("cite") or "").strip():
+        out["cite"] = redact(_lines(parts["cite"]), 12000)
     out["rules"] = [{"rule": redact(str(r.get("rule", "")), 400), "source": redact(str(r.get("source", "")), 200)}
                     for r in parts["rules"] or [] if isinstance(r, dict)]
     out["lessons"] = [{"lesson": redact(str(r.get("lesson", "")), 400),

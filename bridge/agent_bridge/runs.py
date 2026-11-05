@@ -329,6 +329,7 @@ class Runs:
             line = (self._start(c) if action == "start" else self._message(c) if action == "message"
                     else self._stop(c) if action == "stop" else self._check(c) if action == "check"
                     else self._plan(c) if action == "plan" else self._approve_generated(c) if action == "approve_generated"
+                    else self._delete_plan_files(c) if action == "delete_plan_files"
                     else self._unknown(c))
             if line:
                 log.append(line)
@@ -466,6 +467,27 @@ class Runs:
         self.store.update(path, {"status": "done", "endedAt": now_iso(), "moved": moved, "skipped": skipped,
                                  "removed": removed})
         return f"{c['id']}: approved {len(moved)} generated file(s), removed tmp and {removed} result(s)"
+
+    def _delete_plan_files(self, c: dict) -> str:
+        r"""A deleted plan's own folder on this PC (the owner's words, 2026-11-05: "confirmed, deleting a plan will also
+        remove that plan's own folder, <project>\.plan_data\<plan id>\, and nothing outside it"). Only
+        <cwd>/.plan_data/<plan id>/, and only once the plan's record is gone; the command then deletes itself."""
+        path, cwd, pid = f"commands/{c['id']}", c.get("cwd", ""), str(c.get("plan") or "")
+        why = ("Not a plan id." if not re.fullmatch(r"[A-Za-z0-9]+", pid)
+               else "The plan still exists; its files stay." if self.store.get(f"plans/{pid}")
+               else "The plan's folder is not under a registered folder on this machine."
+               if work_type_of(cwd, self.roots) == "other" or not os.path.isdir(cwd) else "")
+        if why:
+            self.store.update(path, {"status": "failed", "endedAt": now_iso(), "error": why})
+            return f"{c['id']}: refused, {why}"
+        root = (Path(cwd) / ".plan_data").resolve()
+        target = (root / pid).resolve()
+        gone = False
+        if target.parent == root and target.is_dir():
+            shutil.rmtree(target)
+            gone = True
+        self.store.delete(path)
+        return f"{c['id']}: plan {pid} deleted, its folder {'removed' if gone else 'was not there'}"
 
     def _check(self, c: dict) -> str:
         """"Check now" on a session page: writes what the wait rule sees, once, on the command itself."""

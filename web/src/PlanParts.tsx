@@ -91,7 +91,8 @@ function Part({ k, parts, before, plan }: { k: keyof Parts; parts: Parts; before
   switch (k) {
     case "goal":
     case "summary":
-      return md(parts[k]);
+    case "cite":
+      return md(parts[k] ?? "");
     case "rules":
       return (
         <table>
@@ -203,6 +204,13 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
           );
         })}
       </Section>
+
+      {(v.parts.cite || before?.cite) && (
+        // the owner's words, 2026-11-05: "move what the plan read ... out into the cite section like generated section"
+        <Section id="plan.part.cite" title="Cite" extra="your words this plan reads" open={false}>
+          <Part k="cite" parts={v.parts} before={before} plan={plan} />
+        </Section>
+      )}
 
       <GeneratedSection plan={plan} v={v} />
 
