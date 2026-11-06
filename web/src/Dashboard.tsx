@@ -213,7 +213,8 @@ export function Dashboard() {
         ) : tab === "inbox" ? (
           item ? (
             <InboxView key={item.id} item={item} session={sessions.find((s) => s.id === item.sessionId)}
-              plan={(plans ?? []).find((p) => p.id === item.planId)} onOpenPlan={(id) => (setPickedPlan(id), setTab("plans"))} />
+              plan={(plans ?? []).find((p) => p.id === item.planId)} onOpenPlan={(id) => (setPickedPlan(id), setTab("plans"))}
+              items={inbox} />
           ) : (
             <p className="muted">The inbox is empty.</p>
           )

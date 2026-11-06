@@ -37,6 +37,7 @@ from datetime import datetime, timezone
 
 from .aggregate import work_type_of
 from .redact import redact
+from .planfrom import check_parts
 
 BEAT_SECONDS = 60
 LIVE_SECONDS = 180  # a session whose heartbeat is older than this is treated as closed
@@ -265,8 +266,11 @@ class Inbox:
         if harness is None:  # kept from the version it grows from, so a plain or a data version keeps the list
             harness = (self.store.get(f"planVersions/{plan_id}_v{parent}") or {}).get("harness") if current else None
         harness = clean_harness(harness)
+        checks = None
         if parts is not None:
             parts = clean_parts(parts)
+            # step s8: the parts of a plan read from a session are checked against its record; bad #n and quotes marked
+            parts, checks = check_parts(parts, (plan.get("source") or {}).get("pagesDir", ""))
             text = text if text.strip() else parts_markdown(parts)
         asked = {i["id"]: i for i in self.store.where("inbox", "planId", plan_id)}
         if answers is None:
@@ -283,6 +287,8 @@ class Inbox:
             version["phaseMove"] = {"from": was, "to": phase, "order": redact(order, 2000)}
             if phase == "build" and harness:
                 version["phaseMove"]["harness"] = harness_split(harness, self.store.get(f"planHarness/{plan_id}"))
+        if checks and checks["refs"] + checks["quotes"]:
+            version["checks"] = checks
         if parts is not None:
             version["parts"] = parts
         if harness:

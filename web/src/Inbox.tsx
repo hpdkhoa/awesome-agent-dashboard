@@ -2,6 +2,7 @@ import { useState } from "react";
 import { answerItem, cancelAnswer, forceAnswer, type InboxItem, type Plan, type Session } from "./data";
 import { Example } from "./Example";
 import { Md } from "./Markdown";
+import { pastPicks } from "./pastPicks";
 import { MoreMenu } from "./MoreMenu";
 import { openFile } from "./FileView";
 import { Section } from "./Section";
@@ -51,8 +52,20 @@ export function InboxList({ items, picked, onPick }: { items: InboxItem[]; picke
   );
 }
 
-export function InboxView({ item, session, plan, onOpenPlan }: {
-  item: InboxItem; session?: Session; plan?: Plan; onOpenPlan?: (id: string) => void;
+// Step s11: your past picks, shown before you answer; never an answer by itself.
+function PastPicks({ items, item }: { items: InboxItem[]; item: InboxItem }) {
+  const all = pastPicks(items, item.id), here = pastPicks(items, item.id, item.planId);
+  if (!all.total) return null;
+  return (
+    <p className="muted small">
+      Your past plan questions: you picked the recommended option {all.picked} of {all.total}
+      {here.total > 0 && ` (this plan: ${here.picked} of ${here.total})`}. You still choose here.
+    </p>
+  );
+}
+
+export function InboxView({ item, session, plan, onOpenPlan, items = [] }: {
+  item: InboxItem; session?: Session; plan?: Plan; onOpenPlan?: (id: string) => void; items?: InboxItem[];
 }) {
   const [choice, setChoice] = useState<string>("");
   const [text, setText] = useState("");
@@ -119,6 +132,7 @@ export function InboxView({ item, session, plan, onOpenPlan }: {
 
       {item.options.length > 0 && item.kind !== "approval" && (
         <Section id="inbox.options" title="Options" extra={item.options.length}>
+          {item.planId && item.recommended != null && <PastPicks items={items} item={item} />}
           <div className={item.options.some((o) => o.example) ? "options wide" : "options"}>
             {item.options.map((o, n) => {
               const picked = (open ? choice : item.answer?.choice ?? "").split(", ");

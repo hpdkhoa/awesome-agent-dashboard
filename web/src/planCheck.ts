@@ -60,6 +60,9 @@ export function generatePrompt(kinds: Kind[], note: string, folder: string): str
     "The owner asks you to generate these for this plan:",
     list,
     note.trim() ? `The owner's note: "${note.trim()}"` : "",
+    // the owner's words, 2026-11-06: "make it so next time I ask any plan session to generate user stories diagram then I
+    // can get the same style as result"
+    kinds.includes("diagram") ? "A user-stories diagram follows the user-stories-diagram skill (the owner's approved map style)." : "",
     `Save each file in ${folder}/tmp/ (make the folder), named <kind>-<what>.<ext>. Never overwrite: if the name is taken, add -2, -3. The files stay in tmp/ until the owner approves them.`,
     'Post each kind with inbox_result(title="Generated <kind>: what it shows", files=[the paths]), one result per kind. Then go on with the plan; do not change the plan unless the owner asks.',
   ].filter(Boolean).join("\n\n");

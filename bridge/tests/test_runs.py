@@ -200,7 +200,7 @@ def test_open_or_closed_comes_from_the_processes(tmp_path):
     (logs / "p" / "run.jsonl").write_text(ended("sdk-cli"))
     assert log_wait_reason(logs, "app", procs=lambda: [("app", "K:/w")]) == "app"  # the app runs it: open
     assert log_wait_reason(logs, "app", procs=lambda: []) is None  # no process: closed, the message goes
-    assert log_wait_reason(logs, "term", procs=lambda: [(None, "K:\w")]) == "app"  # a terminal in its folder
+    assert log_wait_reason(logs, "term", procs=lambda: [(None, r"K:\w")]) == "app"  # a terminal in its folder
     assert log_wait_reason(logs, "term", procs=lambda: [(None, "K:/other")]) is None
     assert log_wait_reason(logs, "run", procs=lambda: [(None, "K:/w")]) is None  # last turn was a headless run
     assert log_wait_reason(logs, "app", procs=lambda: None) == "app"  # no process list: the old guess

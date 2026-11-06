@@ -14,6 +14,7 @@ anything"). The kind goes to claude as an appended system prompt; the owner's te
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 NOTE_PROMPT = (
     "This is page {i} of {n} of the real record of a Claude Code session, in order. Each entry is #number, time and "
@@ -98,6 +99,21 @@ def note_command(claude: str, i: int, n: int) -> list[str]:
             "--no-session-persistence"]
 
 
+# The scope of a Run step (the owner's words, 2026-11-06: "Run step adds a scope instruction for that run: do only step
+# sN with its approved harness; anything outside the plan goes to you as a question first, never done on its own").
+STEP_SCOPE = (
+    "This run is step {step} of your plan, and only that step. Do only what step {step} says, with the harness items the "
+    "owner approved (listed in the message, if any). Anything outside step {step} or outside the plan (another step, a "
+    "new file or change the step does not name, a fix you noticed) is never done in this run: ask the owner first with "
+    "inbox_ask, then stop. Report the step with step_update."
+)
+
+
+def step_args(step_id: str) -> list[str]:
+    """A Run step message: the scope goes as an appended system prompt."""
+    return ["--append-system-prompt", STEP_SCOPE.format(step=step_id)] if step_id else []
+
+
 def kind_args(kind: str) -> list[str]:
     if kind not in KIND_PROMPTS:
         return []
@@ -131,3 +147,85 @@ def mark_quotes(notes: str, page: str, i: int) -> tuple[str, int, int]:
         return f"{m.group(0)} **[quote differs from page {i:02d}: read the page for the exact words]**"
 
     return _QUOTE.sub(check, notes), seen, off
+
+
+# The check on the plan's own parts (step s8, idea accepted 2026-11-04; the owner's strict rule, 2026-11-03: "mark any
+# quote that is not on its own page"). Every #n a part cites must be an entry of the record, and a quote on a line that
+# cites OWNER entries must be in one of those entries' own words. Bad ones are marked in the text, as in the notes.
+_HEAD = re.compile(r"^#(\d+) (?:\(continued\)|\S* (.+))$")  # a SESSION entry has no time: "#1  SESSION <id>"
+_REF = re.compile(r"(?<![\w/\[])#(\d+)(?:\s*(?:-|–|to)\s*#?(\d+))?(?![\w])")  # never a colour like #1a1a1a
+
+
+def read_entries(folder) -> dict[int, tuple[str, str]]:
+    """The record's entries from its pages: #n -> (label, text); a split entry is joined again."""
+    out: dict[int, list] = {}
+    n = 0
+    for page in sorted(Path(folder).glob("page-*.txt")):
+        for line in page.read_text(encoding="utf-8", errors="replace").splitlines():
+            m = _HEAD.match(line)
+            if m:
+                n = int(m.group(1))
+                out.setdefault(n, [m.group(2) or "", []])
+                continue
+            if n and not re.fullmatch(r"\[#\d+ continues on the next page\]", line):
+                out[n][1].append(line)
+    return {k: (v[0], "\n".join(v[1]).strip()) for k, v in out.items()}
+
+
+def check_text(text: str, entries: dict[int, tuple[str, str]]) -> tuple[str, dict]:
+    """Marks the #n not in the record and the quotes not in the OWNER entries their line cites."""
+    counts = {"refs": 0, "badRefs": 0, "quotes": 0, "marked": 0}
+    top = max(entries, default=0)
+    lines = []
+    for line in text.split("\n"):
+        cited: list[int] = []
+
+        def ref(m: re.Match) -> str:
+            a, b = int(m.group(1)), int(m.group(2) or m.group(1))
+            counts["refs"] += 1
+            if not (1 <= a <= b <= top) or a not in entries or b not in entries:
+                counts["badRefs"] += 1
+                return m.group(0) if line[m.end():].startswith(" **[not in the record]**") else m.group(0) + " **[not in the record]**"
+            cited.extend(range(a, b + 1) if b - a <= 500 else [a, b])
+            return m.group(0)
+
+        line = _REF.sub(ref, line)
+        owner = " ".join(_flat(entries[k][1]) for k in cited if k in entries and entries[k][0].startswith("OWNER"))
+        if owner:
+            def quote(m: re.Match) -> str:
+                q = (m.group(1) or m.group(2)).replace('\\"', '"')
+                counts["quotes"] += 1
+                if all(_flat(p) in owner for p in _SKIP.split(q) if p.strip()):
+                    return m.group(0)
+                counts["marked"] += 1
+                return m.group(0) + " **[quote not in the OWNER entries cited]**"
+            # a quote may hold the owner's own quote marks, escaped as \"
+            line = re.sub(r'(?:"((?:\\"|[^"\n])+)"|“([^”\n]+)”)(?! \*\*\[quote not in)', quote, line)
+        lines.append(line)
+    return "\n".join(lines), counts
+
+
+def check_parts(parts: dict, folder: str) -> tuple[dict, dict]:
+    """Every text of the parts and the cite, checked against the record in folder. Returns the parts and the counts."""
+    total = {"refs": 0, "badRefs": 0, "quotes": 0, "marked": 0}
+    if not folder or not Path(folder).is_dir():
+        return parts, total
+    entries = read_entries(folder)
+    if not entries:
+        return parts, total
+
+    def one(t):
+        out, c = check_text(t, entries)
+        for k in total:
+            total[k] += c[k]
+        return out
+
+    out = dict(parts)
+    for k in ("goal", "summary", "cite"):
+        if isinstance(out.get(k), str):
+            out[k] = one(out[k])
+    out["leftover"] = [one(x) for x in out.get("leftover") or []]
+    for k, fields in (("rules", ("rule", "source")), ("lessons", ("lesson", "taughtBy", "appliedIn")),
+                      ("steps", ("title", "does", "check"))):
+        out[k] = [{**x, **{f: one(x[f]) for f in fields if isinstance(x.get(f), str)}} for x in out.get(k) or []]
+    return out, total

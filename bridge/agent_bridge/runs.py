@@ -52,7 +52,7 @@ from pathlib import Path
 from .aggregate import work_type_of
 from .digest import find_log, write_pages
 from .inbox import KINDS, now_iso
-from .planfrom import NO_EDITS, kind_args, mark_quotes, note_command, plan_prompt
+from .planfrom import NO_EDITS, kind_args, mark_quotes, note_command, plan_prompt, step_args
 from .redact import redact
 
 APPROVAL_TOOL = "mcp__agent-inbox__inbox_approve"
@@ -247,10 +247,12 @@ def ensure_plan_data_ignored(cwd: str) -> bool:
     return True
 
 
-def message_command(claude: str, message: str, session_id: str, mode: str = "manual", kind: str = "") -> list[str]:
-    """kind: a plan message's kind (qa, goal, step, rule, lesson); it goes as an appended system prompt."""
+def message_command(claude: str, message: str, session_id: str, mode: str = "manual", kind: str = "",
+                    step: str = "") -> list[str]:
+    """kind: a plan message's kind (qa, goal, step, rule, lesson); step: a Run step's step id. Either goes as an
+    appended system prompt; a Run step has no kind."""
     return [claude, "-p", message, "--output-format", "json", "--resume", session_id,
-            "--permission-prompt-tool", APPROVAL_TOOL, *mode_args(mode), *kind_args(kind)]
+            "--permission-prompt-tool", APPROVAL_TOOL, *mode_args(mode), *(kind_args(kind) or step_args(step))]
 
 
 def parse_result(out: str | None) -> dict:
@@ -409,7 +411,7 @@ class Runs:
                 ensure_plan_data_ignored(cwd)
             except OSError:
                 pass  # a read-only .gitignore never stops the order; the session's files still go to .plan_data
-        p = self._spawn(c["id"], message_command(self.claude, text, sid, mode, kind), cwd)
+        p = self._spawn(c["id"], message_command(self.claude, text, sid, mode, kind, str(c.get("stepId") or "")[:20]), cwd)
         self.store.update(path, {"status": "running", "workType": wt, "pid": p.pid, "startedAt": now_iso(),
                                  "permissionMode": mode})
         self._answer_back(c, {"waitReason": None})

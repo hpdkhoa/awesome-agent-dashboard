@@ -297,3 +297,35 @@ def test_the_cite_holds_the_owners_words_and_part_1_says_what_the_plan_is_for():
     assert p["cite"].startswith("- **Delete**") and parts_markdown(p).endswith('## Cite\n\n- **Delete** (#303): "every item"')
     text = plan_prompt("s1", "F", 2, "c1", goal="ship it")
     assert "what this plan is used for" in text and "No list of quotes here" in text and "cite: the owner's own words" in text
+
+
+def test_a_run_step_message_carries_the_step_scope():
+    c = message_command("claude", "Work on step s2: x. Report it with step_update.", "sid", "manual", "", "s2")
+    scope = c[c.index("--append-system-prompt") + 1]
+    assert "only that step" in scope and "step s2" in scope and "inbox_ask" in scope and "never done in this run" in scope
+    assert "--append-system-prompt" not in message_command("claude", "hi", "sid")
+    k = message_command("claude", "why?", "sid", "manual", "qa", "s2")  # a kind keeps its own prompt
+    assert "Q&A" in k[k.index("--append-system-prompt") + 1]
+
+
+def test_the_plans_own_parts_are_checked_against_the_record(tmp_path):
+    from agent_bridge.planfrom import check_parts, read_entries
+    (tmp_path / "page-01.txt").write_text(
+        "\n#1 2026-11-03T10:00:00 OWNER\nleast verbose explains to me what\nthe log file contains\n"
+        "\n#2 2026-11-03T10:01:00 CLAUDE\nI will read the log.\n[#3 continues on the next page]\n", encoding="utf-8")
+    (tmp_path / "page-02.txt").write_text("\n#3 2026-11-03T10:02:00 OWNER\ndo 1 then commit\n"
+                                          "\n#4  SESSION abc\nThe record of session abc starts here.\n", encoding="utf-8")
+    e = read_entries(tmp_path)
+    assert sorted(e) == [1, 2, 3, 4] and e[1][0] == "OWNER" and e[4][0] == "SESSION abc" and e[3][1] == "do 1 then commit"
+    parts = dict(PARTS, goal="ok", cite=('- **Log** (#1): "least verbose explains to me what the log file contains"\n'
+                                         '- **Wrong** (#1): "least verbose tell me"\n- **Range** (#2 to #3): "do 1 then commit"\n'
+                                         '- **Gone** (#9999): "anything"'),
+                 summary="- read (#2)")
+    out, c = check_parts(parts, str(tmp_path))
+    lines = out["cite"].split("\n")
+    assert "[quote not in" not in lines[0] and "[quote not in the OWNER entries cited]" in lines[1]
+    assert "[quote not in" not in lines[2] and "#9999 **[not in the record]**" in lines[3]
+    assert c == {"refs": 6, "badRefs": 1, "quotes": 3, "marked": 1}  # 4 in the cite, the summary, the rule source
+    again, c2 = check_parts(out, str(tmp_path))  # marks are never doubled on a later version
+    assert again["cite"] == out["cite"] and c2["badRefs"] == 1
+    assert check_parts(parts, str(tmp_path / "none"))[0] == parts
