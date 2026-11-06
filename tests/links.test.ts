@@ -7,6 +7,7 @@ import { doc, getDoc, setDoc } from "firebase/firestore";
 const state = vi.hoisted(() => ({ db: null as unknown }));
 vi.mock("../web/src/firebase", () => ({ get db() { return state.db; } }));
 const { deleteRecords, linkedRecords, stopRunning } = await import("../web/src/links");
+const { removeRows } = await import("../web/src/storeData");
 
 let env: RulesTestEnvironment;
 beforeAll(async () => {
@@ -64,5 +65,17 @@ describe("delete with linked records", () => {
     const { getDocs, collection, query, where } = await import("firebase/firestore");
     const stops = await getDocs(query(collection(state.db as never, "commands"), where("action", "==", "stop")));
     expect(stops.docs.map((d) => [d.data().target, d.data().machine, d.data().deleting])).toEqual([["r1", "PC", true]]);
+  });
+
+  it("the Storage tab's bulk delete of sessions takes each session's heartbeat too", async () => {
+    await put("sessions/a", { title: "a" });
+    await put("liveSessions/a", { beatAt: "x" });
+    await put("sessions/b", { title: "b" });
+    await put("liveSessions/b", { beatAt: "x" });
+    await put("liveSessions/c", { beatAt: "x" });
+    await removeRows("sessions", ["sessions/a", "sessions/b"]);
+    for (const p of ["sessions/a", "liveSessions/a", "sessions/b", "liveSessions/b"])
+      expect((await getDoc(doc(state.db as never, p))).exists()).toBe(false);
+    expect((await getDoc(doc(state.db as never, "liveSessions/c"))).exists()).toBe(true);
   });
 });

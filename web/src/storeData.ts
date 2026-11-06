@@ -79,10 +79,14 @@ export async function removeRows(name: string, paths: string[]) {
         id: string; machine?: string; cwd?: string })
     : [];
   const at = new Date().toISOString();
-  for (let i = 0; i < paths.length; i += 400) {
-    const part = paths.slice(i, i + 400);
+  // a session takes its heartbeat with it (the owner's words, 2026-11-06: "make sure when delete session the heartbeat
+  // will be deleted too"), here as in the "..." menu; two deletes per session, so 200 sessions per batch (limit 500)
+  const step = name === "sessions" ? 200 : 400;
+  for (let i = 0; i < paths.length; i += step) {
+    const part = paths.slice(i, i + step);
     const b = writeBatch(db);
     for (const p of part) b.delete(doc(db, p));
+    if (name === "sessions") for (const p of part) b.delete(doc(db, "liveSessions", p.split("/")[1]));
     if (bridge) b.set(doc(db, "meta", "deleted"), { paths: Object.fromEntries(part.map((p) => [p, at])) }, { merge: true });
     await b.commit();
   }
