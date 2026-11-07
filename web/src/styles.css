@@ -115,6 +115,7 @@ button.danger { border-color: var(--bad); color: var(--bad); }
 .step-state.now { color: var(--accent); border-color: var(--accent); }
 .step-state.done { color: var(--live); border-color: var(--live); }
 .step-state.failed { color: var(--bad, #d4708f); border-color: var(--bad, #d4708f); }
+.group-q { border-top: 1px solid var(--line); padding: 8px 0; }
 .change-note { border-left: 3px solid var(--accent); padding: 4px 10px; margin: 8px 0; }
 @media (max-width: 560px) { .ex-pair { grid-template-columns: 1fr; } }
 .option { display: flex; flex-direction: column; gap: 4px; text-align: left; padding: 10px 12px; background: var(--card); }

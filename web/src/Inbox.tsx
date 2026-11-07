@@ -2,7 +2,7 @@ import { useState } from "react";
 import { answerItem, cancelAnswer, forceAnswer, type InboxItem, type Plan, type Session } from "./data";
 import { Example } from "./Example";
 import { Md } from "./Markdown";
-import { pastPicks } from "./pastPicks";
+import { groupFor, missingPicks, pastPicks } from "./pastPicks";
 import { MoreMenu } from "./MoreMenu";
 import { openFile } from "./FileView";
 import { Section } from "./Section";
@@ -49,6 +49,55 @@ export function InboxList({ items, picked, onPick }: { items: InboxItem[]; picke
         </li>
       )}
     </ul>
+  );
+}
+
+// Step s11 grouping: the waiting questions of one plan together, when your history is clear. Each needs your pick;
+// Send sends them all, and refuses while one has none.
+function GroupAnswer({ group, items }: { group: InboxItem[]; items: InboxItem[] }) {
+  const [picks, setPicks] = useState<Record<string, string>>({});
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const all = pastPicks(items);
+  async function sendAll() {
+    const missing = missingPicks(group, picks);
+    if (missing.length) return setError(`Pick an option on ${missing.length === 1 ? "1 question" : `${missing.length} questions`} first.`);
+    setBusy(true);
+    try {
+      for (const q of group) await answerItem(q.id, picks[q.id], "");
+    } catch (e) {
+      setError(String((e as { code?: string }).code ?? e));
+    }
+    setBusy(false);
+  }
+  return (
+    <Section id="inbox.group" title={`${group.length} questions waiting on this plan`} extra={`your past picks: recommended ${all.picked} of ${all.total}`}>
+      <p className="muted small">Shown together because your history is clear. Nothing is picked for you.</p>
+      {group.map((q, k) => (
+        <div key={q.id} className="group-q">
+          <b>{k + 1}. {q.title}</b>
+          <div className="part-kinds">
+            {q.options.map((o, n) => (
+              <button key={n} className={picks[q.id] === o.label ? "chip on" : "chip"} disabled={busy}
+                onClick={() => (setPicks({ ...picks, [q.id]: o.label }), setError(""))}>
+                {o.label}{q.recommended === n ? " · recommended" : ""}
+              </button>
+            ))}
+          </div>
+          {q.options.some((o) => o.example) && (
+            <Section id="inbox.group.examples" title="Examples" open={false}>
+              {q.options.map((o, n) => o.example && (
+                <div key={n}><p className="small muted">({String.fromCharCode(97 + n)}) {o.label}</p><Example e={o.example} cwd={q.cwd} /></div>
+              ))}
+            </Section>
+          )}
+          <p className={picks[q.id] ? "small ok-fg" : "small wait-fg"}>{picks[q.id] ? `you picked ${picks[q.id]}` : "waiting for your pick"}</p>
+        </div>
+      ))}
+      {error && <p className="bad small">{error}</p>}
+      <p className="small muted">{group.length - missingPicks(group, picks).length} of {group.length} answered</p>
+      <button className="primary" disabled={busy} onClick={sendAll}>{busy ? "Sending" : `Send ${group.length} answers`}</button>
+    </Section>
   );
 }
 
@@ -129,6 +178,8 @@ export function InboxView({ item, session, plan, onOpenPlan, items = [] }: {
           </ul>
         </Section>
       )}
+
+      {groupFor(items, item).length > 0 && <GroupAnswer key={item.id} group={groupFor(items, item)} items={items} />}
 
       {item.options.length > 0 && item.kind !== "approval" && (
         <Section id="inbox.options" title="Options" extra={item.options.length}>
