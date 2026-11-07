@@ -75,11 +75,11 @@ def test_every_option_of_a_plan_question_needs_an_example():
     assert check_example({"type": "text", "draft": " "}) is not None
     store = FakeStore()
     ib = Inbox(store, "PC", [], "s1", "/x")
-    ib.post("question", "free", "no plan, no example needed", [{"label": "A"}])
+    ib.post("question", "free", "no plan, no example needed", [{"label": "A", "differs": "d"}])
     ib.plan_start("p", parts=PARTS)
     with pytest.raises(ValueError, match="needs an example"):
-        ib.post("question", "q", "x", [{"label": "A", "example": EX}, {"label": "B"}])
-    qid = ib.post("question", "q", "x", [{"label": "A", "example": EX}])
+        ib.post("question", "q", "x", [{"label": "A", "differs": "d", "example": EX}, {"label": "B", "differs": "d"}])
+    qid = ib.post("question", "q", "x", [{"label": "A", "differs": "d", "example": EX}])
     assert store.docs[f"inbox/{qid}"]["options"][0]["example"] == EX
 
 
@@ -110,10 +110,10 @@ def test_a_question_asked_during_a_step_joins_it():
     ib = Inbox(store, "PC", [], "s1", "/x")
     pid = ib.plan_start("p", parts=PARTS)
     ib.step_update(pid, "s1", "now", "working")
-    qid = ib.post("question", "q", "x", [{"label": "A", "example": EX}])
+    qid = ib.post("question", "q", "x", [{"label": "A", "differs": "d", "example": EX}])
     assert store.docs[f"inbox/{qid}"]["stepId"] == "s1"
     ib.step_update(pid, "s1", "done", "ok")
-    assert "stepId" not in store.docs[f"inbox/{ib.post('question', 'q', 'x', [{'label': 'A', 'example': EX}])}"]
+    assert "stepId" not in store.docs[f"inbox/{ib.post('question', 'q', 'x', [{'label': 'A', 'differs': 'd', 'example': EX}])}"]
 
 
 def test_a_qa_message_never_changes_the_plan_until_the_owner_confirms_a_switch():

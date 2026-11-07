@@ -49,7 +49,7 @@ export type InboxItem = {
   workType: string;
   title: string;
   text: string;
-  options: { label: string; detail: string; example?: Example }[];
+  options: { label: string; detail: string; differs?: string; example?: Example }[]; // differs: what is different
   recommended: number | null;
   files: string[];
   status: "open" | "answered" | "delivering" | "delivered" | "closed";
@@ -69,12 +69,18 @@ export type InboxItem = {
   reopened?: boolean; // the owner changed an earlier answer: the session branches the plan
   history?: { choice: string; text: string; at: string }[]; // earlier answers, oldest first
   stepId?: string; // asked while this step of the plan was running
+  // one batch: questions asked together show as one entry and are answered together (2026-11-07)
+  batchId?: string; batchIndex?: number; batchSize?: number;
+  draft?: { choice: string; text: string; at: string }; // your latest saved answer, used when the batch is sent
+  thread?: ThreadEntry[]; // your saved answers, your questions back and the session's replies, in order
   switch?: { to: PlanKind; commandId: string }; // a Q&A message asks to change the plan (bridge inbox.py ask_switch)
 };
 
 // Every option of a plan question carries one (the owner's words, 2026-11-03: "every choose will have an example").
 export type Bench = { name: string; before: string; after: string; measured: boolean; source?: string };
+export type ThreadEntry = { who: "owner" | "session"; kind: "answer" | "ask" | "reply"; choice?: string; text?: string; at: string };
 export type Example =
+  | { type: "visual"; svg: string; note?: string } // a drawing of the option
   | { type: "image"; before: string; after: string; note?: string }
   | { type: "code"; diff: string; bench: Bench[]; note?: string }
   | { type: "text"; draft: string; note?: string };
@@ -209,6 +215,29 @@ export const useInbox = () => useCollection<InboxItem>("inbox", orderBy("created
 // The owner's answer. The session picks it up live, or the bridge resumes the session if it has closed.
 export const answerItem = (id: string, choice: string, text: string) =>
   updateDoc(doc(db, "inbox", id), { status: "answered", answer: { choice, text, at: new Date().toISOString() }, error: null });
+// A batch (the owner's words, 2026-11-07: "I want to see the stored answers that I answered and can change them before
+// the last question is answered and the choices will only use my latest choice without drift and I can review them
+// back as the thread in inbox"). Saving keeps your latest answer as the draft and adds it to the thread; when every
+// question of the batch has a draft, all are sent at once, each with its latest draft.
+export async function saveDraft(item: InboxItem, batch: InboxItem[], choice: string, text: string) {
+  const at = new Date().toISOString();
+  const draft = { choice, text, at };
+  await updateDoc(doc(db, "inbox", item.id), {
+    draft, thread: [...(item.thread ?? []), { who: "owner", kind: "answer", choice, text, at }],
+  });
+  const drafts = new Map(batch.map((q) => [q.id, q.id === item.id ? draft : q.draft]));
+  if (batch.every((q) => q.status !== "open" || drafts.get(q.id)))
+    for (const q of batch.filter((x) => x.status === "open"))
+      await answerItem(q.id, drafts.get(q.id)!.choice, drafts.get(q.id)!.text);
+}
+// Ask back before answering: the session replies in the thread; it never answers for you.
+export const askBack = (item: InboxItem, text: string) =>
+  updateDoc(doc(db, "inbox", item.id), {
+    thread: [...(item.thread ?? []), { who: "owner", kind: "ask", text, at: new Date().toISOString() }],
+  });
+// The questions of a batch, in the order asked (a single question is a batch of one).
+export const batchOf = (item: InboxItem, items: InboxItem[]) =>
+  item.batchId ? items.filter((i) => i.batchId === item.batchId).sort((a, b) => (a.batchIndex ?? 0) - (b.batchIndex ?? 0)) : [item];
 // Reopen an answer in a plan: the old answer goes to history, and the session gets the new one with the round to
 // branch from (live, or by resume).
 export const reopenItem = (item: InboxItem, choice: string, text: string) =>

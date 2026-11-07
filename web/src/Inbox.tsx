@@ -1,8 +1,7 @@
 import { useState } from "react";
-import { answerItem, cancelAnswer, forceAnswer, type InboxItem, type Plan, type Session } from "./data";
+import { answerItem, askBack, batchOf, cancelAnswer, forceAnswer, saveDraft, type InboxItem, type Plan, type Session } from "./data";
 import { Example } from "./Example";
 import { Md } from "./Markdown";
-import { groupFor, missingPicks, pastPicks } from "./pastPicks";
 import { MoreMenu } from "./MoreMenu";
 import { openFile } from "./FileView";
 import { Section } from "./Section";
@@ -27,14 +26,17 @@ function ago(iso: string) {
 }
 
 export function InboxList({ items, picked, onPick }: { items: InboxItem[]; picked?: string; onPick: (id: string) => void }) {
-  const sorted = [...items].sort((a, b) => Number(isWaiting(b)) - Number(isWaiting(a)));
+  // one row per batch: its first question stands for it
+  const sorted = [...items].filter((i) => !i.batchId || (i.batchIndex ?? 0) === 0)
+    .sort((a, b) => Number(isWaiting(b)) - Number(isWaiting(a)));
+  const size = (i: InboxItem) => (i.batchId ? items.filter((x) => x.batchId === i.batchId) : [i]);
   return (
     <ul className="list">
       {sorted.map((i) => (
         <li key={i.id} className={i.id === picked ? "row on" : "row"} onClick={() => onPick(i.id)}>
-          <span className={isWaiting(i) ? "dot wait" : "dot"} />
+          <span className={size(i).some(isWaiting) ? "dot wait" : "dot"} />
           <div className="grow">
-            <div className="title">{i.title}</div>
+            <div className="title">{size(i).length > 1 ? `${size(i).length} questions: ` : ""}{i.title}</div>
             <div className="muted small">
               {KIND[i.kind]} · {i.workType} · {ago(i.createdAt)} · {STATUS[i.status]}
             </div>
@@ -52,64 +54,98 @@ export function InboxList({ items, picked, onPick }: { items: InboxItem[]; picke
   );
 }
 
-// Step s11 grouping: the waiting questions of one plan together, when your history is clear. Each needs your pick;
-// Send sends them all, and refuses while one has none.
-function GroupAnswer({ group, items }: { group: InboxItem[]; items: InboxItem[] }) {
-  const [picks, setPicks] = useState<Record<string, string>>({});
+// One question of a batch (the owner's words, 2026-11-07): options drawn or with their difference, a text box for your
+// own answer or a question instead of a pick (like "Other"), your saved answers kept as a thread, and ask back.
+function QuestionCard({ q, batch, k }: { q: InboxItem; batch: InboxItem[]; k: number }) {
+  const [choice, setChoice] = useState(q.draft?.choice ?? "");
+  const [text, setText] = useState(q.draft?.text ?? "");
+  const [ask, setAsk] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const all = pastPicks(items);
-  async function sendAll() {
-    const missing = missingPicks(group, picks);
-    if (missing.length) return setError(`Pick an option on ${missing.length === 1 ? "1 question" : `${missing.length} questions`} first.`);
+  const open = q.status === "open";
+  const shown = open ? choice : q.answer?.choice ?? "";
+  async function run(f: () => Promise<unknown>) {
     setBusy(true);
     try {
-      for (const q of group) await answerItem(q.id, picks[q.id], "");
+      await f();
     } catch (e) {
       setError(String((e as { code?: string }).code ?? e));
     }
     setBusy(false);
   }
+  const left = batch.filter((x) => x.status === "open" && !x.draft && x.id !== q.id).length;
   return (
-    <Section id="inbox.group" title={`${group.length} questions waiting on this plan`} extra={`your past picks: recommended ${all.picked} of ${all.total}`}>
-      <p className="muted small">Shown together because your history is clear. Nothing is picked for you.</p>
-      {group.map((q, k) => (
-        <div key={q.id} className="group-q">
-          <b>{k + 1}. {q.title}</b>
-          <div className="part-kinds">
-            {q.options.map((o, n) => (
-              <button key={n} className={picks[q.id] === o.label ? "chip on" : "chip"} disabled={busy}
-                onClick={() => (setPicks({ ...picks, [q.id]: o.label }), setError(""))}>
-                {o.label}{q.recommended === n ? " · recommended" : ""}
-              </button>
-            ))}
-          </div>
-          {q.options.some((o) => o.example) && (
-            <Section id="inbox.group.examples" title="Examples" open={false}>
-              {q.options.map((o, n) => o.example && (
-                <div key={n}><p className="small muted">({String.fromCharCode(97 + n)}) {o.label}</p><Example e={o.example} cwd={q.cwd} /></div>
-              ))}
-            </Section>
-          )}
-          <p className={picks[q.id] ? "small ok-fg" : "small wait-fg"}>{picks[q.id] ? `you picked ${picks[q.id]}` : "waiting for your pick"}</p>
+    <div className="qcard">
+      <b>{batch.length > 1 ? `${k + 1}. ` : ""}{q.title}</b>
+      {q.text && q.text !== q.title && <Md text={q.text} cwd={q.cwd} />}
+      {q.options.length > 0 && (
+        <div className={q.options.some((o) => o.example) ? "options wide" : "options"}>
+          {q.options.map((o, n) => {
+            const picked = shown.split(", ");
+            const on = q.multi ? picked.includes(o.label) : shown === o.label;
+            return (
+              <div key={n} className="option-wrap">
+                <button className={on ? "option on" : "option"} disabled={!open || busy}
+                  onClick={() => {
+                    if (q.multi) {
+                      const next = on ? picked.filter((l) => l !== o.label) : [...picked.filter(Boolean), o.label];
+                      setChoice(q.options.map((x) => x.label).filter((l) => next.includes(l)).join(", "));
+                    } else setChoice(on ? "" : o.label);
+                    setError("");
+                  }}>
+                  <span>
+                    ({String.fromCharCode(97 + n)}) {o.label}
+                    {q.recommended === n && <span className="tag">Recommended</span>}
+                  </span>
+                  {o.detail && <span className="muted small">{o.detail}</span>}
+                  {o.differs && <span className="small differs">≠ {o.differs}</span>}
+                </button>
+                {o.example && <Example e={o.example} cwd={q.cwd} />}
+              </div>
+            );
+          })}
         </div>
-      ))}
-      {error && <p className="bad small">{error}</p>}
-      <p className="small muted">{group.length - missingPicks(group, picks).length} of {group.length} answered</p>
-      <button className="primary" disabled={busy} onClick={sendAll}>{busy ? "Sending" : `Send ${group.length} answers`}</button>
-    </Section>
-  );
-}
-
-// Step s11: your past picks, shown before you answer; never an answer by itself.
-function PastPicks({ items, item }: { items: InboxItem[]; item: InboxItem }) {
-  const all = pastPicks(items, item.id), here = pastPicks(items, item.id, item.planId);
-  if (!all.total) return null;
-  return (
-    <p className="muted small">
-      Your past plan questions: you picked the recommended option {all.picked} of {all.total}
-      {here.total > 0 && ` (this plan: ${here.picked} of ${here.total})`}. You still choose here.
-    </p>
+      )}
+      {open && (
+        <>
+          <textarea rows={2} value={text} placeholder="Your own answer, or a question back, instead of a pick"
+            onChange={(e) => (setText(e.target.value), setError(""))} />
+          {error && <p className="bad small">{error}</p>}
+          <div className="actions">
+            <button className="primary" disabled={busy}
+              onClick={() => (!choice && !text.trim() ? setError("Pick an option or write something first.")
+                : run(() => saveDraft(q, batch, choice, text.trim())))}>
+              {q.draft ? "Change my answer" : "Save my answer"}
+            </button>
+            <span className="small muted">
+              {q.draft ? `saved: ${[q.draft.choice, q.draft.text].filter(Boolean).join(" · ")}` : "not saved yet"}
+              {left > 0 ? ` · sent when ${left === 1 ? "1 more question is" : `${left} more questions are`} saved` : ""}
+            </span>
+          </div>
+          {q.via !== "hook" && (
+            <div className="actions">
+              <input value={ask} placeholder="Ask back: a short question, the session replies here" onChange={(e) => setAsk(e.target.value)} />
+              <button disabled={busy || !ask.trim()} onClick={() => run(async () => (await askBack(q, ask.trim()), setAsk("")))}>Ask back</button>
+            </div>
+          )}
+        </>
+      )}
+      {!open && (
+        <p className="small ok-fg">sent: {[q.answer?.choice, q.answer?.text].filter(Boolean).join(" · ") || "no answer"}</p>
+      )}
+      {(q.thread ?? []).length > 0 && (
+        <Section id="inbox.thread" title="Thread" extra={(q.thread ?? []).length} open={open}>
+          <ul className="thread">
+            {(q.thread ?? []).map((t, n) => (
+              <li key={n} className={t.who}>
+                <span className="small muted">{t.who === "owner" ? (t.kind === "ask" ? "you asked" : "you saved") : "session"} · {ago(t.at)}</span>{" "}
+                {t.kind === "answer" ? <b>{[t.choice, t.text].filter(Boolean).join(" · ")}</b> : <Md text={t.text ?? ""} cwd={q.cwd} />}
+              </li>
+            ))}
+          </ul>
+        </Section>
+      )}
+    </div>
   );
 }
 
@@ -179,11 +215,17 @@ export function InboxView({ item, session, plan, onOpenPlan, items = [] }: {
         </Section>
       )}
 
-      {groupFor(items, item).length > 0 && <GroupAnswer key={item.id} group={groupFor(items, item)} items={items} />}
+      {item.kind === "question" && (() => {
+        const batch = batchOf(item, items.length ? items : [item]);
+        return (
+          <Section id="inbox.batch" title={batch.length > 1 ? `${batch.length} questions, answered together` : "The question"}>
+            {batch.map((q, k) => <QuestionCard key={q.id} q={q} batch={batch} k={k} />)}
+          </Section>
+        );
+      })()}
 
-      {item.options.length > 0 && item.kind !== "approval" && (
+      {item.options.length > 0 && item.kind !== "approval" && item.kind !== "question" && (
         <Section id="inbox.options" title="Options" extra={item.options.length}>
-          {item.planId && item.recommended != null && <PastPicks items={items} item={item} />}
           <div className={item.options.some((o) => o.example) ? "options wide" : "options"}>
             {item.options.map((o, n) => {
               const picked = (open ? choice : item.answer?.choice ?? "").split(", ");
@@ -216,12 +258,12 @@ export function InboxView({ item, session, plan, onOpenPlan, items = [] }: {
         </Section>
       )}
 
-      {open ? (
+      {item.kind === "question" ? null : open ? (
         <Section id="inbox.answer" title={item.kind === "result" ? "Review note (optional)" : "Your answer"}>
           <textarea
             value={text}
             rows={3}
-            placeholder={item.kind === "question" ? "Free-text answer, or a note with your choice (markdown works)" : "Optional note"}
+            placeholder="Optional note"
             onChange={(e) => {
               setText(e.target.value);
               setError("");
@@ -229,11 +271,6 @@ export function InboxView({ item, session, plan, onOpenPlan, items = [] }: {
           />
           {error && <p className="bad small">{error}</p>}
           <div className="actions">
-            {item.kind === "question" && (
-              <button className="primary" disabled={busy} onClick={() => send(choice)}>
-                Answer
-              </button>
-            )}
             {item.kind === "suggestion" && (
               <>
                 <button className="primary" disabled={busy} onClick={() => send("Accept")}>

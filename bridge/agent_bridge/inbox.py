@@ -31,6 +31,7 @@ picture pair, a code diff with a benchmark, or a draft. A plan question without 
 
 import json
 import os
+import re
 import threading
 import time
 import uuid
@@ -75,11 +76,29 @@ def check_example(e) -> str | None:
         return None
     if t == "text":
         return None if (e.get("draft") or "").strip() else "a text example needs the draft"
-    return "an example's type is image, code or text"
+    if t == "visual":
+        return None if clean_svg(e.get("svg")) else "a visual example needs an inline <svg> drawing"
+    return "an example's type is visual, image, code or text"
+
+
+# A drawn option (the owner's words, 2026-11-07: "consider anything can draw out then it is better to have the idea or
+# choice draw out instead of text out"). The page shows it as an image, where no script runs; scripts, event handlers,
+# foreign objects and outside links are still cut here.
+def clean_svg(svg) -> str:
+    s = str(svg or "").strip()
+    if not s.lower().startswith("<svg") or len(s) > 30000:
+        return ""
+    s = re.sub(r"(?is)<(script|foreignObject)\b.*?</\1\s*>", "", s)
+    s = re.sub(r"(?is)<(script|foreignObject)\b[^>]*/>", "", s)
+    s = re.sub(r"(?i)\son\w+\s*=\s*(\"[^\"]*\"|'[^']*'|[^\s>]+)", "", s)
+    s = re.sub(r"(?i)((?:xlink:)?href\s*=\s*[\"'])(?!#)[^\"']*", r"\1#", s)
+    return s
 
 
 def clean_example(e: dict) -> dict:
     out = {"type": e["type"]}
+    if e.get("type") == "visual":
+        out["svg"] = clean_svg(e.get("svg"))
     for k, n in (("before", 300), ("after", 300), ("diff", 12000), ("draft", 6000), ("note", 400)):
         if e.get(k):
             out[k] = redact(str(e[k]), n)
@@ -337,8 +356,9 @@ class Inbox:
             raise ValueError("switch to one of: " + ", ".join(k for k in KINDS if k != "qa"))
         run = self.running_command() or {}
         opts = [{"label": f"Switch to {KINDS[to]}", "detail": "the session makes this change as a new plan version",
-                 "example": {"type": "text", "draft": change}},
-                {"label": "Keep Q&A", "detail": "nothing changes", "example": {"type": "text", "draft": "No change to the plan."}}]
+                 "differs": "the plan changes: a new version", "example": {"type": "text", "draft": change}},
+                {"label": "Keep Q&A", "detail": "nothing changes", "differs": "the plan stays as it is",
+                 "example": {"type": "text", "draft": "No change to the plan."}}]
         return self.post("question", f"Switch to {KINDS[to]}?", why, opts, 0,
                          extra={"switch": {"to": to, "commandId": run.get("id", "")}})
 
@@ -369,7 +389,16 @@ class Inbox:
             if not options or bad:
                 raise ValueError("Every option of a plan question needs an example (the owner's rule). "
                                  + ("; ".join(bad) if bad else "Give options, each with an example."))
+        # each option drawn, or at least its difference (the owner's words, 2026-11-07: "I want the question to have the
+        # visualization ... or at least give me the different between each answer"); the question box has neither
+        if kind == "question" and extra.get("via") != "hook" and options:
+            plain = [o.get("label", "") for o in options
+                     if not str(o.get("differs") or "").strip() and (o.get("example") or {}).get("type") not in ("visual", "image")]
+            if plain:
+                raise ValueError("Every option needs a drawing (example type visual) or a differs line: what is "
+                                 "different about it, in a few words. Missing on: " + ", ".join(plain))
         opts = [{"label": redact(o.get("label", ""), 120), "detail": redact(o.get("detail", ""), 400),
+                 **({"differs": redact(str(o["differs"]), 160)} if o.get("differs") else {}),
                  **({"example": clean_example(o["example"])} if o.get("example") else {})} for o in options or []]
         if recommended is not None and not 0 <= recommended < len(opts):
             recommended = None
@@ -397,6 +426,35 @@ class Inbox:
             body = ("Answer within 10 minutes, or the session asks there. " if extra.get("via") == "hook" else "") + first
             self.push.notify(f"{PUSH_TITLE[kind]}: {title}", body[:200] or title, f"/?item={item_id}", item_id)
         return item_id
+
+    def post_batch(self, questions: list[dict], via: str = "") -> list[str]:
+        """Questions asked together are one batch (the owner's words, 2026-11-07: "group the questions in the same batch,
+        instead of current flow is 3 questions from the same batch/session/message became 3 items in inbox"): one inbox
+        entry on the page, answered together. Each question keeps its own record, so rounds and answers stay per
+        question. questions: [{"title", "text", "options", "recommended", "extra"}]."""
+        batch = uuid.uuid4().hex[:12]
+        return [self.post("question", q.get("title") or q.get("text", "")[:80], q.get("text", ""), q.get("options"),
+                          q.get("recommended"), extra={**(q.get("extra") or {}), **({"via": via} if via else {}),
+                                                       "batchId": batch, "batchIndex": k, "batchSize": len(questions)})
+                for k, q in enumerate(questions)]
+
+    def ask_back(self, item_id: str) -> dict | None:
+        """The owner's newest question back on an item that the session has not replied to yet (the ping-pong)."""
+        thread = (self.store.get(f"inbox/{item_id}") or {}).get("thread") or []
+        for e in reversed(thread):
+            if e.get("who") == "session":
+                return None
+            if e.get("who") == "owner" and e.get("kind") == "ask":
+                return e
+        return None
+
+    def reply(self, item_id: str, text: str) -> bool:
+        """The session's short reply to the owner's question back; it never answers the question for the owner."""
+        item = self.store.get(f"inbox/{item_id}")
+        if not item:
+            return False
+        thread = list(item.get("thread") or []) + [{"who": "session", "kind": "reply", "text": redact(text, 2000), "at": now_iso()}]
+        return self.store.update(f"inbox/{item_id}", {"thread": thread})
 
     def beat(self) -> None:
         if self.session_id == "unknown" or self.beats < 0:
@@ -512,14 +570,28 @@ def server():
     )
 
     async def wait_for(item_id: str, minutes: float, ctx: Context) -> str:
+        """Waits for the answer to item_id, or to every question of its batch. Returns early when the owner asks back."""
         minutes = max(1.0, min(minutes, MAX_WAIT_MINUTES))
         end = time.time() + minutes * 60
         step = 0
+        first = await asyncio.to_thread(inbox.store.get, f"inbox/{item_id}") or {}
+        ids = [item_id]
+        if first.get("batchId"):
+            ids = [i["id"] for i in sorted(await asyncio.to_thread(inbox.store.where, "inbox", "batchId", first["batchId"]),
+                                           key=lambda i: i.get("batchIndex", 0))] or ids
         while time.time() < end:
-            text = await asyncio.to_thread(inbox.take_answer, item_id)
-            if text:
+            for i in ids:
+                ask = await asyncio.to_thread(inbox.ask_back, i)
+                if ask:
+                    title = next((x.get("title", "") for x in [await asyncio.to_thread(inbox.store.get, f"inbox/{i}") or {}]), "")
+                    return (f'The owner asks back on "{title}" (id {i}): "{ask.get("text", "")}". This is not an answer. '
+                            f"Reply in a few words with inbox_reply(item_id=\"{i}\", text=...) (draw it with an svg when "
+                            f"it can be drawn), then call inbox_wait(item_id=\"{item_id}\").")
+            items = [await asyncio.to_thread(inbox.store.get, f"inbox/{i}") or {} for i in ids]
+            if all(x.get("status") == "answered" for x in items):
+                texts = [t for i in ids if (t := await asyncio.to_thread(inbox.take_answer, i))]
                 extra = await asyncio.to_thread(inbox.other_replies, item_id)
-                return "\n".join([text, *extra])
+                return "\n".join([*texts, *extra])
             step += 1
             try:
                 await ctx.report_progress(step, None, "waiting for the owner's answer")
@@ -534,25 +606,46 @@ def server():
 
     @mcp.tool()
     async def inbox_ask(question: str, ctx: Context, title: str = "", options: list[dict] | None = None,
-                        recommended: int | None = None, context: str = "", wait_minutes: float = MAX_WAIT_MINUTES) -> str:
-        """Ask the owner a question on the dashboard and wait for the answer.
+                        recommended: int | None = None, context: str = "", wait_minutes: float = MAX_WAIT_MINUTES,
+                        more_questions: list[dict] | None = None) -> str:
+        """Ask the owner on the dashboard and wait for the answer. Draw before you write: the owner reads pictures
+        faster than words.
 
-        options: a list of {"label": short choice, "detail": one line, "example": {...}}. recommended: the index of
-        the option you recommend. context: the facts the owner needs to decide. wait_minutes: up to 25; then call
-        inbox_wait.
+        options: a list of {"label": short choice, "detail": one line, "differs": what is different about this
+        option, a few words on the same point for every option, "example": {...}}. Each option needs a drawing
+        (example type visual) or a differs line. recommended: the index of the option you recommend. context: the
+        facts the owner needs to decide. wait_minutes: up to 25; then call inbox_wait.
+        more_questions: other questions asked together, each {"question", "title", "options", "recommended"}: the
+        owner sees and answers them as one batch, and you get all the answers at once.
+        The owner may ask back before answering: you then get their question; reply with inbox_reply and wait again.
 
         example (required on every option while a plan is open), one of:
+        {"type": "visual", "svg": an inline <svg> drawing of the option, small, labelled, no script};
         {"type": "image", "before": file path, "after": file path, "note": what to look at} (same view, with markers);
         {"type": "code", "diff": unified diff, "bench": [{"name", "before", "after", "measured": true|false,
          "source": the run that measured it}]} (say measured false for an estimate);
         {"type": "text", "draft": the draft text}.
         """
         try:
-            item_id = await asyncio.to_thread(inbox.post, "question", title or question[:80],
-                                              (context + "\n\n" + question).strip(), options, recommended)
+            if more_questions:
+                batch = [{"title": title or question[:80], "text": (context + "\n\n" + question).strip(),
+                          "options": options, "recommended": recommended}]
+                batch += [{"title": q.get("title") or str(q.get("question", ""))[:80], "text": str(q.get("question", "")),
+                           "options": q.get("options"), "recommended": q.get("recommended")} for q in more_questions]
+                item_id = (await asyncio.to_thread(inbox.post_batch, batch))[0]
+            else:
+                item_id = await asyncio.to_thread(inbox.post, "question", title or question[:80],
+                                                  (context + "\n\n" + question).strip(), options, recommended)
         except ValueError as e:
             return f"Not asked: {e}"
         return await wait_for(item_id, wait_minutes, ctx)
+
+    @mcp.tool()
+    async def inbox_reply(item_id: str, text: str) -> str:
+        """Reply to the owner's question back on an inbox question: a few words (an svg drawing in the text is fine
+        when it explains better). It never answers the question for the owner. Then call inbox_wait."""
+        ok = await asyncio.to_thread(inbox.reply, item_id, text)
+        return "Replied. Call inbox_wait to wait for the answer." if ok else f"No question {item_id}."
 
     @mcp.tool()
     async def inbox_wait(item_id: str, ctx: Context, wait_minutes: float = MAX_WAIT_MINUTES) -> str:

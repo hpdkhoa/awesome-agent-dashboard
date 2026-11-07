@@ -22,8 +22,9 @@ POLL_SECONDS = 5
 
 
 def post_questions(inbox: Inbox, questions: list[dict]) -> list[str]:
-    """One inbox item per question; options keep their labels, so an answer maps back to the label Claude offered."""
-    ids = []
+    """One batch: the questions of one question box show as one entry on the page and are answered together. Options
+    keep their labels, so an answer maps back to the label Claude offered."""
+    batch = []
     for q in questions:
         # an option's preview is its example; a plan question with an option that has none is refused, and the
         # session's own question box opens instead
@@ -33,9 +34,9 @@ def post_questions(inbox: Inbox, questions: list[dict]) -> list[str]:
         text = q.get("question", "")
         if q.get("multiSelect"):
             text += "\n\n(More than one option may be picked.)"
-        ids.append(inbox.post("question", q.get("header") or q.get("question", "")[:80], text, opts,
-                              extra={"via": "hook", "multi": bool(q.get("multiSelect"))}))
-    return ids
+        batch.append({"title": q.get("header") or q.get("question", "")[:80], "text": text, "options": opts,
+                      "extra": {"multi": bool(q.get("multiSelect"))}})
+    return inbox.post_batch(batch, via="hook")
 
 
 def answer_of(item: dict) -> str:

@@ -23,6 +23,10 @@ function Shot({ path, label, cwd }: { path: string; label: string; cwd: string }
 export function Example({ e, cwd }: { e: Ex; cwd: string }) {
   return (
     <div className="example">
+      {e.type === "visual" && (
+        // shown as an image, so nothing in the drawing can run
+        <img className="ex-visual" alt="drawing of this option" src={"data:image/svg+xml;charset=utf-8," + encodeURIComponent(e.svg)} />
+      )}
       {e.type === "image" && (
         <div className="ex-pair">
           <Shot path={e.before} label="Before" cwd={cwd} />

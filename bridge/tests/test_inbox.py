@@ -45,7 +45,7 @@ def make(store, sid="s1"):
 def test_question_round_trip_live():
     store = FakeStore()
     ib = make(store)
-    qid = ib.post("question", "Which way?", "Pick one", [{"label": "A", "detail": "fast"}, {"label": "B"}], 0)
+    qid = ib.post("question", "Which way?", "Pick one", [{"label": "A", "differs": "d", "detail": "fast"}, {"label": "B", "differs": "d"}], 0)
     item = store.get(f"inbox/{qid}")
     assert item["status"] == "open" and item["workType"] == "labs" and item["recommended"] == 0
     assert ib.take_answer(qid) is None
@@ -58,7 +58,7 @@ def test_question_round_trip_live():
 
 def test_bad_recommended_index_is_dropped_and_secrets_removed():
     store = FakeStore()
-    qid = make(store).post("question", "t", "key AIza" + "x" * 35, [{"label": "A"}], 5)
+    qid = make(store).post("question", "t", "key AIza" + "x" * 35, [{"label": "A", "differs": "d"}], 5)
     item = store.get(f"inbox/{qid}")
     assert item["recommended"] is None and "AIza" not in item["text"]
 
@@ -144,9 +144,9 @@ def test_plan_rounds_follow_its_versions():
     store = FakeStore()
     ib = make(store)
     pid = ib.plan_start("Plans tab")
-    q0 = ib.post("question", "Scope?", "which", [{"label": "A", "example": {"type": "text", "draft": "x"}}])
+    q0 = ib.post("question", "Scope?", "which", [{"label": "A", "differs": "d", "example": {"type": "text", "draft": "x"}}])
     assert ib.plan_version(pid, "# v1", "first draft") == 1
-    q1 = ib.post("question", "Graph?", "which", [{"label": "B", "example": {"type": "text", "draft": "x"}}])
+    q1 = ib.post("question", "Graph?", "which", [{"label": "B", "differs": "d", "example": {"type": "text", "draft": "x"}}])
     assert ib.plan_version(pid, "# v2", "Q1 picked B") == 2
     assert store.docs[f"inbox/{q0}"]["planId"] == pid and store.docs[f"inbox/{q0}"]["round"] == 0
     assert store.docs[f"inbox/{q1}"]["round"] == 1
@@ -162,7 +162,7 @@ def test_only_this_sessions_open_plan_takes_questions():
     ib = make(store)
     assert "planId" not in store.docs[f"inbox/{ib.post('question', 'q', 'x')}"]
     pid = ib.plan_start("mine", "# v1")
-    assert store.docs[f"inbox/{ib.post('question', 'q', 'x', [{'label': 'A', 'example': {'type': 'text', 'draft': 'x'}}])}"]["planId"] == pid
+    assert store.docs[f"inbox/{ib.post('question', 'q', 'x', [{'label': 'A', 'differs': 'd', 'example': {'type': 'text', 'draft': 'x'}}])}"]["planId"] == pid
     assert store.docs[f"plans/{pid}"]["current"] == 1
     assert store.docs[f"inbox/{ib.post('suggestion', 's', 'x')}"].get("planId") is None
 
@@ -171,7 +171,7 @@ def test_reopened_answer_branches_and_old_branch_keeps_its_answer():
     store = FakeStore()
     ib = make(store)
     pid = ib.plan_start("p", "# v1")
-    q = ib.post("question", "List or graph?", "x", [{"label": "List", "example": {"type": "text", "draft": "x"}}, {"label": "Graph", "example": {"type": "text", "draft": "x"}}])
+    q = ib.post("question", "List or graph?", "x", [{"label": "List", "differs": "d", "example": {"type": "text", "draft": "x"}}, {"label": "Graph", "differs": "d", "example": {"type": "text", "draft": "x"}}])
     owner_answers(store, q, "List")
     assert ib.plan_version(pid, "# v2 list", "Q: List") == 2
     assert store.docs[f"planVersions/{pid}_v2"]["parent"] == 1
@@ -199,3 +199,37 @@ def test_a_deleted_heartbeat_stays_deleted():
     inbox.beat()
     inbox.beat()
     assert store.get("liveSessions/s1") is None
+
+
+def test_a_batch_is_one_entry_with_its_questions_in_order_and_options_need_a_drawing_or_a_difference():
+    import pytest
+    store = FakeStore()
+    ib = make(store)
+    with pytest.raises(ValueError, match="drawing"):
+        ib.post("question", "q", "x", [{"label": "A"}])
+    svg = '<svg onload="x()"><script>bad()</script><rect/></svg>'
+    ids = ib.post_batch([{"title": "one", "text": "1?", "options": [{"label": "A", "differs": "fast"}]},
+                         {"title": "two", "text": "2?", "options": [{"label": "B", "example": {"type": "visual", "svg": svg}}]}])
+    a, b = store.docs[f"inbox/{ids[0]}"], store.docs[f"inbox/{ids[1]}"]
+    assert a["batchId"] == b["batchId"] and (a["batchIndex"], b["batchIndex"], a["batchSize"]) == (0, 1, 2)
+    assert a["options"][0]["differs"] == "fast" and b["options"][0]["example"]["svg"] == "<svg><rect/></svg>"
+
+
+def test_ask_back_is_seen_until_the_session_replies():
+    store = FakeStore()
+    ib = make(store)
+    i = ib.post("question", "q", "x", [{"label": "A", "differs": "d"}])
+    assert ib.ask_back(i) is None
+    store.update(f"inbox/{i}", {"thread": [{"who": "owner", "kind": "answer", "choice": "A"},
+                                           {"who": "owner", "kind": "ask", "text": "on a phone?"}]})
+    assert ib.ask_back(i)["text"] == "on a phone?"
+    assert ib.reply(i, "it stacks") and ib.ask_back(i) is None
+    assert store.docs[f"inbox/{i}"]["thread"][-1]["who"] == "session" and store.docs[f"inbox/{i}"]["status"] == "open"
+
+
+def test_the_question_box_posts_one_batch():
+    from agent_bridge.ask import post_questions
+    store = FakeStore()
+    ids = post_questions(make(store), [{"question": "a?", "options": [{"label": "x"}]}, {"question": "b?", "options": [{"label": "y"}]}])
+    docs = [store.docs[f"inbox/{i}"] for i in ids]
+    assert len({d["batchId"] for d in docs}) == 1 and all(d["via"] == "hook" for d in docs)
