@@ -349,3 +349,51 @@ def test_a_message_waiting_a_minute_for_the_app_asks_the_archiver_and_unarchives
     runs.step([store.get("commands/m1")])
     assert store.get("commands/m1")["status"] == "running" and store.get("commands/m1")["archive"] == "unarchiving"
     assert hand.take(1, poll=0.05)["action"] == "unarchive"
+
+
+def test_a_message_on_an_older_plan_brings_it_to_the_latest_format_first(tmp_path, monkeypatch):
+    store, runs, work = setup(tmp_path, monkeypatch)
+    store.put_many({"plans/old": {"id": "old", "title": "Old plan", "sessionId": "old-s", "machine": "PC", "cwd": str(work),
+                                  "status": "done", "current": 5, "closeNote": "approved"}})
+    cmd(store, "m1", action="message", sessionId="old-s", cwd=str(work), planId="old", generate={"kinds": ["chart"]},
+        prompt="Save each file in .plan_data/old/v5/tmp/ please", createdAt="1")
+    runs.step()
+    m = store.get("commands/m1")
+    up = store.get(f"commands/{m['upgradeId']}")
+    assert m["status"] == "waiting" and m["waitReason"] == "upgrade"
+    assert up["action"] == "plan" and up["sourceSessionId"] == "old-s" and up["upgradeOf"] == "old"
+    runs.step()  # the plan from the session is still going: the message keeps waiting
+    assert store.get("commands/m1")["status"] == "waiting"
+    store.put_many({"plans/new": {"id": "new", "title": "New plan", "kind": "parts", "sessionId": "new-s", "machine": "PC",
+                                  "cwd": str(work), "status": "open", "current": 1}})
+    store.update(f"commands/{m['upgradeId']}", {"status": "done", "planId": "new"})
+    c = wait_done(runs, "m1", store)
+    assert c["status"] == "done" and c["planId"] == "new" and c["upgradedFrom"] == "old"
+    assert c["result"].endswith("resumed new-s") and ".plan_data/new/v1/tmp/" in c["result"]
+    old = store.get("plans/old")
+    assert old["status"] == "done" and old["upgradedTo"] == "new" and "plan new" in old["closeNote"]
+
+
+def test_a_failed_upgrade_fails_the_message_with_its_reason(tmp_path, monkeypatch):
+    store, runs, work = setup(tmp_path, monkeypatch)
+    store.put_many({"plans/old": {"id": "old", "title": "Old", "sessionId": "old-s", "machine": "PC", "cwd": str(work),
+                                  "status": "open", "current": 2}})
+    cmd(store, "m1", action="message", sessionId="old-s", cwd=str(work), planId="old", prompt="resume", createdAt="1")
+    runs.step()
+    store.update(f"commands/{store.get('commands/m1')['upgradeId']}", {"status": "failed", "error": "no log"})
+    runs.step()
+    m = store.get("commands/m1")
+    assert m["status"] == "failed" and "latest format" in m["error"] and "no log" in m["error"]
+    assert store.get("plans/old")["status"] == "open"
+
+
+def test_a_plan_below_the_format_number_is_rebuilt_and_one_at_it_is_not(tmp_path, monkeypatch):
+    import agent_bridge.runs as r
+    store, runs, work = setup(tmp_path, monkeypatch)
+    base = {"title": "P", "sessionId": "s", "machine": "PC", "cwd": str(work), "status": "open", "current": 1, "kind": "parts"}
+    store.put_many({"plans/a": {"id": "a", **base}, "plans/b": {"id": "b", **base, "format": 2}})
+    monkeypatch.setattr(r, "PLAN_FORMAT", 2)
+    assert runs._upgrade_first({"id": "m1", "planId": "b"}) == (True, None)
+    store.put_many({"commands/m2": {"id": "m2"}})
+    go, _ = runs._upgrade_first({"id": "m2", "planId": "a"})  # parts but no number: format 1, below 2
+    assert not go and store.get("commands/m2")["waitReason"] == "upgrade"

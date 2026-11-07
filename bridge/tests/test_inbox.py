@@ -5,6 +5,9 @@ from datetime import datetime, timedelta, timezone
 from agent_bridge.deliver import deliver
 from agent_bridge.inbox import Inbox, answer_text
 
+PARTS = {"goal": "g", "summary": "s", "rules": [], "lessons": [], "leftover": [],
+         "steps": [{"id": "s1", "title": "t", "does": "d", "check": "c"}]}
+
 
 class FakeStore:
     """The four store calls the inbox uses, in memory."""
@@ -143,25 +146,25 @@ def test_cancelled_message_closes_the_answer():
 def test_plan_rounds_follow_its_versions():
     store = FakeStore()
     ib = make(store)
-    pid = ib.plan_start("Plans tab")
+    pid = ib.plan_start("Plans tab", parts=PARTS)
     q0 = ib.post("question", "Scope?", "which", [{"label": "A", "differs": "d", "example": {"type": "text", "draft": "x"}}])
-    assert ib.plan_version(pid, "# v1", "first draft") == 1
+    assert ib.plan_version(pid, "", "first draft", parts=PARTS) == 2
     q1 = ib.post("question", "Graph?", "which", [{"label": "B", "differs": "d", "example": {"type": "text", "draft": "x"}}])
-    assert ib.plan_version(pid, "# v2", "Q1 picked B") == 2
-    assert store.docs[f"inbox/{q0}"]["planId"] == pid and store.docs[f"inbox/{q0}"]["round"] == 0
-    assert store.docs[f"inbox/{q1}"]["round"] == 1
-    assert store.docs[f"planVersions/{pid}_v2"]["note"] == "Q1 picked B"
-    assert store.docs[f"plans/{pid}"]["current"] == 2
+    assert ib.plan_version(pid, "", "Q1 picked B", parts=PARTS) == 3
+    assert store.docs[f"inbox/{q0}"]["planId"] == pid and store.docs[f"inbox/{q0}"]["round"] == 1
+    assert store.docs[f"inbox/{q1}"]["round"] == 2
+    assert store.docs[f"planVersions/{pid}_v3"]["note"] == "Q1 picked B"
+    assert store.docs[f"plans/{pid}"]["current"] == 3
     ib.plan_close(pid, "approved")
     assert "planId" not in store.docs[f"inbox/{ib.post('question', 'later', 'x')}"]
 
 
 def test_only_this_sessions_open_plan_takes_questions():
     store = FakeStore()
-    make(store, "other").plan_start("not mine")
+    make(store, "other").plan_start("not mine", parts=PARTS)
     ib = make(store)
     assert "planId" not in store.docs[f"inbox/{ib.post('question', 'q', 'x')}"]
-    pid = ib.plan_start("mine", "# v1")
+    pid = ib.plan_start("mine", parts=PARTS)
     assert store.docs[f"inbox/{ib.post('question', 'q', 'x', [{'label': 'A', 'differs': 'd', 'example': {'type': 'text', 'draft': 'x'}}])}"]["planId"] == pid
     assert store.docs[f"plans/{pid}"]["current"] == 1
     assert store.docs[f"inbox/{ib.post('suggestion', 's', 'x')}"].get("planId") is None
@@ -170,7 +173,7 @@ def test_only_this_sessions_open_plan_takes_questions():
 def test_reopened_answer_branches_and_old_branch_keeps_its_answer():
     store = FakeStore()
     ib = make(store)
-    pid = ib.plan_start("p", "# v1")
+    pid = ib.plan_start("p", parts=PARTS)
     q = ib.post("question", "List or graph?", "x", [{"label": "List", "differs": "d", "example": {"type": "text", "draft": "x"}}, {"label": "Graph", "differs": "d", "example": {"type": "text", "draft": "x"}}])
     owner_answers(store, q, "List")
     assert ib.plan_version(pid, "# v2 list", "Q: List") == 2
@@ -233,3 +236,21 @@ def test_the_question_box_posts_one_batch():
     ids = post_questions(make(store), [{"question": "a?", "options": [{"label": "x"}]}, {"question": "b?", "options": [{"label": "y"}]}])
     docs = [store.docs[f"inbox/{i}"] for i in ids]
     assert len({d["batchId"] for d in docs}) == 1 and all(d["via"] == "hook" for d in docs)
+
+
+def test_a_new_plan_must_have_the_six_parts():
+    ib = make(FakeStore())
+    try:
+        ib.plan_start("text only", "# v1")
+    except ValueError as e:
+        assert "latest format" in str(e)
+    else:
+        raise AssertionError("a text-only plan was opened")
+
+
+def test_a_new_plan_carries_the_format_number():
+    from agent_bridge.inbox import PLAN_FORMAT, format_of
+    store = FakeStore()
+    pid = make(store).plan_start("p", parts=PARTS)
+    assert store.docs[f"plans/{pid}"]["format"] == PLAN_FORMAT == 1
+    assert format_of({"kind": "parts"}) == 1 and format_of({}) == 0

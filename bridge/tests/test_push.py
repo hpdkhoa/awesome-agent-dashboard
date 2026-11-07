@@ -63,7 +63,7 @@ def test_questions_suggestions_results_and_plan_versions_push():
     store = FakeStore()
     got = []
     ib = Inbox(store, "PC", [("labs", "K:/labs")], "s1", "K:/labs/x", type("P", (), {"notify": lambda self, *a: got.append(a)})())
-    pid = ib.plan_start("Plans tab", "# v1", "first draft")
+    pid = ib.plan_start("Plans tab", "", "first draft", parts={"goal": "g", "summary": "s", "rules": [], "lessons": [], "leftover": [], "steps": []})
     q = ib.post("question", "List or graph?", "\nPick one.", [{"label": "List", "differs": "d", "example": {"type": "text", "draft": "x"}}])
     h = ib.post("question", "Hook question", "Which?", [{"label": "A", "differs": "d", "example": {"type": "text", "draft": "x"}}], extra={"via": "hook"})
     ib.post("suggestion", "Idea", "Try this")

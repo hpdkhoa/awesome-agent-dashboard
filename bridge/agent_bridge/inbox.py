@@ -57,6 +57,15 @@ STEP_STATES = ("next", "now", "done", "failed")
 # "I will be the one who trigger the move in every phase, I give order and decisions, you note it down as a plain
 # version to change the phase, and I want the version is included the phase").
 PHASES = ("explore", "build", "verify", "remove", "optimize")
+# The plan format number (the owner's words, 2026-11-07: "all plans will have to update to latest format when I resume
+# the plan"). 0: text only. 1: the six parts. Raise it when the plan format changes; plans below it are rebuilt from
+# their session when the owner resumes them (runs.py _upgrade_first).
+PLAN_FORMAT = 1
+
+
+def format_of(plan: dict) -> int:
+    """A plan's format number; plans made before the number existed: 1 with the six parts, else 0."""
+    return int(plan.get("format", 1 if plan.get("kind") == "parts" else 0))
 
 
 def check_example(e) -> str | None:
@@ -221,12 +230,17 @@ class Inbox:
 
     def plan_start(self, title: str, text: str = "", note: str = "", parts: dict | None = None, source: str = "",
                    harness: list | None = None) -> str:
-        """parts: the six parts of v1. source: the id of the dashboard command that read a session for this plan."""
+        """parts: the six parts of v1. source: the id of the dashboard command that read a session for this plan.
+        A new plan starts in the latest format, the six parts (the owner's words, 2026-11-07: "make sure that any new
+        plan will goes witb the latest version of plan"): a plan with text only is refused."""
+        if parts is None:
+            raise ValueError("A new plan starts in the latest format: give the six parts (goal, summary, rules, "
+                             "lessons, leftover, steps). A plan with text only is no longer opened.")
         plan_id = uuid.uuid4().hex[:20]
         doc = {
             "id": plan_id, "title": redact(title, 200), "sessionId": self.session_id, "machine": self.machine,
             "cwd": self.cwd, "workType": work_type_of(self.cwd, self.roots), "status": "open", "current": 0,
-            "createdAt": now_iso(), "updatedAt": now_iso(), "phase": PHASES[0],
+            "createdAt": now_iso(), "updatedAt": now_iso(), "phase": PHASES[0], "format": PLAN_FORMAT,
         }
         if parts is not None:
             parts = clean_parts(parts)
@@ -679,7 +693,8 @@ def server():
     @mcp.tool()
     async def plan_start(title: str, text: str = "", note: str = "", parts: dict | None = None, source: str = "",
                          harness: list | None = None) -> str:
-        """Open a plan on the dashboard. text: version 1 (markdown), if you have one. Questions you ask with inbox_ask
+        """Open a plan on the dashboard, always in the latest format: parts is required (a plan with text only is
+        refused). text: an extra markdown note for version 1, if you have one. Questions you ask with inbox_ask
         (or your question box) while the plan is open join it, in the round of its current version.
 
         parts: the six parts of a plan from a session, in this order: {"goal": markdown (quote the owner), "summary":

@@ -52,7 +52,7 @@ from pathlib import Path
 from .aggregate import work_type_of
 from .archiver import Archiver
 from .digest import find_log, write_pages
-from .inbox import KINDS, now_iso
+from .inbox import KINDS, PLAN_FORMAT, format_of, now_iso
 from .planfrom import NO_EDITS, kind_args, mark_quotes, note_command, plan_prompt, step_args
 from .redact import redact
 
@@ -385,7 +385,51 @@ class Runs:
                 return "turn"  # a run of this bridge is working in it
         return log_wait_reason(self.logs, session_id, force, self.procs_seen)
 
+    def _upgrade_first(self, c: dict) -> tuple[bool, str | None]:
+        """A message on a plan in an older format (its format number below PLAN_FORMAT) waits while a plan from that plan's session brings it
+        to the latest format; then the message goes on to the new plan, and the old plan is closed with a link (the
+        owner's words, 2026-11-07: "all plans will have to update to latest format when I resume the plan").
+        Returns (go on with c, log line)."""
+        plan = self.store.get(f"plans/{c.get('planId')}") if c.get("planId") else None
+        if not plan or format_of(plan) >= PLAN_FORMAT:
+            return True, None
+        path, up = f"commands/{c['id']}", c.get("upgradeId")
+        if not up:
+            up = uuid.uuid4().hex[:20]
+            self.store.put_many({f"commands/{up}": {
+                "id": up, "action": "plan", "machine": plan.get("machine", self.machine),
+                "sourceSessionId": plan.get("sessionId", ""), "cwd": plan.get("cwd", ""), "upgradeOf": plan["id"],
+                "prompt": f"Plan from session (latest format): {plan.get('title', '')}", "status": "new",
+                "createdAt": now_iso()}})
+            self.store.update(path, {"status": "waiting", "waitReason": "upgrade", "upgradeId": up, "waitingSince": now_iso()})
+            self._answer_back(c, {"waitReason": "upgrade"})
+            return False, f"{c['id']}: plan {plan['id']} is in an older format, {up} brings it to the latest first"
+        u = self.store.get(f"commands/{up}") or {}
+        if u.get("status") in ("new", "running"):
+            return False, None
+        new = self.store.get(f"plans/{u.get('planId', '')}") if u.get("status") == "done" and u.get("planId") else None
+        if not new:
+            error = "The plan could not be brought to the latest format: " + str(u.get("error") or u.get("status") or "no new plan")
+            self.store.update(path, {"status": "failed", "endedAt": now_iso(), "error": redact(error, 800)})
+            self._answer_back(c, {"status": "answered", "error": redact(error, 800)})
+            return False, f"{c['id']}: refused, {error}"
+        note = (plan.get("closeNote") or "").strip()
+        link = f"Moved to the latest format: plan {new['id']} ({new.get('title', '')})."
+        self.store.update(f"plans/{plan['id']}", {"status": "done", "upgradedTo": new["id"], "updatedAt": now_iso(),
+                                                  "closeNote": f"{note} {link}".strip() if link not in note else note})
+        prompt = str(c.get("prompt") or "")
+        if c.get("generate"):  # the order names the old plan's folder; the files go to the new plan's folder
+            prompt = re.sub(rf"\.plan_data/{re.escape(plan['id'])}/v\d+", f".plan_data/{new['id']}/v{new.get('current', 1)}", prompt)
+        moved = {"planId": new["id"], "sessionId": new.get("sessionId", ""), "cwd": new.get("cwd", c.get("cwd", "")),
+                 "prompt": prompt, "upgradedFrom": plan["id"]}
+        self.store.update(path, moved)
+        c.update(moved)
+        return True, f"{c['id']}: plan {plan['id']} moved to the latest format as {new['id']}; the message goes on"
+
     def _message(self, c: dict) -> str | None:
+        go, line = self._upgrade_first(c)
+        if not go:
+            return line
         path = f"commands/{c['id']}"
         sid, cwd, text = c.get("sessionId", ""), c.get("cwd", ""), (c.get("prompt") or "").strip()
         if not sid or not text:

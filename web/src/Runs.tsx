@@ -98,6 +98,7 @@ const ARCHIVE_LABEL: Record<string, string> = {
 const WAIT_LABEL: Record<string, string> = {
   turn: "waiting for the session's turn to end",
   app: "waiting: last used in the app or a terminal, send it with Remote Control",
+  upgrade: "waiting: the plan is being moved to the latest format first",
 };
 
 // What the wait rule saw on the last "Check now" (the owner's choice, 2026-11-02: "do both").

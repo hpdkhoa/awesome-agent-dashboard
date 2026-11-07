@@ -176,6 +176,12 @@ export function PlanView({ plan, items, session, runs = [], onOpenItem }: {
             closed: {plan.closeNote}
           </>
         )}
+        {plan.upgradedTo && (
+          <>
+            <br />
+            <a href={`/?plan=${plan.upgradedTo}`}>Open the plan in the latest format</a>
+          </>
+        )}
       </p>
       <div className="chips">
         {(plan.kind === "parts" ? (["parts", "graph", "list"] as const) : (["graph", "list"] as const)).map((x) => (

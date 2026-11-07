@@ -57,7 +57,7 @@ export type InboxItem = {
   answer: { choice: string; text: string; at: string } | null;
   deliveredAt?: string;
   deliveredVia?: "live" | "resume";
-  waitReason?: "turn" | "app" | null; // why an answer has not reached the session yet (bridge runs.py)
+  waitReason?: "turn" | "app" | "upgrade" | null; // why an answer has not reached the session yet (bridge runs.py)
   commandId?: string; // the message run that carries the answer to the session
   force?: boolean;
   followUp?: string;
@@ -90,6 +90,8 @@ export type Example =
 export type Plan = {
   id: string; title: string; sessionId: string; machine: string; cwd: string; workType: string;
   status: "open" | "done"; current: number; createdAt: string; updatedAt: string; closeNote?: string;
+  format?: number; // plan format number (bridge inbox.py PLAN_FORMAT); none: 1 with parts, else 0
+  upgradedTo?: string; // the plan in the latest format this older plan moved to (bridge runs.py _upgrade_first)
   chosen?: number; // the version on the chosen line (default: the newest)
   kind?: "parts"; // a plan with six parts (plan from a session, 2026-11-03)
   source?: { sessionId: string; commandId: string; pagesDir: string; pages: { file: string; first: number; last: number }[] };
@@ -152,7 +154,8 @@ export type Run = {
   generate?: { kinds: Kind[]; note?: string }; // the owner's Generate order (planCheck.ts)
   phaseOrder?: boolean; // the owner's order to move the plan's phase (phases.ts)
   quotes?: { checked: number; marked: number }; // plan from a session: quotes in the notes not found on their page
-  waitReason?: "turn" | "app";
+  waitReason?: "turn" | "app" | "upgrade";
+  upgradeId?: string; upgradedFrom?: string; // a message on an older plan waits while the plan moves to the latest format
   // the archiver (bridge archiver.py, 2026-11-06): asked, archived, unarchiving, done, refused, unarchive failed
   archive?: string; archiveNote?: string | null;
   force?: boolean;
