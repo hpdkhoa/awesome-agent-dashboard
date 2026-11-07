@@ -50,6 +50,7 @@ import uuid
 from pathlib import Path
 
 from .aggregate import work_type_of
+from .archiver import Archiver
 from .digest import find_log, write_pages
 from .inbox import KINDS, now_iso
 from .planfrom import NO_EDITS, kind_args, mark_quotes, note_command, plan_prompt, step_args
@@ -290,6 +291,8 @@ class Runs:
         self.push = push  # a push.Pusher: tells the owner's phone when a run ended
         self.procs_seen = procs  # which sessions are open in the app or a terminal (injectable for tests)
         self.out_dir = out_dir  # each run's output goes to files, so a long run never blocks on a full pipe
+        self.archiver = Archiver(out_dir / "archiver")  # archiver.py: frees a session open in the app; the same
+        # folder as the archiver tools in inbox.py (data_dir()/runs/archiver)
         self.out_dir.mkdir(parents=True, exist_ok=True)
         self.procs: dict[str, subprocess.Popen] = {}
         # "new" commands already acted on: a listener snapshot can lag behind our own write, never act twice
@@ -315,7 +318,7 @@ class Runs:
 
     def step(self, todo: list[dict] | None = None) -> list[str]:
         """Acts on the commands still to do. `todo` comes from the listener (listen.py); without it, ask Firestore."""
-        log = []
+        log = self._archiver_reports()
         if todo is None:
             todo = self.store.where("commands", "status", "new") + self.store.where("commands", "status", "waiting")
         # oldest first: Firestore returns them by document id, so two messages to one session could flip (the owner's
@@ -338,6 +341,7 @@ class Runs:
         for cid, p in list(self.procs.items()):
             if p.poll() is not None:
                 log.append(self._finish(cid, p))
+        log += self._archiver_freed()
         return log
 
     def _unknown(self, c: dict) -> str:
@@ -401,9 +405,12 @@ class Runs:
         why = self.wait_reason(sid, bool(c.get("force")))
         if why:
             if c.get("status") != "waiting" or c.get("waitReason") != why:
-                self.store.update(path, {"status": "waiting", "waitReason": why, "workType": wt})
+                self.store.update(path, {"status": "waiting", "waitReason": why, "workType": wt, "waitingSince": now_iso()})
                 self._answer_back(c, {"waitReason": why})
                 return f"{c['id']}: session {sid} {'is in a turn' if why == 'turn' else 'is open in the app or a terminal'}, the message waits"
+            if why == "app" and self._ask_archive(c, sid, cwd):
+                self.store.update(path, {"archive": "asked"})
+                return f"{c['id']}: waited 1 minute for session {sid}, the archiver is asked to free it"
             return None
         mode, kind = self.mode(), c.get("kind") if c.get("kind") in KINDS else ""
         if c.get("generate"):
@@ -415,7 +422,38 @@ class Runs:
         self.store.update(path, {"status": "running", "workType": wt, "pid": p.pid, "startedAt": now_iso(),
                                  "permissionMode": mode})
         self._answer_back(c, {"waitReason": None})
+        if self.archiver.of(c["id"]) == "archived":
+            self.archiver.ask_unarchive(c["id"])
+            self.store.update(path, {"archive": "unarchiving"})
         return f"{c['id']}: sent to session {sid}"
+
+    def _ask_archive(self, c: dict, sid: str, cwd: str) -> bool:
+        """After 1 minute of waiting for a session open in the app, ask the archiver (archiver.py) to free it."""
+        try:
+            since = datetime.fromisoformat(str(c.get("waitingSince"))).timestamp()
+        except ValueError:
+            return False
+        logs = list(self.logs.glob(f"*/{sid}.jsonl")) if self.logs and self.logs.is_dir() else []
+        last = datetime.fromtimestamp(logs[0].stat().st_mtime, timezone.utc).isoformat() if logs else ""
+        return self.archiver.maybe_ask(c["id"], sid, cwd, since, last)
+
+    def _archiver_reports(self) -> list[str]:
+        """The archiver's reports go on their messages, before the messages are looked at."""
+        log = []
+        for cid, state, note in self.archiver.collect():
+            self.store.update(f"commands/{cid}", {"archive": state, "archiveNote": note or None})
+            log.append(f"{cid}: archiver {state}{': ' + note if note else ''}")
+        return log
+
+    def _archiver_freed(self) -> list[str]:
+        """An archived session whose message no longer waits (sent, cancelled or deleted) is unarchived."""
+        log = []
+        for cid, s in list(self.archiver.state.items()):
+            if s.get("state") == "archived" and (self.store.get(f"commands/{cid}") or {}).get("status") not in ("waiting", "new"):
+                self.archiver.ask_unarchive(cid)
+                self.store.update(f"commands/{cid}", {"archive": "unarchiving"})
+                log.append(f"{cid}: the message no longer waits, the archiver is asked to unarchive its session")
+        return log
 
     def _approve_generated(self, c: dict) -> str:
         """The owner approves the final result of a Generate (the owner's words, 2026-11-04: "the generated files I'm not

@@ -324,3 +324,28 @@ def test_a_stop_sent_by_delete_kills_the_run_and_leaves_no_record(tmp_path, monk
     assert runs.procs.get("c1") is None or runs.procs["c1"].wait(10) is not None
     runs.step()
     assert not runs.procs and store.get("commands/c1") is None and store.get("commands/x1") is None
+
+
+def test_a_message_waiting_a_minute_for_the_app_asks_the_archiver_and_unarchives_after_it_runs(tmp_path, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    from agent_bridge.archiver import Hand
+    store, runs, work = setup(tmp_path, monkeypatch)
+    hand = Hand(runs.archiver.folder, "arch")
+    hand.take(0)
+    held = {"v": "app"}
+    monkeypatch.setattr(runs, "wait_reason", lambda sid, force=False: held["v"])
+    cmd(store, "m1", action="message", sessionId="s1", cwd=str(work), prompt="hi")
+    runs.step()
+    assert store.get("commands/m1")["status"] == "waiting" and runs.archiver.of("m1") == ""
+    old = (datetime.now(timezone.utc) - timedelta(seconds=61)).isoformat()
+    store.update("commands/m1", {"waitingSince": old})
+    runs.step([store.get("commands/m1")])
+    assert runs.archiver.of("m1") == "asked" and store.get("commands/m1")["archive"] == "asked"
+    assert hand.take(1, poll=0.05)["action"] == "archive"
+    hand.report("m1", "archive", True, app_session="local_s1")
+    runs.step([])
+    assert store.get("commands/m1")["archive"] == "archived"
+    held["v"] = None  # the app process is gone: the bridge sends
+    runs.step([store.get("commands/m1")])
+    assert store.get("commands/m1")["status"] == "running" and store.get("commands/m1")["archive"] == "unarchiving"
+    assert hand.take(1, poll=0.05)["action"] == "unarchive"

@@ -104,6 +104,10 @@ against its page and marks any that differ; the run shows how many it checked an
 - **Plan versions** change only with the plan's data. A step moving (next, now, done, failed) is a step version: each
   step shows its last reply like a message, older ones folded.
 - **Run step** on a step sends "Work on step sN" to the plan's session as a normal message.
+- **The archiver** frees a session open in the Claude app for a waiting message. Start one app session in Auto
+  with the prompt in `cc/dashboard/ARCHIVER_PROMPT.md`; it waits in `archiver_wait` (no tokens). After a message
+  waits 1 minute for an idle app session, the bridge asks it to archive the session, sends the message once the
+  process is gone, then asks it to unarchive. Pinned, busy and on-screen sessions are refused and keep waiting.
 - **"..." on every record** (session, run, inbox item, plan, plan version, step, money entry, Storage row) has
   Delete record. It lists the record and the records linked below it (a session's runs, plans and inbox items; a
   run's questions and the plan it made; a plan's versions, steps, questions and messages) and deletes them after

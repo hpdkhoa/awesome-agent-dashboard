@@ -87,6 +87,14 @@ export function StartForm({ machines, plan = false }: { machines: Machine[]; pla
 
 // claude.ai names a Remote Control session "session_..."; the log names the same id "cse_...".
 // Why a message waits (bridge/agent_bridge/runs.py wait_reason).
+const ARCHIVE_LABEL: Record<string, string> = {
+  asked: "the archiver is asked to free the session",
+  archived: "session archived, sending now",
+  unarchiving: "sent; unarchiving the session",
+  done: "sent; the session is back in your list",
+  refused: "the archiver could not free it",
+  "unarchive failed": "sent; unarchive failed: unarchive it in the app",
+};
 const WAIT_LABEL: Record<string, string> = {
   turn: "waiting for the session's turn to end",
   app: "waiting: last used in the app or a terminal, send it with Remote Control",
@@ -234,6 +242,7 @@ export function RunList({ runs, title = "Runs from the dashboard" }: { runs: Run
             <>
               {r.action === "message" ? (r.kind ? `plan message: ${KIND_NAME[r.kind]}` : "message")
                 : r.action === "plan" ? `plan from session${r.status === "running" && r.stage ? ": " + r.stage : ""}` : "new session"}
+              {r.archive ? ` · ${ARCHIVE_LABEL[r.archive] ?? r.archive}${r.archiveNote ? ": " + r.archiveNote : ""}` : ""}
               {r.quotes ? ` · quotes ${r.quotes.checked} checked, ${r.quotes.marked} marked` : ""}{" "}
               · {r.workType ?? ""} · {r.machine} ·{" "}
               {r.permissionMode === "auto" && <>auto · </>}

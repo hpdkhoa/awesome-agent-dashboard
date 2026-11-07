@@ -147,6 +147,8 @@ export type Run = {
   phaseOrder?: boolean; // the owner's order to move the plan's phase (phases.ts)
   quotes?: { checked: number; marked: number }; // plan from a session: quotes in the notes not found on their page
   waitReason?: "turn" | "app";
+  // the archiver (bridge archiver.py, 2026-11-06): asked, archived, unarchiving, done, refused, unarchive failed
+  archive?: string; archiveNote?: string | null;
   force?: boolean;
   permissionMode?: RunMode; // the setting the bridge read when this run went
   // "Check now": what the bridge's wait rule saw for the session (bridge runs.py session_status)

@@ -29,6 +29,7 @@ picture pair, a code diff with a benchmark, or a draft. A plan question without 
 """
 
 
+import json
 import os
 import threading
 import time
@@ -42,6 +43,9 @@ from .planfrom import check_parts
 BEAT_SECONDS = 60
 LIVE_SECONDS = 180  # a session whose heartbeat is older than this is treated as closed
 POLL_SECONDS = 5
+# how long one archiver_wait call blocks before it returns "nothing": measured 2026-11-07 on CLI 2.1.316, a tool call
+# held 30, 330, 660 and 1260 s with no timeout; 1200 s stays under the longest measured. An ask returns at once anyway.
+ARCHIVER_WAIT = 1200
 MAX_WAIT_MINUTES = 25  # under Claude Code's 30-minute idle limit for a local MCP server
 PUSH_TITLE = {"question": "Question", "suggestion": "Suggestion", "result": "Result to review"}
 PARTS = ("goal", "summary", "rules", "lessons", "leftover", "steps")
@@ -672,6 +676,29 @@ def server():
         item_id = await asyncio.to_thread(inbox.post, "result", title, summary, None, None, files)
         replies = await asyncio.to_thread(inbox.other_replies, item_id)
         return "\n".join([f"Posted result {item_id} for review.", *replies])
+
+    # The archiver (archiver.py; the owner's choice, 2026-11-06: "the bridge checks for free and wakes the archiver only
+    # when needed, with the archiver in Auto"). Only the archiver session calls these two.
+    from .archiver import Hand
+    from .config import data_dir
+
+    hand = Hand(data_dir() / "runs" / "archiver", inbox.session_id)
+
+    @mcp.tool()
+    async def archiver_wait() -> str:
+        """For the archiver session only. Waits (no tokens) until the bridge asks you to archive or unarchive a
+        session, or ARCHIVER_WAIT seconds pass; then returns the ask as JSON, or "nothing". Call it again after each
+        answer, forever."""
+        ask = await asyncio.to_thread(hand.take, ARCHIVER_WAIT)
+        return json.dumps(ask) if ask else "nothing"
+
+    @mcp.tool()
+    async def archiver_report(cid: str, action: str, ok: bool, note: str = "", app_session: str = "") -> str:
+        """For the archiver session only. Report one ask: cid and action from the ask, ok true when the session was
+        archived (or unarchived), else ok false and note why (busy, pinned, open on screen, no match, refused).
+        app_session: the app's session id you acted on (local_...)."""
+        await asyncio.to_thread(hand.report, cid, action, ok, note, app_session)
+        return "Reported. Call archiver_wait again."
 
     mcp.run("stdio")
 
