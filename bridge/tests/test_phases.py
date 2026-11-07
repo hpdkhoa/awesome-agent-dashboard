@@ -158,3 +158,21 @@ def test_a_deleted_plan_takes_only_its_own_plan_data_folder(tmp_path, monkeypatc
     assert other.exists() and store.get("commands/d2")["status"] == "failed"  # a plan that exists keeps its files
     assert store.get("commands/d3")["status"] == "failed" and (work / "keep.txt").exists()
     assert (work / ".plan_data").exists()  # only the plan's own folder goes
+
+
+def test_a_ticked_file_already_in_the_version_folder_is_approved_in_place_once(tmp_path, monkeypatch):
+    from test_runs import cmd, setup
+    store, runs, work = setup(tmp_path, monkeypatch)
+    v3 = work / ".plan_data" / "pl1" / "v3"
+    v3.mkdir(parents=True)
+    (v3 / "diagram-old.svg").write_text("made before tmp/", encoding="utf-8")
+    (v3 / "chart-left.svg").write_text("not ticked", encoding="utf-8")
+    store.put_many({"plans/pl1": {"id": "pl1", "sessionId": "s1"}})
+    for i in (1, 2):  # approving twice records it once
+        cmd(store, f"a{i}", action="approve_generated", planId="pl1", cwd=str(work), folder=".plan_data/pl1/v3",
+            keep=[".plan_data/pl1/v3/diagram-old.svg"], drop=[])
+        runs.step()
+        assert store.get(f"commands/a{i}")["moved"] == [{"from": ".plan_data/pl1/v3/diagram-old.svg", "to": ".plan_data/pl1/v3/diagram-old.svg"}]
+    assert (v3 / "diagram-old.svg").exists() and (v3 / "chart-left.svg").exists()  # an unticked file outside tmp/ stays
+    gen = store.get("planGenerated/pl1")["versions"]["v3"]
+    assert [g["file"] for g in gen] == [".plan_data/pl1/v3/diagram-old.svg"]

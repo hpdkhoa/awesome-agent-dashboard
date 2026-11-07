@@ -108,7 +108,7 @@ export function FileViewer() {
           )}
         </span>
         {typeof t === "object" && t && (
-          <a href={t.url} target="_blank" rel="noopener noreferrer">New tab</a>
+          <a href={`${t.url}?download=1`} download={t.name} rel="noopener noreferrer">Download</a>
         )}
         <button onClick={() => setAsk(null)}>Close</button>
       </div>

@@ -1,7 +1,7 @@
 // Generate and check on a plan: the owner's last order, what came back for it, and what the buttons send.
 import { describe, expect, it } from "vitest";
 import type { InboxItem, Plan, Run } from "../web/src/data";
-import { approvals, checkGenerate, generateFolder, generatePrompt, lastOrder, tmpFolderOf } from "../web/src/planCheck";
+import { approvals, approvedFiles, checkGenerate, generateFolder, generatePrompt, lastOrder, relPath, tmpFolderOf, versionFolderOf } from "../web/src/planCheck";
 
 const plan = { id: "p1", sessionId: "s1", createdAt: "2026-11-04T01:00:00Z", status: "open" } as Plan;
 const run = (f: Partial<Run>) => ({ id: "r", action: "message", planId: "p1", createdAt: "2026-11-04T02:00:00Z", ...f }) as Run;
@@ -48,16 +48,33 @@ describe("generate and check", () => {
   it("groups an approval per version folder: ticked files kept, every tmp result dropped", () => {
     expect(tmpFolderOf(".plan_data/p1/v3/tmp/diagram-a.svg")).toBe(".plan_data/p1/v3");
     expect(tmpFolderOf(".plan_data\\p1\\v3\\tmp\\a.svg")).toBe(".plan_data/p1/v3"); // Windows separators
-    expect(tmpFolderOf(".plan_data/p1/v3/diagram-a.svg")).toBeNull(); // already approved
+    expect(tmpFolderOf(".plan_data/p1/v3/diagram-a.svg")).toBeNull(); // not in tmp/
     const order = { kinds: ["diagram", "mockup"] as ("diagram" | "mockup")[], note: "", at: "2026-11-04T02:00:00Z" };
     const c = checkGenerate(plan, order, [
       result("Generated diagram: a", [".plan_data/p1/v3/tmp/diagram-a.svg", ".plan_data/p1/v3/tmp/diagram-b.svg"]),
       result("Generated mockup: m", [".plan_data/p1/v3/tmp/mockup-m.svg"]),
       result("Generated diagram: old", [".plan_data/p1/v2/diagram-old.svg"]),
     ]);
-    expect(approvals(c, [".plan_data/p1/v3/tmp/diagram-b.svg"])).toEqual([
+    expect(approvals(c, [".plan_data/p1/v3/tmp/diagram-b.svg"], "p1")).toEqual([
       { folder: ".plan_data/p1/v3", keep: [".plan_data/p1/v3/tmp/diagram-b.svg"],
         drop: ["Generated diagram: a", "Generated mockup: m"] },
+    ]);
+  });
+
+  it("approved only from the record: a file outside tmp/ waits for a tick, and absolute paths count", () => {
+    const cwd = String.raw`K:\Projects\cc`;
+    expect(relPath("K:/Projects/cc/.plan_data/p1/v3/tmp/a.svg", cwd)).toBe(".plan_data/p1/v3/tmp/a.svg");
+    expect(versionFolderOf(".plan_data/p1/v3/old.svg", "p1")).toBe(".plan_data/p1/v3");
+    expect(versionFolderOf(".plan_data/p2/v3/old.svg", "p1")).toBeNull();
+    const done = approvedFiles({ versions: { v3: [{ file: ".plan_data/p1/v3/kept.svg" }] } });
+    const order = { kinds: ["diagram"] as "diagram"[], note: "", at: "2026-11-04T02:00:00Z" };
+    const c = checkGenerate(plan, order, [
+      result("Generated diagram: old", [".plan_data/p1/v3/old.svg", ".plan_data/p1/v3/kept.svg"]),
+      result("Generated diagram: new", ["K:/Projects/cc/.plan_data/p1/v3/tmp/new.svg"]),
+    ]);
+    expect(approvals(c, [], "p1", cwd, done)).toEqual([]); // nothing ticked: nothing to approve
+    expect(approvals(c, [".plan_data/p1/v3/old.svg"], "p1", cwd, done)).toEqual([
+      { folder: ".plan_data/p1/v3", keep: [".plan_data/p1/v3/old.svg"], drop: ["Generated diagram: old", "Generated diagram: new"] },
     ]);
   });
 });

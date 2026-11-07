@@ -59,7 +59,6 @@ export function InboxList({ items, picked, onPick }: { items: InboxItem[]; picke
 function QuestionCard({ q, batch, k }: { q: InboxItem; batch: InboxItem[]; k: number }) {
   const [choice, setChoice] = useState(q.draft?.choice ?? "");
   const [text, setText] = useState(q.draft?.text ?? "");
-  const [ask, setAsk] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const open = q.status === "open";
@@ -108,7 +107,7 @@ function QuestionCard({ q, batch, k }: { q: InboxItem; batch: InboxItem[]; k: nu
       )}
       {open && (
         <>
-          <textarea rows={2} value={text} placeholder="Your own answer, or a question back, instead of a pick"
+          <textarea rows={2} value={text} placeholder={q.via === "hook" ? "Your own answer, instead of a pick" : "Your own answer, or a question back: Save keeps it as your answer, Ask back asks the session"}
             onChange={(e) => (setText(e.target.value), setError(""))} />
           {error && <p className="bad small">{error}</p>}
           <div className="actions">
@@ -124,8 +123,11 @@ function QuestionCard({ q, batch, k }: { q: InboxItem; batch: InboxItem[]; k: nu
           </div>
           {q.via !== "hook" && (
             <div className="actions">
-              <input value={ask} placeholder="Ask back: a short question, the session replies here" onChange={(e) => setAsk(e.target.value)} />
-              <button disabled={busy || !ask.trim()} onClick={() => run(async () => (await askBack(q, ask.trim()), setAsk("")))}>Ask back</button>
+              {/* one box for both (the owner's words, 2026-11-08: "check the ask back button, now it is disabled and I
+                  cannot click it to ask"): the question typed in the box above goes back to the session */}
+              <button disabled={busy} onClick={() => (!text.trim() ? setError("Write your question in the box first.")
+                : run(async () => (await askBack(q, text.trim()), setText(""))))}>Ask back</button>
+              <span className="small muted">sends the text in the box as a question; the session replies in the thread</span>
             </div>
           )}
         </>

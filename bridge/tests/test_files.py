@@ -76,3 +76,12 @@ def test_refused(site):
     assert "Access-Control-Allow-Origin" not in h
     now[0] += 601  # a ticket lasts 10 minutes
     assert call(base, t["url"])[0] == 404
+
+
+def test_download_sends_the_file_as_an_attachment(site):
+    base, root, _ = site
+    t = json.loads(call(base, "/ticket", {"path": "web/page.html", "cwd": str(root)})[2])
+    st, h, body = call(base, t["url"] + "?download=1")
+    assert st == 200 and body.startswith(b"<img")
+    assert h["Content-Disposition"] == "attachment; filename=\"page.html\"; filename*=UTF-8''page.html"
+    assert "Content-Disposition" not in call(base, t["url"])[1]  # the viewer itself still shows it inline

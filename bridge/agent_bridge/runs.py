@@ -503,7 +503,7 @@ class Runs:
         """The owner approves the final result of a Generate (the owner's words, 2026-11-04: "the generated files I'm not
         approved must stay in a tmp folder inside current folder structure of generated files; then when I approve the
         final result of the generated step then only approved items go to plan, tmp files need to be removed (tmp
-        folder and dashboard)"). Moves the approved files from <version>/tmp/ to <version>/ (never overwriting),
+        folder and dashboard)"). Moves the approved files from <version>/tmp/ to <version>/ (never overwriting); a ticked file already in <version>/ is approved where it is (2026-11-08),
         removes the tmp folder, and deletes the plan session's "Generated" results that pointed into it."""
         path, cwd = f"commands/{c['id']}", c.get("cwd", "")
         folder = str(c.get("folder") or "")
@@ -520,6 +520,9 @@ class Runs:
         moved, skipped = [], []
         for rel in c.get("keep") or []:
             src = (Path(cwd) / str(rel)).resolve()
+            if src.is_file() and src.parent == base:  # already in the version folder (made before tmp/): approved in place
+                moved.append({"from": str(rel), "to": src.relative_to(Path(cwd).resolve()).as_posix()})
+                continue
             if not src.is_file() or tmp not in src.parents:
                 skipped.append(str(rel))
                 continue
@@ -539,6 +542,8 @@ class Runs:
             rec.setdefault("versions", {}).setdefault(key, [])
             for m in moved:
                 name = m["to"].rsplit("/", 1)[-1]
+                if any(x.get("file") == m["to"] for x in rec["versions"][key]):
+                    continue
                 rec["versions"][key].append({"file": m["to"], "kind": name.split("-", 1)[0], "at": now_iso()})
             self.store.put_many({f"planGenerated/{plan['id']}": rec})
         removed = 0

@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { sendApproveGenerated, sendGenerate, sendPhaseOrder, sendPlanCheck, usePlanVersions, type InboxItem, type Plan, type Run, type Session } from "./data";
-import { approvals, checkGenerate, generateFolder, generatePrompt, tmpFolderOf, KINDS, kindName, lastOrder, resumePrompt, type GenerateCheck, type Kind } from "./planCheck";
+import { sendApproveGenerated, sendGenerate, usePlanGenerated, sendPhaseOrder, sendPlanCheck, usePlanVersions, type InboxItem, type Plan, type Run, type Session } from "./data";
+import { approvals, approvedFiles, checkGenerate, generateFolder, generatePrompt, relPath, versionFolderOf, KINDS, kindName, lastOrder, resumePrompt, type GenerateCheck, type Kind } from "./planCheck";
 import { openFile } from "./FileView";
 import { HarnessSection } from "./HarnessView";
 import { GeneratedSection } from "./GeneratedView";
@@ -56,7 +56,9 @@ function GenerateBox({ plan, items, runs }: { plan: Plan; items: InboxItem[]; ru
   const fail = (e: unknown) => setError(String((e as { code?: string })?.code ?? e));
   const generate = (ks: Kind[], n: string) => sendGenerate(plan, ks, n, generatePrompt(ks, n, generateFolder(plan))).then(() => setC(null)).catch(fail);
   const [ticked, setTicked] = useState<string[]>([]);
-  const pending = c ? approvals(c, ticked) : [];
+  const done = approvedFiles(usePlanGenerated(plan.id));
+  const pending = c ? approvals(c, ticked, plan.id, plan.cwd, done) : [];
+  const open = c ? c.results.flatMap((r) => r.files).filter((f) => !done.has(relPath(f, plan.cwd)) && versionFolderOf(f, plan.id, plan.cwd)) : [];
   const approving = runs.some((r) => r.planId === plan.id && r.action === "approve_generated" && (r.status === "new" || r.status === "running"));
   const approved = runs.filter((r) => r.planId === plan.id && r.action === "approve_generated" && r.status === "done").flatMap((r) => (r.moved ?? []).map((m) => m.to));
   const approve = () =>
@@ -90,14 +92,15 @@ function GenerateBox({ plan, items, runs }: { plan: Plan; items: InboxItem[]; ru
                 </summary>
                 <ul className="gen-files">
                   {files.map((f) => {
-                    const waiting = tmpFolderOf(f) !== null;
+                    const isDone = done.has(relPath(f, plan.cwd));
+                    const mine = versionFolderOf(f, plan.id, plan.cwd) !== null;
                     return (
                       <li key={f}>
                         <label>
-                          <input type="checkbox" disabled={!waiting} checked={!waiting || ticked.includes(f)}
+                          <input type="checkbox" disabled={isDone || !mine || approving} checked={isDone || ticked.includes(f)}
                             onChange={(e) => setTicked(e.target.checked ? [...ticked, f] : ticked.filter((x) => x !== f))} />{" "}
                           <code className="file-link" role="button" onClick={(e) => (e.preventDefault(), openFile(f, plan.cwd))}>{f}</code>
-                          <span className="small muted">{waiting ? " · waiting for approval" : " · approved"}</span>
+                          <span className="small muted">{isDone ? " · approved" : mine ? " · waiting for approval" : " · outside this plan's folder: cannot be approved here"}</span>
                         </label>
                       </li>
                     );
@@ -114,13 +117,13 @@ function GenerateBox({ plan, items, runs }: { plan: Plan; items: InboxItem[]; ru
                 <button className="chip" disabled={going} onClick={() => sendPlanCheck(plan, resumePrompt).catch(fail)}>{going ? "Sent" : "Resume the plan"}</button>
               )
             )}
-            {pending.length > 0 && (
-              <button className="primary" disabled={approving} onClick={approve}>
-                {approving ? "Approving" : `Approve the final result (${pending.reduce((n, a) => n + a.keep.length, 0)} kept)`}
+            {open.length > 0 && (
+              <button className="primary" disabled={approving || pending.length === 0} onClick={approve}>
+                {approving ? "Approving" : `Approve the final result (${pending.reduce((n, a) => n + a.keep.length, 0)} of ${open.length} ticked)`}
               </button>
             )}
           </div>
-          {pending.length > 0 && <p className="muted small">Ticked files move into the plan's version folder. The rest, the tmp folder and their results on the dashboard are removed.</p>}
+          {open.length > 0 && <p className="muted small">Tick the files to keep, then Approve. Ticked files go to the plan's Generated section (from tmp/ they move up). Unticked files in tmp/ are removed with it; unticked files outside tmp/ stay where they are, not approved.</p>}
         </>
       )}
       {approved.length > 0 && <p className="muted small">{approved.length} approved file(s): see the plan's Generated section.</p>}

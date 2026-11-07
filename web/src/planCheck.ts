@@ -73,21 +73,44 @@ export const resumePrompt = "Go on with the plan from where it stopped.";
 // Approval (the owner's words, 2026-11-04: "the generated files I'm not approved must stay in a tmp folder inside
 // current folder structure of generated files; then when I approve the final result of the generated step then only
 // approved items go to plan, tmp files need to be removed (tmp folder and dashboard)"). A file waits for approval while
-// it is in <version>/tmp/. One approval per version folder: the ticked files move up, the rest go with tmp/.
+// it is not on the plan's approved record.
 const TMP = /^(\.plan_data\/[A-Za-z0-9]+\/v\d+)\/tmp\//;
-export const tmpFolderOf = (file: string) => TMP.exec(file.replace(/\\/g, "/"))?.[1] ?? null;
+const VERSION = /^(\.plan_data\/([A-Za-z0-9]+)\/v\d+)\/(?:tmp\/)?[^/]+$/;
+// A result's path inside the plan's project folder: forward slashes, the project folder cut off (results may carry
+// absolute paths).
+export function relPath(file: string, cwd = ""): string {
+  const f = file.replace(/\\/g, "/");
+  const base = cwd.replace(/\\/g, "/").replace(/\/+$/, "");
+  return base && f.toLowerCase().startsWith(base.toLowerCase() + "/") ? f.slice(base.length + 1) : f.replace(/^\.\//, "");
+}
+export const tmpFolderOf = (file: string, cwd = "") => TMP.exec(relPath(file, cwd))?.[1] ?? null;
+// The version folder of a file in this plan's own .plan_data folder (in tmp/ or not); null for any other file.
+export function versionFolderOf(file: string, planId: string, cwd = ""): string | null {
+  const m = VERSION.exec(relPath(file, cwd));
+  return m && m[2] === planId ? m[1] : null;
+}
+// The owner's words, 2026-11-08: "I don't want the checkbox is approved I want tick the checkbox and at the end click
+// approve button". A file is approved only when the owner's approval is on record: the plan's Generated section
+// (planGenerated). Every other file waits for a tick, wherever it sits.
+export const approvedFiles = (rec: { versions?: Record<string, { file: string }[]> } | null) =>
+  new Set(Object.values(rec?.versions ?? {}).flat().map((x) => x.file));
 
-export function approvals(c: GenerateCheck, ticked: string[]): { folder: string; keep: string[]; drop: string[] }[] {
+// One approval per version folder: the ticked files are approved (from tmp/ they move up), tmp/ goes with the rest;
+// a result is dropped from the dashboard once none of its files still waits outside tmp/.
+export function approvals(c: GenerateCheck, ticked: string[], planId: string, cwd = "", approved = new Set<string>()):
+  { folder: string; keep: string[]; drop: string[] }[] {
   const byFolder = new Map<string, { keep: string[]; drop: Set<string> }>();
+  const keep = new Set(ticked.map((f) => relPath(f, cwd)));
   for (const r of c.results) {
-    for (const f of r.files) {
-      const folder = tmpFolderOf(f);
-      if (!folder) continue;
+    const rel = r.files.map((f) => relPath(f, cwd));
+    const folders = [...new Set(rel.map((f) => versionFolderOf(f, planId)).filter((x): x is string => !!x))];
+    const left = rel.some((f) => !tmpFolderOf(f) && !keep.has(f) && !approved.has(f));
+    for (const folder of folders) {
       const g = byFolder.get(folder) ?? { keep: [], drop: new Set<string>() };
-      if (ticked.includes(f)) g.keep.push(f);
-      g.drop.add(r.id);
+      for (const f of rel) if (keep.has(f) && !approved.has(f) && versionFolderOf(f, planId) === folder && !g.keep.includes(f)) g.keep.push(f);
+      if (!left) g.drop.add(r.id);
       byFolder.set(folder, g);
     }
   }
-  return [...byFolder].map(([folder, g]) => ({ folder, keep: g.keep, drop: [...g.drop] }));
+  return [...byFolder].filter(([, g]) => g.keep.length).map(([folder, g]) => ({ folder, keep: g.keep, drop: [...g.drop] }));
 }

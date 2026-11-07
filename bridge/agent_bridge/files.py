@@ -193,7 +193,8 @@ def handler(files: Files, origins: list[str]):
                 self._json(401, {"error": "sign in again"})
 
         def do_GET(self):
-            parts = self.path.split("?", 1)[0].split("/", 3)  # "", "t", ticket, rel
+            path, _, query = self.path.partition("?")
+            parts = path.split("/", 3)  # "", "t", ticket, rel
             full = files.open(parts[2], parts[3]) if len(parts) == 4 and parts[1] == "t" else None
             if full is None:
                 return self._json(404, {"error": "not found or expired"})
@@ -202,6 +203,11 @@ def handler(files: Files, origins: list[str]):
                 ctype += "; charset=utf-8"
             # a PDF opens in the browser's own viewer, which a sandbox CSP blocks
             extra = {} if ctype == "application/pdf" else {"Content-Security-Policy": SANDBOX}
+            if "download=1" in query.split("&"):  # the Download button (the owner's words, 2026-11-08: "replace the new
+                # tab button when see the file by download button"); a cross-site link's download attribute is ignored
+                name = os.path.basename(full)
+                ascii_name = name.encode("ascii", "replace").decode().replace('"', "_").replace("?", "_")
+                extra["Content-Disposition"] = f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(name)}"
             size = os.path.getsize(full)
             self._head(200, ctype, size, extra)
             with open(full, "rb") as f:
