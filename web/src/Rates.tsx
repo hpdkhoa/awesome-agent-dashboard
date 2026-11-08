@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { LineChart } from "./Charts";
 import { addGold, fmt, parseAmount, FX_SOURCES, fxSource, GOLD_SOURCES, goldSource, syncAll, type FxSnapshot, type GoldPrice, type SyncLine } from "./moneyData";
 
 const today = () => new Date().toLocaleDateString("en-CA");
@@ -80,24 +81,9 @@ function GoldForm() {
   );
 }
 
-// Line chart of one series over the saved snapshots, oldest on the left.
+// Line chart of one series over the saved snapshots, oldest on the left: dots, legend and stats (Charts.tsx).
 function Line({ points, label }: { points: { t: string; v: number }[]; label: string }) {
-  if (points.length < 2) return <p className="muted small">{label}: needs two saved points to draw.</p>;
-  const w = 600, h = 140, pad = 4;
-  const vs = points.map((p) => p.v);
-  const lo = Math.min(...vs), hi = Math.max(...vs), span = hi - lo || 1;
-  const xy = points.map((p, i) => [pad + (i / (points.length - 1)) * (w - 2 * pad), h - pad - ((p.v - lo) / span) * (h - 2 * pad)]);
-  return (
-    <figure className="chart">
-      <svg viewBox={`0 0 ${w} ${h}`} role="img" aria-label={label}>
-        <polyline fill="none" stroke="var(--accent)" strokeWidth="2" points={xy.map((p) => p.join(",")).join(" ")} />
-      </svg>
-      <figcaption className="small muted">
-        {label}: {fmt(lo, 0)} to {fmt(hi, 0)} đ · {new Date(points[0].t).toLocaleDateString()} to{" "}
-        {new Date(points[points.length - 1].t).toLocaleDateString()}
-      </figcaption>
-    </figure>
-  );
+  return <LineChart label={label} unit="đ" points={points} digits={0} />;
 }
 
 const diff = (a: number | null | undefined, b: number | null | undefined) =>

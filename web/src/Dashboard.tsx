@@ -6,6 +6,7 @@ import { MessageBox, ModeSwitch, PlanFromSession, RunList, StartForm } from "./R
 import { PlanList, PlanView } from "./Plans";
 import { usePush, type PushState } from "./notify";
 import { FileViewer, PcText } from "./FileView";
+import { SpendChart } from "./Charts";
 import { MoreMenu } from "./MoreMenu";
 
 // A tap on a push opens /?item=<inbox id>, /?run=<command id> or /?plan=<plan id> (bridge/agent_bridge/push.py).
@@ -227,10 +228,10 @@ export function Dashboard() {
       <FileViewer />
 
       <section className="usage">
-        <Section id="usage.days" title="Spend by day" extra="last 14 days">
-          <Bars days={[...usage].reverse().slice(-14)} />
+        <Section id="usage.days" title="Spend by day" extra={`${usage.length} days, whole history`}>
+          <SpendChart usage={usage} />
         </Section>
-        <Section id="usage.workTypes" title="By work type" extra={`last ${usage.length} days`}>
+        <Section id="usage.workTypes" title="By work type" extra={`all ${usage.length} days`}>
         <table>
           <tbody>
             {byWorkType.map(([w, t]) => (
@@ -243,22 +244,7 @@ export function Dashboard() {
           </tbody>
         </table>
         </Section>
-        <p className="muted small">Dollars are list-price estimates from token counts. Your plan is a subscription.</p>
       </section>
-    </div>
-  );
-}
-
-function Bars({ days }: { days: { day: string; costUsd: number; total: number }[] }) {
-  const max = Math.max(1, ...days.map((d) => d.costUsd));
-  return (
-    <div className="bars">
-      {days.map((d) => (
-        <div key={d.day} className="bar" title={`${d.day}: ${num(d.total)} tokens, ${usd(d.costUsd)}`}>
-          <div className="fill" style={{ height: `${(d.costUsd / max) * 100}%` }} />
-          <span className="small muted">{d.day.slice(8)}</span>
-        </div>
-      ))}
     </div>
   );
 }

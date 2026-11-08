@@ -196,7 +196,8 @@ export function useSessions(older: boolean): Session[] | null {
   }, [older]);
   return rows;
 }
-export const useUsage = () => useCollection<Usage>("usage", orderBy("day", "desc"), limit(30));
+// every synced day, oldest to newest on the chart (the owner's words, 2026-11-08: "all spend type with full history")
+export const useUsage = () => useCollection<Usage>("usage", orderBy("day", "desc"));
 export const useWorkTypes = () => useCollection<WorkType>("workTypes");
 export const useMachines = () => useCollection<Machine>("machines");
 export const usePlans = () => useCollection<Plan>("plans", orderBy("updatedAt", "desc"), limit(100));
