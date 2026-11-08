@@ -120,9 +120,9 @@ def _fold(d: dict, st: FileState) -> None:
             ]
             old = st.msgs.get(mid)
             st.msgs[mid] = new if old is None else old[:3] + [max(a, b) for a, b in zip(old[3:], new[3:])]
-        text = _text_of(m.get("content"))
-        if text.strip():
-            st.last_reply = redact(text, 3000)
+        # the reply itself is not kept: the page reads any turn's whole text from the log through texts.py (the
+        # owner's choice, 2026-11-08: "the dashboard only load the file stored on the PC"); last_reply stays "" so an
+        # older saved state still loads
 
 
 def session_files(logs: Path, max_age_days: float | None = None) -> dict[str, list[Path]]:

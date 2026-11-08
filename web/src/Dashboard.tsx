@@ -5,7 +5,7 @@ import { RECENT_DAYS, useInbox, useMachines, usePlans, useRuns, useSessions, use
 import { MessageBox, ModeSwitch, PlanFromSession, RunList, StartForm } from "./Runs";
 import { PlanList, PlanView } from "./Plans";
 import { usePush, type PushState } from "./notify";
-import { FileViewer } from "./FileView";
+import { FileViewer, PcText } from "./FileView";
 import { MoreMenu } from "./MoreMenu";
 
 // A tap on a push opens /?item=<inbox id>, /?run=<command id> or /?plan=<plan id> (bridge/agent_bridge/push.py).
@@ -307,7 +307,7 @@ function SessionView({ s, runs }: { s: Session; runs: Run[] }) {
         <Md text={s.lastPrompt} cwd={s.cwd} />
       </Section>
       <Section id="session.lastReply" title="Last reply">
-        <Md text={s.lastReply} cwd={s.cwd} />
+        <PcText session={s.id} cwd={s.cwd} />
       </Section>
       <Section id="session.tokens" title="Tokens" extra={`${num(s.tokens.total)} · ${usd(s.tokens.costUsd)} est.`} open={false}>
         <TokenTable t={s.tokens} />

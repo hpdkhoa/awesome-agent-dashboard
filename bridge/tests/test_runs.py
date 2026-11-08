@@ -3,6 +3,7 @@ import sys
 import time
 
 from agent_bridge.inbox import approval_reply
+from agent_bridge.texts import Texts
 from agent_bridge.runs import APPROVAL_TOOL, Runs, folder_ok, message_command, start_command
 from test_inbox import FakeStore
 
@@ -63,7 +64,8 @@ def test_start_runs_claude_in_the_registered_folder(tmp_path, monkeypatch):
     c = store.get("commands/c1")
     assert c["status"] == "running" and len(c["sessionId"]) == 36 and c["workType"] == "labs"
     c = wait_done(runs, "c1", store)
-    assert c["status"] == "done" and c["costUsd"] == 0.12 and c["result"] == "did: hello in work"
+    assert c["status"] == "done" and c["costUsd"] == 0.12 and "result" not in c  # the result stays on the PC
+    assert Texts(None, tmp_path / "out").run("c1")["text"] == "did: hello in work"
     out = json.loads((tmp_path / "out" / "c1.out").read_text())
     assert out["key"] is None  # ANTHROPIC_API_KEY never reaches claude
 
@@ -147,7 +149,7 @@ def test_message_to_a_closed_session_resumes_it(tmp_path, monkeypatch):
     sub.mkdir()
     cmd(store, "m1", action="message", sessionId="old-session", cwd=str(sub), prompt="carry on")
     c = wait_done(runs, "m1", store)
-    assert c["status"] == "done" and c["result"] == "did: carry on in sub resumed old-session"
+    assert c["status"] == "done" and Texts(None, tmp_path / "out").run("m1")["text"] == "did: carry on in sub resumed old-session"
 
 
 def line(kind, entry="sdk-cli", **kw):
@@ -219,7 +221,7 @@ def test_two_messages_to_one_session_go_oldest_first(tmp_path, monkeypatch):
     assert store.get("commands/aa1")["status"] == "running"
     assert store.get("commands/zz2")["status"] == "waiting" and store.get("commands/zz2")["waitReason"] == "turn"
     assert wait_done(runs, "aa1", store)["status"] == "done"
-    assert "did: second" in wait_done(runs, "zz2", store)["result"]
+    assert wait_done(runs, "zz2", store)["status"] == "done" and "did: second" in Texts(None, tmp_path / "out").run("zz2")["text"]
 
 
 def test_message_to_a_session_open_in_the_app_waits(tmp_path, monkeypatch):
@@ -369,7 +371,8 @@ def test_a_message_on_an_older_plan_brings_it_to_the_latest_format_first(tmp_pat
     store.update(f"commands/{m['upgradeId']}", {"status": "done", "planId": "new"})
     c = wait_done(runs, "m1", store)
     assert c["status"] == "done" and c["planId"] == "new" and c["upgradedFrom"] == "old"
-    assert c["result"].endswith("resumed new-s") and ".plan_data/new/v1/tmp/" in c["result"]
+    text = Texts(None, tmp_path / "out").run("m1")["text"]
+    assert text.endswith("resumed new-s") and ".plan_data/new/v1/tmp/" in text
     old = store.get("plans/old")
     assert old["status"] == "done" and old["upgradedTo"] == "new" and "plan new" in old["closeNote"]
 

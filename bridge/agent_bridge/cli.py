@@ -96,8 +96,10 @@ def main(argv: list[str] | None = None) -> None:
             # the pages and notes a plan from a session was built from open in the viewer too
             plans = data_dir() / "runs" / "plans"
             plans.mkdir(parents=True, exist_ok=True)
+            from .texts import Texts
+
             serve(Files([*cfg.roots, ("plans", str(plans))], firebase_verifier(cfg.project_id, cfg.owner_email)),
-                  list(cfg.site_origins), cfg.files_port)
+                  list(cfg.site_origins), cfg.files_port, Texts(cfg.logs, data_dir() / "runs"))
             store.put_many({"meta/files": {"url": cfg.files_url}})
             print(f"file viewer on 127.0.0.1:{cfg.files_port} for {cfg.files_url}", flush=True)
         feed = gone = None

@@ -37,6 +37,62 @@ export async function ticket(path: string, cwd: string): Promise<Ticket> {
   return { ...j, url: url + j.url };
 }
 
+// The whole text of a session's turn or of a run's result, read from the PC and never stored (the owner's words,
+// 2026-11-08: "do option 3, the dashboard only load the file stored on the PC ... make sure the result is captured fully
+// inside my PC so the file render completed result from each message turn"): bridge/agent_bridge/texts.py.
+export type PcTurn = { n: number; at: string; prompt: string; chars: number };
+export type PcReply = { text: string; chars: number; n?: number; at?: string; prompt?: string; turns?: PcTurn[]; isError?: boolean };
+
+export async function pcText(body: { session?: string; turn?: number; run?: string }): Promise<PcReply> {
+  const url = await filesUrl();
+  if (!url) throw new Error("The file viewer is off: set FILES_URL on the bridge.");
+  const token = await auth.currentUser?.getIdToken();
+  let r: Response;
+  try {
+    r = await fetch(url + "/text", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    throw new Error("The PC does not answer: is the bridge running and the tunnel up?");
+  }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error ?? `The bridge answered ${r.status}.`);
+  return j;
+}
+
+// A session's reply (any turn, the last one first) or a run's result, whole, from the PC.
+export function PcText({ session, run, cwd }: { session?: string; run?: string; cwd: string }) {
+  const [turn, setTurn] = useState<number | undefined>(undefined);
+  const [got, setGot] = useState<PcReply | string | null>(null);
+  useEffect(() => {
+    setGot(null);
+    pcText(session ? { session, turn } : { run }).then(setGot, (e) => setGot(String(e.message ?? e)));
+  }, [session, run, turn]);
+  if (typeof got === "string") return <p className="muted small">{got}</p>;
+  if (!got) return <p className="muted small">loading from the PC</p>;
+  const total = got.turns?.length ?? 0;
+  return (
+    <div>
+      {session && got.n != null && (
+        <p className="small muted">
+          <button disabled={got.n <= 1} onClick={() => setTurn(got.n! - 1)} aria-label="earlier turn">
+            ‹
+          </button>{" "}
+          turn {got.n} of {total} · {got.at ? new Date(got.at).toLocaleString() : ""} · {got.chars.toLocaleString()} chars{" "}
+          <button disabled={got.n >= total} onClick={() => setTurn(got.n! + 1)} aria-label="later turn">
+            ›
+          </button>
+          {got.prompt && <> · asked: {got.prompt}</>}
+        </p>
+      )}
+      {run && <p className="small muted">{got.chars.toLocaleString()} chars, whole, from the PC</p>}
+      <Md text={got.text} cwd={cwd} />
+    </div>
+  );
+}
+
 // A link or a path a session wrote that points at a file on the PC, not a web page.
 export const isLocal = (href?: string) =>
   !!href && !href.startsWith("#") && (/^[a-zA-Z]:[\\/]/.test(href) || href.startsWith("file:") || !/^[a-z][a-z0-9+.-]*:/i.test(href));

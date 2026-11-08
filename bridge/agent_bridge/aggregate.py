@@ -79,8 +79,7 @@ def build(
                 _add(u["byModel"].setdefault(model, _zero()), model, t)
                 if sid not in u["sessions"]:
                     u["sessions"].append(sid)
-        last_reply = max(files, key=lambda f: f.last_ts).last_reply if files else ""
-        doc = {
+        doc = {  # no lastReply: the page loads any turn's whole reply from the log on the PC (texts.py)
             "id": sid,
             "machine": machine,
             "workType": wt,
@@ -88,7 +87,6 @@ def build(
             "title": (main.title or main.first_prompt.split("\n")[0][:120] or sid[:8]),
             "firstPrompt": main.first_prompt,
             "lastPrompt": main.last_prompt,
-            "lastReply": last_reply,
             "startedAt": min((f.first_ts for f in files if f.first_ts), default=""),
             "lastAt": max((f.last_ts for f in files), default=""),
             "prompts": main.prompts,

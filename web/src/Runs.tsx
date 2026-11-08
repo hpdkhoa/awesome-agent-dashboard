@@ -5,6 +5,7 @@ import {
 } from "./data";
 import { usd } from "./Dashboard";
 import { Md } from "./Markdown";
+import { PcText } from "./FileView";
 import { MoreMenu } from "./MoreMenu";
 import { Section } from "./Section";
 
@@ -254,10 +255,10 @@ export function RunList({ runs, title = "Runs from the dashboard" }: { runs: Run
         >
           <p className="label">Prompt</p>
           <Md text={r.prompt} cwd={r.cwd ?? r.folder ?? ""} />
-          {r.result && (
+          {(r.status === "done" || r.status === "lost") && (
             <>
               <p className="label">Result</p>
-              <Md text={r.result} cwd={r.cwd ?? r.folder ?? ""} />
+              <PcText run={r.id} cwd={r.cwd ?? r.folder ?? ""} />
             </>
           )}
           {r.error && <p className="bad small">{r.error}</p>}

@@ -5,7 +5,12 @@ The session itself takes an answer while its inbox_ask still waits (inbox.py). A
 message with inboxId: the same `claude -p --resume <session>`, approvals in the inbox, the same wait rule (a running
 turn, a session open in the app), a push when it ends, and a row in Runs, without blocking the bridge (the owner's
 choice, 2026-11-02: "build the fix", so a plan stays one session). Runs writes the outcome back on the inbox item; a
-failed try goes again after 10 minutes. Only sessions of this machine. The `claude` program must be the unmodified CLI,
+failed try goes again after 10 minutes. Only sessions of this machine.
+
+An ask back (the owner's question on an open question, in its thread) goes the same way when the session's inbox_ask
+or inbox_wait no longer polls for it (the owner's choice, 2026-11-08: "A, bridge delivers"): one message run per ask,
+the session replies with inbox_reply, and the reply shows in the thread. The run carries askBackId, not inboxId, so
+its outcome never changes the open question's status. The `claude` program must be the unmodified CLI,
 signed in through Anthropic's own flow (terms T5, T6).
 """
 
@@ -16,7 +21,7 @@ import shutil
 import uuid
 from datetime import datetime, timezone
 
-from .inbox import answer_text, is_live, now_iso
+from .inbox import answer_text, ask_back_text, is_live, now_iso, open_ask
 
 RETRY_SECONDS = 600
 
@@ -64,4 +69,24 @@ def deliver(store, machine: str, claude: str | None) -> list[str]:
         }})
         store.update(f"inbox/{item['id']}", {"status": "delivering", "commandId": cid, "lastTryAt": now_iso(), "error": None})
         log.append(f"{item['id']}: handed to run {cid}")
+    for item in store.where("inbox", "status", "open"):
+        if item.get("kind") != "question" or item.get("machine") != machine or item.get("sessionId") in (None, "", "unknown"):
+            continue
+        ask = open_ask(item.get("thread") or [])
+        if not ask or item.get("askBackSentAt") == ask.get("at"):
+            continue  # no open ask back, or this one already went
+        if is_live(store, item["sessionId"]):
+            continue  # the session's inbox_ask or inbox_wait still polls and sees the ask back itself
+        if not claude:
+            store.update(f"inbox/{item['id']}", {"error": "No signed-in claude CLI on this machine for your ask back."})
+            log.append(f"{item['id']}: ask back, no claude CLI")
+            continue
+        cid = uuid.uuid4().hex[:20]
+        store.put_many({f"commands/{cid}": {
+            "id": cid, "action": "message", "machine": machine, "sessionId": item["sessionId"], "cwd": item.get("cwd", ""),
+            "prompt": ask_back_text(item, ask), "askBackId": item["id"], "force": bool(item.get("force")), "status": "new",
+            "createdAt": now_iso(),
+        }})
+        store.update(f"inbox/{item['id']}", {"askBackSentAt": ask.get("at"), "askBackCommandId": cid, "error": None})
+        log.append(f"{item['id']}: ask back handed to run {cid}")
     return log

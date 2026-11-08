@@ -254,3 +254,26 @@ def test_a_new_plan_carries_the_format_number():
     pid = make(store).plan_start("p", parts=PARTS)
     assert store.docs[f"plans/{pid}"]["format"] == PLAN_FORMAT == 1
     assert format_of({"kind": "parts"}) == 1 and format_of({}) == 0
+
+
+def test_ask_back_delivered_by_the_bridge_when_the_session_stopped_waiting():
+    store = FakeStore()
+    ib = make(store)
+    qid = ib.post("question", "Numbers", "Which?", [{"label": "A", "differs": "d"}, {"label": "B", "differs": "d"}], 0)
+    assert deliver(store, "PC", "claude") == []  # no ask back yet
+    store.update(f"inbox/{qid}", {"thread": [{"who": "owner", "kind": "ask", "text": "what is this?", "at": "t1"}]})
+    store.put_many({"liveSessions/s1": {"sessionId": "s1", "beatAt": datetime.now(timezone.utc).isoformat()}})
+    assert deliver(store, "PC", "claude") == []  # the session still polls: it sees the ask itself
+    store.put_many({"liveSessions/s1": {"sessionId": "s1", "beatAt": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()}})
+    lines = deliver(store, "PC", "claude")
+    assert len(lines) == 1 and "ask back handed to run" in lines[0]
+    item = store.get(f"inbox/{qid}")
+    cmds = store.where("commands", "action", "message")
+    assert len(cmds) == 1 and cmds[0]["askBackId"] == qid and "inboxId" not in cmds[0]
+    assert cmds[0]["sessionId"] == "s1" and "what is this?" in cmds[0]["prompt"] and f'inbox_reply(item_id="{qid}"' in cmds[0]["prompt"]
+    assert item["status"] == "open" and item["askBackSentAt"] == "t1" and item["askBackCommandId"] == cmds[0]["id"]
+    assert deliver(store, "PC", "claude") == []  # one run per ask back
+    assert ib.reply(qid, "the table in the plan")
+    store.update(f"inbox/{qid}", {"thread": store.get(f"inbox/{qid}")["thread"] + [{"who": "owner", "kind": "ask", "text": "which table?", "at": "t2"}]})
+    lines = deliver(store, "PC", "claude")
+    assert len(lines) == 1 and len(store.where("commands", "action", "message")) == 2  # a new ask back goes again

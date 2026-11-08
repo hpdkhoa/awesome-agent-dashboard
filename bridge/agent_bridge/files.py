@@ -10,6 +10,9 @@ the tunnel. Two calls:
   folder, and returns a ticket URL that works for 10 minutes.
 - GET /t/<ticket>/<path in that root>: the file's bytes. The ticket covers the file's root, so an html page also loads
   its own images and css. Nothing outside WORK_ROOTS is ever served.
+- POST /text with the owner's token and {session, turn} or {run}: the whole text of a session's turn or of a run's
+  result, read from this PC (texts.py), never stored (the owner's choice, 2026-11-08: "do option 3, the dashboard
+  only load the file stored on the PC").
 
 Every answer carries no-store, no-referrer and a sandbox CSP (an html page runs with no origin of its own, so it can
 never reach the dashboard or the sign-in).
@@ -146,7 +149,7 @@ class Files:
         return full if inside(full, root) and os.path.isfile(full) and not secret(full) else None
 
 
-def handler(files: Files, origins: list[str]):
+def handler(files: Files, origins: list[str], texts=None):
     class H(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
@@ -179,16 +182,19 @@ def handler(files: Files, origins: list[str]):
                                               "Access-Control-Max-Age": "600"})
 
         def do_POST(self):
-            if self.path != "/ticket":
+            if self.path not in ("/ticket", "/text") or (self.path == "/text" and texts is None):
                 return self._json(404, {"error": "not found"})
             auth = self.headers.get("Authorization", "")
             try:
                 body = json.loads(self.rfile.read(min(int(self.headers.get("Content-Length") or 0), 8192)) or b"{}")
                 if not auth.startswith("Bearer "):
                     raise PermissionError("no sign-in")
+                if self.path == "/text":
+                    files.verify(auth[7:])
+                    return self._json(200, texts.answer(body))
                 self._json(200, files.ticket(auth[7:], str(body.get("path", "")), str(body.get("cwd", ""))))
             except ValueError as e:
-                self._json(404 if str(e) == "no such file" else 400, {"error": str(e)})
+                self._json(404 if str(e).startswith("no ") else 400, {"error": str(e)})
             except Exception:  # a bad, old or foreign token
                 self._json(401, {"error": "sign in again"})
 
@@ -217,9 +223,9 @@ def handler(files: Files, origins: list[str]):
     return H
 
 
-def serve(files: Files, origins: list[str], port: int) -> ThreadingHTTPServer:
-    """Starts the server on 127.0.0.1:port in a daemon thread."""
-    srv = ThreadingHTTPServer(("127.0.0.1", port), handler(files, origins))
+def serve(files: Files, origins: list[str], port: int, texts=None) -> ThreadingHTTPServer:
+    """Starts the server on 127.0.0.1:port in a daemon thread. texts: a texts.Texts, for POST /text."""
+    srv = ThreadingHTTPServer(("127.0.0.1", port), handler(files, origins, texts))
     srv.daemon_threads = True
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv

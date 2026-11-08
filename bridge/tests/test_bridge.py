@@ -42,7 +42,7 @@ def test_one_message_split_over_lines_counts_once(tmp_path):
     p = tmp_path / "proj" / "s1.jsonl"
     write(p, [human(T1, "do it"), assistant("m1", T2), assistant("m1", T2, text="done"), assistant("m2", T3)])
     st = read_lines(p, FileState())
-    assert len(st.msgs) == 2 and st.prompts == 1 and st.last_reply == "done"
+    assert len(st.msgs) == 2 and st.prompts == 1 and st.last_reply == ""  # the reply is read from the log on demand (texts.py)
 
 
 def test_tool_results_are_not_prompts(tmp_path):

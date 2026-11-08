@@ -454,13 +454,7 @@ class Inbox:
 
     def ask_back(self, item_id: str) -> dict | None:
         """The owner's newest question back on an item that the session has not replied to yet (the ping-pong)."""
-        thread = (self.store.get(f"inbox/{item_id}") or {}).get("thread") or []
-        for e in reversed(thread):
-            if e.get("who") == "session":
-                return None
-            if e.get("who") == "owner" and e.get("kind") == "ask":
-                return e
-        return None
+        return open_ask((self.store.get(f"inbox/{item_id}") or {}).get("thread") or [])
 
     def reply(self, item_id: str, text: str) -> bool:
         """The session's short reply to the owner's question back; it never answers the question for the owner."""
@@ -529,6 +523,25 @@ def answer_text(item: dict) -> str:
     if not a.get("choice") and not a.get("text"):
         parts.append("No note.")
     return " ".join(parts)
+
+
+def open_ask(thread: list[dict]) -> dict | None:
+    """The owner's newest question back in a thread with no session reply after it."""
+    for e in reversed(thread):
+        if e.get("who") == "session":
+            return None
+        if e.get("who") == "owner" and e.get("kind") == "ask":
+            return e
+    return None
+
+
+def ask_back_text(item: dict, ask: dict) -> str:
+    """The message a session gets when the owner asked back after its inbox_ask stopped waiting (the owner's choice,
+    2026-11-08: "A, bridge delivers"). It is not an answer: the session replies in the thread, then waits again."""
+    return (f'The owner asks back on your question "{item.get("title", "")}" (id {item.get("id", "")}) on the dashboard: '
+            f'"{ask.get("text", "")}". This is not an answer. Reply in a few words with inbox_reply(item_id="{item.get("id", "")}", '
+            f'text=...) (draw it with an svg when it can be drawn), then call inbox_wait(item_id="{item.get("id", "")}") '
+            f"for the answers.")
 
 
 def is_live(store, session_id: str) -> bool:

@@ -695,8 +695,8 @@ class Runs:
             fields["error"] = redact(str(r.get("result") or r.get("terminal_reason") or "claude reported an error"), 800)
         elif p.returncode == 0:
             fields["status"] = "done"
-            if r.get("result") is not None:
-                fields["result"] = redact(str(r["result"]), 4000)
+            # the result itself is not stored: the page reads the whole text from <cid>.out on this PC (texts.py; the
+            # owner's choice, 2026-11-08: "the dashboard only load the file stored on the PC")
         else:
             fields["status"] = "failed"
             fields["error"] = redact(str(r.get("result") or (err or out or "")[-800:]), 800)
@@ -711,7 +711,7 @@ class Runs:
             self._answer_back(c, {"status": "answered", "lastTryAt": now_iso(),
                                   "error": fields.get("error") or f"The message run {fields['status']}."})
         if self.push is not None and fields["status"] in ("done", "failed"):
-            first = (fields.get("result") or fields.get("error") or "").strip().split("\n")
+            first = (fields.get("error") or str(r.get("result") or "")).strip().split("\n")
             body = next((line for line in first if line.strip(" -")), "")[:160]
             what = "message" if c.get("action") == "message" else "run"
             self.push.notify(f"{what.capitalize()} {fields['status']}: {c.get('workType') or c.get('folder') or ''}".rstrip(": "),
