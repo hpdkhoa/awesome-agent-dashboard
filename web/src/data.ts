@@ -60,7 +60,6 @@ export type InboxItem = {
   waitReason?: "turn" | "app" | "upgrade" | null; // why an answer has not reached the session yet (bridge runs.py)
   commandId?: string; // the message run that carries the answer to the session
   force?: boolean;
-  followUp?: string;
   error?: string | null;
   via?: "hook"; // posted by the question hook from Claude Code's own question box
   multi?: boolean; // more than one option may be picked
@@ -78,7 +77,8 @@ export type InboxItem = {
 
 // Every option of a plan question carries one (the owner's words, 2026-11-03: "every choose will have an example").
 export type Bench = { name: string; before: string; after: string; measured: boolean; source?: string };
-export type ThreadEntry = { who: "owner" | "session"; kind: "answer" | "ask" | "reply"; choice?: string; text?: string; at: string };
+// a session reply made after 2026-11-08 keeps only chars: its words are read from the session log on the PC (PcText)
+export type ThreadEntry = { who: "owner" | "session"; kind: "answer" | "ask" | "reply"; choice?: string; text?: string; chars?: number; at: string };
 export type Example =
   | { type: "visual"; svg: string; note?: string } // a drawing of the option
   | { type: "image"; before: string; after: string; note?: string }

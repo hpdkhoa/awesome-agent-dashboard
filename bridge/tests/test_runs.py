@@ -113,11 +113,20 @@ def test_no_claude_cli(tmp_path, monkeypatch):
     assert "No signed-in claude CLI" in store.get("commands/c1")["error"]
 
 
-def test_runs_lost_by_a_restart_are_marked(tmp_path):
+def test_runs_lost_by_a_restart_are_marked_or_finished_from_their_out_file(tmp_path):
     store = FakeStore()
-    store.put_many({"commands/c1": {"id": "c1", "machine": "PC", "status": "running"}})
-    Runs(store, "PC", [], "claude", tmp_path).forget_lost()
-    assert store.get("commands/c1")["status"] == "lost"
+    store.put_many({"commands/c1": {"id": "c1", "machine": "PC", "status": "running"},
+                    "commands/c2": {"id": "c2", "machine": "PC", "status": "running", "inboxId": "q1"},
+                    "commands/c3": {"id": "c3", "machine": "PC", "status": "running"},
+                    "inbox/q1": {"id": "q1", "status": "delivering"}})
+    (tmp_path / "c2.out").write_text(json.dumps({"result": "all done", "total_cost_usd": 0.5}), encoding="utf-8")
+    (tmp_path / "c3.out").write_text("", encoding="utf-8")  # the run was cut before claude wrote its result
+    log = Runs(store, "PC", [], "claude", tmp_path).forget_lost()
+    assert store.get("commands/c1")["status"] == "lost" and store.get("commands/c3")["status"] == "lost"
+    c2 = store.get("commands/c2")
+    assert c2["status"] == "done" and c2["costUsd"] == 0.5 and "result" not in c2
+    assert store.get("inbox/q1")["status"] == "delivered" and store.get("inbox/q1")["deliveredVia"] == "resume"
+    assert any("c2: done" in x and "finished from its .out" in x for x in log) and sum("lost" in x for x in log) == 2
 
 
 def test_command_shape_and_folder_match():
@@ -288,7 +297,8 @@ def test_an_answer_message_writes_its_outcome_on_the_inbox_item(tmp_path, monkey
     OPEN.clear()  # the owner closed the window
     assert wait_done(runs, "m1", store)["status"] == "done"
     q = store.get("inbox/q1")
-    assert q["status"] == "delivered" and q["deliveredVia"] == "resume" and q["followUp"].startswith("did: The owner answered")
+    assert q["status"] == "delivered" and q["deliveredVia"] == "resume" and "followUp" not in q  # the reply is read from the PC
+    assert Texts(None, tmp_path / "out").run("m1")["text"].startswith("did: The owner answered")
     assert q["waitReason"] is None
 
 

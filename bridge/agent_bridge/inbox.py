@@ -457,11 +457,13 @@ class Inbox:
         return open_ask((self.store.get(f"inbox/{item_id}") or {}).get("thread") or [])
 
     def reply(self, item_id: str, text: str) -> bool:
-        """The session's short reply to the owner's question back; it never answers the question for the owner."""
+        """The session's short reply to the owner's question back; it never answers the question for the owner. Only
+        its length is stored: the page reads the words from this session's log on the PC (texts.py, the owner's
+        choice, 2026-11-08: "From the PC too")."""
         item = self.store.get(f"inbox/{item_id}")
         if not item:
             return False
-        thread = list(item.get("thread") or []) + [{"who": "session", "kind": "reply", "text": redact(text, 2000), "at": now_iso()}]
+        thread = list(item.get("thread") or []) + [{"who": "session", "kind": "reply", "chars": len(text), "at": now_iso()}]
         return self.store.update(f"inbox/{item_id}", {"thread": thread})
 
     def beat(self) -> None:

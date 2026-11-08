@@ -89,7 +89,8 @@ def main(argv: list[str] | None = None) -> None:
 
         runs = Runs(store, cfg.machine, cfg.roots, claude, data_dir() / "runs", logs=cfg.logs,
                     push=pusher(store, cfg.owner_email))
-        runs.forget_lost()
+        for line in runs.forget_lost():
+            print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} run {line}", flush=True)
         if cfg.files_url:
             from .files import Files, firebase_verifier, serve
 

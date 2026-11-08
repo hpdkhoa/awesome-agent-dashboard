@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { PcText } from "./FileView";
 import { answerItem, askBack, batchOf, cancelAnswer, forceAnswer, saveDraft, type InboxItem, type Plan, type Session } from "./data";
 import { Example } from "./Example";
 import { Md } from "./Markdown";
@@ -141,7 +142,13 @@ function QuestionCard({ q, batch, k }: { q: InboxItem; batch: InboxItem[]; k: nu
             {(q.thread ?? []).map((t, n) => (
               <li key={n} className={t.who}>
                 <span className="small muted">{t.who === "owner" ? (t.kind === "ask" ? "you asked" : "you saved") : "session"} · {ago(t.at)}</span>{" "}
-                {t.kind === "answer" ? <b>{[t.choice, t.text].filter(Boolean).join(" · ")}</b> : <Md text={t.text ?? ""} cwd={q.cwd} />}
+                {t.kind === "answer" ? (
+                  <b>{[t.choice, t.text].filter(Boolean).join(" · ")}</b>
+                ) : t.who === "session" && t.text == null && q.sessionId ? (
+                  <PcText reply={{ session: q.sessionId, item: q.id, k: (q.thread ?? []).slice(0, n).filter((x) => x.who === "session").length }} cwd={q.cwd} />
+                ) : (
+                  <Md text={t.text ?? ""} cwd={q.cwd} />
+                )}
               </li>
             ))}
           </ul>
@@ -309,9 +316,9 @@ export function InboxView({ item, session, plan, onOpenPlan, items = [] }: {
           <Md text={[item.answer?.choice && `**${item.answer.choice}**`, item.answer?.text].filter(Boolean).join("\n\n") || "Reviewed, no note"} />
         </Section>
       )}
-      {item.followUp && (
+      {item.deliveredVia === "resume" && item.commandId && (
         <Section id="inbox.followup" title="The session's reply">
-          <Md text={item.followUp} cwd={item.cwd} />
+          <PcText run={item.commandId} cwd={item.cwd} />
         </Section>
       )}
       {(item.status === "answered" || item.status === "delivering") && item.waitReason && (

@@ -7,8 +7,10 @@ Two sources, both already written in full on the PC:
 - a session's log, <logs>/<project>/<session>.jsonl, written by Claude Code itself: every turn's final reply, whole;
 - a run's .out file, written by the bridge from `claude -p --output-format json`: the run's whole result.
 
-The page asks POST /text on the file viewer (files.py) with {"session": id, "turn": n} (no turn: the last one) or
-{"run": id}. Secrets are replaced as everywhere else (redact), with no length cap.
+The page asks POST /text on the file viewer (files.py) with {"session": id, "turn": n} (no turn: the last one),
+{"run": id}, or {"reply": {"session": id, "item": inbox item id, "k": n}} for the n-th (from 0) inbox_reply the session
+made on that item, read from its inbox_reply tool call in the log (the owner's choice, 2026-11-08: "From the PC too").
+Secrets are replaced as everywhere else (redact), with no length cap.
 """
 
 from __future__ import annotations
@@ -63,6 +65,25 @@ def turns_of(path: Path) -> list[dict]:
     return out
 
 
+def replies_of(path: Path, item_id: str) -> list[str]:
+    """The texts of the session's inbox_reply calls on one inbox item, in order, from its log."""
+    out = []
+    with open(path, "rb") as f:
+        for raw in f:
+            try:
+                d = json.loads(raw)
+            except (ValueError, UnicodeDecodeError):
+                continue
+            if d.get("type") != "assistant":
+                continue
+            for b in (d.get("message") or {}).get("content") or []:
+                if isinstance(b, dict) and b.get("type") == "tool_use" and str(b.get("name", "")).endswith("inbox_reply"):
+                    inp = b.get("input") or {}
+                    if inp.get("item_id") == item_id and b.get("id") not in [x[0] for x in out]:
+                        out.append((b.get("id"), str(inp.get("text", ""))))
+    return [t for _, t in out]
+
+
 class Texts:
     def __init__(self, logs: Path | None, out_dir: Path | None):
         self.logs, self.out_dir = logs, out_dir
@@ -95,7 +116,21 @@ class Texts:
         text = redact(str(r.get("result") or ""), NO_CAP)
         return {"text": text, "chars": len(text), "isError": bool(r.get("is_error"))}
 
+    def reply(self, session_id: str, item_id: str, k: int) -> dict:
+        path = self.log_of(session_id)
+        if path is None:
+            raise ValueError("no log for this session on this PC")
+        texts = replies_of(path, str(item_id))
+        if not 0 <= k < len(texts):
+            raise ValueError("no such reply in this session's log")
+        text = redact(texts[k], NO_CAP)
+        return {"text": text, "chars": len(text), "k": k, "of": len(texts)}
+
     def answer(self, body: dict) -> dict:
+        if isinstance(body.get("reply"), dict):
+            r = body["reply"]
+            k = r.get("k", 0)
+            return self.reply(str(r.get("session", "")), str(r.get("item", "")), int(k) if isinstance(k, (int, float)) else 0)
         if body.get("session"):
             turn = body.get("turn")
             return self.session(str(body["session"]), int(turn) if isinstance(turn, (int, float)) else None)

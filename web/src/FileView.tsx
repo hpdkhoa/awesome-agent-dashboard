@@ -43,7 +43,8 @@ export async function ticket(path: string, cwd: string): Promise<Ticket> {
 export type PcTurn = { n: number; at: string; prompt: string; chars: number };
 export type PcReply = { text: string; chars: number; n?: number; at?: string; prompt?: string; turns?: PcTurn[]; isError?: boolean };
 
-export async function pcText(body: { session?: string; turn?: number; run?: string }): Promise<PcReply> {
+export type PcReplyRef = { session: string; item: string; k: number };
+export async function pcText(body: { session?: string; turn?: number; run?: string; reply?: PcReplyRef }): Promise<PcReply> {
   const url = await filesUrl();
   if (!url) throw new Error("The file viewer is off: set FILES_URL on the bridge.");
   const token = await auth.currentUser?.getIdToken();
@@ -63,13 +64,13 @@ export async function pcText(body: { session?: string; turn?: number; run?: stri
 }
 
 // A session's reply (any turn, the last one first) or a run's result, whole, from the PC.
-export function PcText({ session, run, cwd }: { session?: string; run?: string; cwd: string }) {
+export function PcText({ session, run, reply, cwd }: { session?: string; run?: string; reply?: PcReplyRef; cwd: string }) {
   const [turn, setTurn] = useState<number | undefined>(undefined);
   const [got, setGot] = useState<PcReply | string | null>(null);
   useEffect(() => {
     setGot(null);
-    pcText(session ? { session, turn } : { run }).then(setGot, (e) => setGot(String(e.message ?? e)));
-  }, [session, run, turn]);
+    pcText(reply ? { reply } : session ? { session, turn } : { run }).then(setGot, (e) => setGot(String(e.message ?? e)));
+  }, [session, run, turn, reply?.session, reply?.item, reply?.k]);
   if (typeof got === "string") return <p className="muted small">{got}</p>;
   if (!got) return <p className="muted small">loading from the PC</p>;
   const total = got.turns?.length ?? 0;

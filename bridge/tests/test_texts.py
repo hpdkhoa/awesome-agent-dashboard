@@ -81,3 +81,26 @@ def test_text_call_is_off_without_texts(tmp_path):
         assert call(f"http://127.0.0.1:{srv.server_address[1]}", "/text", {"session": "s"})[0] == 404
     finally:
         srv.shutdown()
+
+
+def test_thread_replies_come_whole_from_the_session_log(tmp_path):
+    big = "y" * 6000
+    call_a = {"type": "tool_use", "id": "t1", "name": "mcp__agent-inbox__inbox_reply", "input": {"item_id": "q1", "text": "first " + big}}
+    call_b = {"type": "tool_use", "id": "t2", "name": "mcp__agent-inbox__inbox_reply", "input": {"item_id": "q1", "text": "second"}}
+    other = {"type": "tool_use", "id": "t3", "name": "mcp__agent-inbox__inbox_reply", "input": {"item_id": "q9", "text": "elsewhere"}}
+    logs = write_log(tmp_path, [
+        line("user", "q", "2026-11-08T01:00:00Z", origin={"kind": "human"}),
+        line("assistant", [call_a], "2026-11-08T01:00:01Z", mid="a1"),
+        line("assistant", [call_a], "2026-11-08T01:00:02Z", mid="a1"),  # the same call streamed twice counts once
+        line("assistant", [other], "2026-11-08T01:00:03Z", mid="a2"),
+        line("assistant", [call_b], "2026-11-08T01:00:04Z", mid="a3"),
+    ])
+    t = Texts(logs, None)
+    first = t.answer({"reply": {"session": "sess1", "item": "q1", "k": 0}})
+    assert first["chars"] == 6006 and first["text"].startswith("first ") and first["of"] == 2
+    assert t.answer({"reply": {"session": "sess1", "item": "q1", "k": 1}})["text"] == "second"
+    try:
+        t.answer({"reply": {"session": "sess1", "item": "q1", "k": 2}})
+        assert False
+    except ValueError as e:
+        assert "no such reply" in str(e)

@@ -227,7 +227,9 @@ def test_ask_back_is_seen_until_the_session_replies():
                                            {"who": "owner", "kind": "ask", "text": "on a phone?"}]})
     assert ib.ask_back(i)["text"] == "on a phone?"
     assert ib.reply(i, "it stacks") and ib.ask_back(i) is None
-    assert store.docs[f"inbox/{i}"]["thread"][-1]["who"] == "session" and store.docs[f"inbox/{i}"]["status"] == "open"
+    last = store.docs[f"inbox/{i}"]["thread"][-1]
+    assert last["who"] == "session" and last["chars"] == len("it stacks") and "text" not in last  # words stay on the PC
+    assert store.docs[f"inbox/{i}"]["status"] == "open"
 
 
 def test_the_question_box_posts_one_batch():

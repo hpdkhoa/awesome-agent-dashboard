@@ -256,6 +256,16 @@ def message_command(claude: str, message: str, session_id: str, mode: str = "man
             "--permission-prompt-tool", APPROVAL_TOOL, *mode_args(mode), *(kind_args(kind) or step_args(step))]
 
 
+class _Ended:
+    """Stands in for the process of a run whose output file is complete but whose process an earlier bridge owned."""
+
+    def __init__(self, returncode: int):
+        self.returncode = returncode
+
+    def poll(self):
+        return self.returncode
+
+
 def parse_result(out: str | None) -> dict:
     """claude's JSON result. An "is_error" result carries its message in "result", such as "Not logged in"."""
     try:
@@ -299,13 +309,25 @@ class Runs:
         self.acted: set[str] = set()
         self.reading: dict[str, dict] = {}  # plan commands still reading pages: {"proc": the page run, "stop": bool}
 
-    def forget_lost(self) -> None:
-        """On start: runs marked running by an earlier bridge on this machine can no longer be followed."""
+    def forget_lost(self) -> list[str]:
+        """On start: runs an earlier bridge on this machine left running. One whose .out already holds claude's
+        complete result is finished from that file as if its process had just ended (the owner's choice, 2026-11-08:
+        "Finish from the .out file"); the rest can no longer be followed and are lost."""
+        log = []
         for c in self.store.where("commands", "status", "running"):
-            if c.get("machine") == self.machine and c["id"] not in self.procs:
-                error = "The bridge restarted while this run was going; its result is in the session log."
-                self.store.update(f"commands/{c['id']}", {"status": "lost", "endedAt": now_iso(), "error": error})
-                self._answer_back(c, {"status": "answered", "error": error})
+            if c.get("machine") != self.machine or c["id"] in self.procs:
+                continue
+            out = self.out_dir / f"{c['id']}.out"
+            r = parse_result(out.read_text(encoding="utf-8", errors="replace")) if out.is_file() else {}
+            if r.get("result") is not None or r.get("is_error"):
+                self.procs[c["id"]] = _Ended(1 if r.get("is_error") else 0)
+                log.append(self._finish(c["id"], self.procs[c["id"]]) + " (finished from its .out after a bridge restart)")
+                continue
+            error = "The bridge restarted while this run was going; its result is in the session log."
+            self.store.update(f"commands/{c['id']}", {"status": "lost", "endedAt": now_iso(), "error": error})
+            self._answer_back(c, {"status": "answered", "error": error})
+            log.append(f"{c['id']}: lost to a bridge restart")
+        return log
 
     def _answer_back(self, c: dict, fields: dict) -> None:
         """Writes a delivered answer's outcome on its inbox item."""
@@ -681,7 +703,8 @@ class Runs:
     def _finish(self, cid: str, p: subprocess.Popen) -> str:
         del self.procs[cid]
         out = (self.out_dir / f"{cid}.out").read_text(encoding="utf-8", errors="replace")
-        err = (self.out_dir / f"{cid}.err").read_text(encoding="utf-8", errors="replace")
+        err_path = self.out_dir / f"{cid}.err"
+        err = err_path.read_text(encoding="utf-8", errors="replace") if err_path.is_file() else ""
         stopped = (self.store.get(f"commands/{cid}") or {}).get("status") == "stopping"
         fields = {"endedAt": now_iso(), "exitCode": p.returncode}
         r = parse_result(out)
@@ -703,8 +726,9 @@ class Runs:
         self.store.update(f"commands/{cid}", fields)
         c = self.store.get(f"commands/{cid}") or {}
         if fields["status"] == "done":
-            self._answer_back(c, {"status": "delivered", "deliveredAt": now_iso(), "deliveredVia": "resume",
-                                  "followUp": redact(str(r.get("result") or ""), 2000), "error": None})
+            # no followUp text: the page reads the run's whole result from the PC (texts.py, the owner's choice,
+            # 2026-11-08: "From the PC too")
+            self._answer_back(c, {"status": "delivered", "deliveredAt": now_iso(), "deliveredVia": "resume", "error": None})
         elif fields["status"] == "stopped":
             self._answer_back(c, {"status": "closed", "error": "Stopped on the page before it reached the session."})
         else:
