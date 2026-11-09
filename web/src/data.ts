@@ -142,7 +142,12 @@ export type Run = {
   target?: string;
   cwd?: string;
   status: "new" | "waiting" | "running" | "stopping" | "done" | "stopped" | "failed" | "lost" | "cancelled" | "paused";
-  action: "start" | "stop" | "message" | "check" | "plan" | "approve_generated";
+  action: "start" | "stop" | "message" | "check" | "plan" | "approve_generated" | "continue" | "auto_continue";
+  pausedUntilAt?: string | null; // a run paused by the usage limit: the reset time the bridge read from claude's message
+  autoContinue?: boolean; // continues by itself at the reset (bridge runs.py _pause, _auto_continue)
+  autoBy?: "last" | "owner" | null; // the run that paused last, or the owner's pick
+  continuedBy?: string; // the run that does this one's leftover work
+  continueOf?: string; // the paused run this one continues
   moved?: { from: string; to: string }[]; // approve_generated: the approved files, where they went
   kind?: PlanKind; // a message on a plan
   planId?: string;
@@ -400,6 +405,18 @@ export const sendPlanCheck = (plan: Plan, text: string) => {
     id, action: "message", machine: plan.machine, sessionId: plan.sessionId, cwd: plan.cwd, prompt: text, ownerText: text,
     planId: plan.id, planCheck: true, status: "new", createdAt: new Date().toISOString(),
   });
+};
+
+// A run paused by the usage limit (the owner's words, 2026-11-09: "I need the continue button inside run tab and session
+// tab to do the leftover work manually"; note "auto only the last or the message I choose to auto restart when limit
+// lifted"): Continue now, or pick it to continue by itself at the reset.
+export const continueRun = (machine: string, target: string) => {
+  const id = newId();
+  return setDoc(doc(db, "commands", id), { id, action: "continue", machine, target, status: "new", createdAt: new Date().toISOString() });
+};
+export const setAutoContinue = (machine: string, target: string, on: boolean) => {
+  const id = newId();
+  return setDoc(doc(db, "commands", id), { id, action: "auto_continue", machine, target, on, status: "new", createdAt: new Date().toISOString() });
 };
 
 export const stopRun = (machine: string, target: string) => {

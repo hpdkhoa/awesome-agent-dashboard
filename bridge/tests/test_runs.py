@@ -18,6 +18,10 @@ if prompt == "fail":
 if prompt == "notlogged":
     print(json.dumps({"type": "result", "is_error": True, "result": "Not logged in · Please run /login", "subtype": "success"}))
     sys.exit(1)
+if prompt.startswith("limit") or prompt.endswith("limit"):
+    print(json.dumps({"type": "result", "is_error": True, "api_error_status": 429, "api_error": "usage_limit_reached",
+                      "result": "You've hit your 5-hour limit · resets 5:30pm (Asia/Ho_Chi_Minh)"}))
+    sys.exit(1)
 resumed = sys.argv[sys.argv.index("--resume") + 1] if "--resume" in sys.argv else ""
 print(json.dumps({"result": "did: " + prompt + " in " + os.path.basename(os.getcwd()) + (" resumed " + resumed if resumed else ""),
                   "total_cost_usd": 0.12, "key": os.environ.get("ANTHROPIC_API_KEY")}))

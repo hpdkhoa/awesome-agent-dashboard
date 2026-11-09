@@ -1,6 +1,6 @@
 import { useState } from "react";
 import {
-  cancelMessage, checkSession, forceMessage, planFromSession, PLAN_KINDS, sendMessage, setRunMode, startRun, stopRun, useRunMode,
+  cancelMessage, checkSession, continueRun, forceMessage, setAutoContinue, planFromSession, PLAN_KINDS, sendMessage, setRunMode, startRun, stopRun, useRunMode,
   type Machine, type Run, type Session,
 } from "./data";
 import { usd } from "./Dashboard";
@@ -222,6 +222,39 @@ export function PlanFromSession({ s, runs }: { s: Session; runs: Run[] }) {
 
 const KIND_NAME = Object.fromEntries(PLAN_KINDS) as Record<string, string>;
 
+// Continue on a paused run, or a failed plan from a session (bridge runs.py continue_run): the leftover work only. The
+// run that paused last continues by itself at the reset; any other paused run does when the owner turns Auto on.
+function ContinueBar({ r }: { r: Run }) {
+  const [sent, setSent] = useState<"" | "continue" | "auto">("");
+  const [error, setError] = useState("");
+  if (r.continuedBy) return <p className="muted small">Continued as run {r.continuedBy}.</p>;
+  const paused = r.status === "paused";
+  if (!paused && !(r.action === "plan" && r.status === "failed")) return null;
+  const at = r.pausedUntilAt ? new Date(r.pausedUntilAt).toLocaleString() : "";
+  const fail = (e: unknown) => (setSent(""), setError(String((e as { code?: string }).code ?? e)));
+  return (
+    <div className="actions">
+      {paused && (
+        <p className="small">
+          {!at ? "Reset time unknown: press Continue after the limit lifts."
+            : r.autoContinue ? `Continues by itself at ${at}${r.autoBy === "owner" ? " (your pick)" : " (the last paused run)"}.`
+            : `Waits for Continue (the limit resets ${at}).`}
+        </p>
+      )}
+      <button className="primary" disabled={sent === "continue"}
+        onClick={() => (setSent("continue"), continueRun(r.machine, r.id).catch(fail))}>
+        {sent === "continue" ? "Continuing" : "Continue"}
+      </button>
+      {paused && at && (
+        <button disabled={sent === "auto"} onClick={() => (setSent("auto"), setAutoContinue(r.machine, r.id, !r.autoContinue).then(() => setSent("")).catch(fail))}>
+          {r.autoContinue ? "Auto at reset: on (turn off)" : "Auto at reset: off (turn on)"}
+        </button>
+      )}
+      {error && <p className="bad small">{error}</p>}
+    </div>
+  );
+}
+
 export function RunList({ runs, title = "Runs from the dashboard" }: { runs: Run[]; title?: string }) {
   const shown = runs.filter((r) => r.action === "start" || r.action === "message" || r.action === "plan");
   return (
@@ -232,7 +265,7 @@ export function RunList({ runs, title = "Runs from the dashboard" }: { runs: Run
         <Section
           key={r.id}
           id={"run." + r.id}
-          open={LIVE.has(r.status)}
+          open={LIVE.has(r.status) || (r.status === "paused" && !r.continuedBy)}
           tools={<MoreMenu path={`commands/${r.id}`} />}
           title={
             <span className="run-head">
@@ -267,6 +300,7 @@ export function RunList({ runs, title = "Runs from the dashboard" }: { runs: Run
               <button onClick={() => stopRun(r.machine, r.id)}>Stop</button>
             </div>
           )}
+          <ContinueBar r={r} />
           {r.status === "waiting" && (
             <div className="actions">
               <button onClick={() => cancelMessage(r.id)}>Cancel</button>

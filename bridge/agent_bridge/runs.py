@@ -33,6 +33,13 @@ Rules from the plan: only folders registered in WORK_ROOTS, a fixed list of acti
 argument (never through a shell), permissions stay on: in Manual every approval goes to the owner's inbox, in Auto the
 safety check decides first and the inbox is the fallback (never bypass mode),
 ANTHROPIC_API_KEY is removed so the run uses the plan (terms T7).
+
+A run cut by the usage limit is "paused", not failed (the owner's words, 2026-11-09: "I need the continue button inside
+run tab and session tab to do the leftover work manually"; choice "Continue + auto at reset", note "auto only the last
+or the message I choose to auto restart when limit lifted"). "continue" (target) makes the leftover run: a plan from a
+session again (its finished pages are kept, _earlier_notes), or a message to the run's session that goes on from where
+it stopped. At the reset time the bridge continues by itself only the run that paused last, plus every paused run the
+owner marked with "auto_continue" (target, on).
 """
 
 from __future__ import annotations
@@ -42,7 +49,7 @@ import os
 import shutil
 import re
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import signal
 import subprocess
 import threading
@@ -60,7 +67,12 @@ APPROVAL_TOOL = "mcp__agent-inbox__inbox_approve"
 NOTE_SECONDS = 20 * 60  # one page's notes
 NO_CLI = "No signed-in claude CLI on this machine. Install Claude Code and sign in, or set CLAUDE_BIN."
 SESSION_ARG = re.compile(r"^--(?:resume|session-id)(?:=(.+))?$")
-SCAN_SECONDS = 3  # one process scan serves every waiting message and answer of one bridge round
+LIMIT_MARGIN = 120  # seconds after the reset time before an auto continue, so the limit is surely lifted
+CONTINUE_NOTE = ("The last run of this message stopped at the usage limit. Go on with the leftover work from where it "
+                 "stopped; do not redo what is already done. The message was:\n\n")
+MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
+RESETS = re.compile(r"resets\s+(?:([A-Za-z]{3})[a-z]*\s+(\d{1,2}),?\s+(?:at\s+)?)?(\d{1,2})(?::(\d{2}))?\s*([ap]m)", re.I)
+SCAN_SECONDS = 3 # one process scan serves every waiting message and answer of one bridge round
 TAIL_BYTES = 256 * 1024  # the end of a session log: enough for its last turn's closing lines
 SKIP = {"queue-operation", "frame-link", "api-request", "api-request-shape", "api-request-blob", "attachment",
         "file-history-snapshot", "summary", "custom-title", "last-prompt"}  # lines that are not conversation turns
@@ -275,6 +287,27 @@ def parse_result(out: str | None) -> dict:
     return r if isinstance(r, dict) else {}
 
 
+def reset_time(text: str, after: datetime) -> datetime | None:
+    """When the usage limit lifts, from claude's message ("resets 5:30pm (Asia/Ho_Chi_Minh)", or with a date "resets
+    Nov 10, 5:30pm"): the first such time after `after`. Claude Code writes it in this PC's own time zone, the zone the
+    bridge runs in, so it is read as local time (no time zone data needed). None when the message has no time."""
+    m = RESETS.search(text or "")
+    if not m:
+        return None
+    mon, day, h, mi, ap = m.groups()
+    hour, minute = int(h) % 12 + (12 if ap.lower() == "pm" else 0), int(mi or 0)
+    local = after.astimezone()
+    try:
+        if mon:
+            t = local.replace(month=MONTHS.index(mon.lower()) + 1, day=int(day), hour=hour, minute=minute, second=0,
+                              microsecond=0)
+            return t if t >= local - timedelta(days=1) else t.replace(year=t.year + 1)
+        t = local.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    except ValueError:  # a month name or a day that is not real
+        return None
+    return t if t > local else t + timedelta(days=1)
+
+
 def folder_ok(folder: str, roots: list[tuple[str, str]]) -> str | None:
     """The work type of folder when it is exactly a registered root, else None."""
     norm = folder.replace("\\", "/").rstrip("/").lower()
@@ -308,12 +341,17 @@ class Runs:
         # "new" commands already acted on: a listener snapshot can lag behind our own write, never act twice
         self.acted: set[str] = set()
         self.reading: dict[str, dict] = {}  # plan commands still reading pages: {"proc": the page run, "stop": bool}
+        # paused runs to continue at the reset: {run id: {"due": epoch seconds, "by": "last" | "owner"}}; read from the
+        # store once on the first step, so a bridge restart keeps them
+        self.auto: dict[str, dict] | None = None
+        self.auto_lock = threading.Lock()  # a plan pauses from its reading thread
 
     def forget_lost(self) -> list[str]:
         """On start: runs an earlier bridge on this machine left running. One whose .out already holds claude's
         complete result is finished from that file as if its process had just ended (the owner's choice, 2026-11-08:
-        "Finish from the .out file"); the rest can no longer be followed and are lost."""
-        log = []
+        "Finish from the .out file"); the rest can no longer be followed and are lost. Also reads the paused runs that
+        continue by themselves at the reset."""
+        log = [f"{k}: continues by itself at the reset" for k in self._auto_runs()]
         for c in self.store.where("commands", "status", "running"):
             if c.get("machine") != self.machine or c["id"] in self.procs:
                 continue
@@ -357,6 +395,7 @@ class Runs:
                     else self._stop(c) if action == "stop" else self._check(c) if action == "check"
                     else self._plan(c) if action == "plan" else self._approve_generated(c) if action == "approve_generated"
                     else self._delete_plan_files(c) if action == "delete_plan_files"
+                    else self._continue(c) if action == "continue" else self._auto_continue(c) if action == "auto_continue"
                     else self._unknown(c))
             if line:
                 log.append(line)
@@ -364,6 +403,119 @@ class Runs:
             if p.poll() is not None:
                 log.append(self._finish(cid, p))
         log += self._archiver_freed()
+        log += self._continue_due()
+        return log
+
+    def _auto_runs(self) -> dict[str, dict]:
+        """The auto continues; on the first call, read from this machine's paused runs in the store."""
+        with self.auto_lock:
+            if self.auto is None:
+                self.auto = {}
+                for c in self.store.where("commands", "status", "paused"):
+                    at = c.get("pausedUntilAt")
+                    if c.get("machine") == self.machine and c.get("autoContinue") and at and not c.get("continuedBy"):
+                        try:
+                            self.auto[c["id"]] = {"due": datetime.fromisoformat(at).timestamp() + LIMIT_MARGIN,
+                                                  "by": c.get("autoBy") or "last"}
+                        except ValueError:
+                            pass
+            return self.auto
+
+    def _pause(self, cid: str, res: dict, stage: str | None = None) -> None:
+        """A run cut by the usage limit: paused, with the reset time. It becomes the one "last" auto continue; an
+        earlier "last" one stops being auto, the owner's own picks stay (the owner's note, 2026-11-09: "auto only the
+        last or the message I choose to auto restart when limit lifted")."""
+        text = str(res.get("result") or "")
+        at = reset_time(text, datetime.now(timezone.utc))
+        auto = self._auto_runs()
+        with self.auto_lock:
+            for k in [k for k, a in auto.items() if a["by"] == "last"]:
+                del auto[k]
+                self.store.update(f"commands/{k}", {"autoContinue": False, "autoBy": None})
+            if at is not None:
+                auto[cid] = {"due": at.timestamp() + LIMIT_MARGIN, "by": "last"}
+        fields = {"status": "paused", "endedAt": now_iso(), "error": redact(text, 300),
+                  "pausedUntil": text.partition("resets ")[2].strip() or "the usage limit resets",
+                  "pausedUntilAt": at.isoformat() if at else None,
+                  "autoContinue": at is not None, "autoBy": "last" if at else None}
+        if stage:
+            fields["stage"] = stage
+        self.store.update(f"commands/{cid}", fields)
+
+    def continue_run(self, target: str) -> tuple[str | None, str]:
+        """The leftover run of a paused run (or a failed plan from a session): (the new command's id, a log line or
+        why not). A plan goes again from its session and keeps the finished pages; a start or a message goes on in
+        its session; a start whose session never got a log starts again."""
+        old = self.store.get(f"commands/{target}") or {}
+        act, status = old.get("action"), old.get("status")
+        why = ("No such run." if not old else "That run is on another machine." if old.get("machine") != self.machine
+               else f"Already continued as run {old['continuedBy']}." if old.get("continuedBy")
+               else "" if status == "paused" or (act == "plan" and status == "failed")
+               else f"Only a paused run can continue (this one is {status}).")
+        if why:
+            return None, why
+        nid = uuid.uuid4().hex[:20]
+        prompt = str(old.get("prompt") or "")
+        if act == "plan":
+            new = {"action": "plan", **{k: old[k] for k in ("sourceSessionId", "cwd", "goal", "upgradeOf") if k in old},
+                   "prompt": prompt if prompt.startswith("Plan from session") else "Plan from session (continued)"}
+        elif act == "start" and (not old.get("sessionId") or find_log(self.logs, old["sessionId"]) is None):
+            new = {"action": "start", "folder": old.get("folder", ""), "prompt": prompt}
+        else:
+            new = {"action": "message", "sessionId": old.get("sessionId", ""), "cwd": old.get("cwd") or old.get("folder", ""),
+                   "prompt": prompt if prompt.startswith(CONTINUE_NOTE) else CONTINUE_NOTE + prompt,
+                   **{k: old[k] for k in ("kind", "planId", "stepId", "inboxId", "ownerText", "generate", "planCheck",
+                                          "phaseOrder") if k in old}}
+        self.store.put_many({f"commands/{nid}": {"id": nid, "machine": self.machine, "status": "new",
+                                                 "createdAt": now_iso(), "continueOf": target, **new}})
+        with self.auto_lock:
+            (self.auto or {}).pop(target, None)
+        self.store.update(f"commands/{target}", {"continuedBy": nid, "autoContinue": False, "autoBy": None})
+        return nid, f"{target}: continued as {nid}"
+
+    def _continue(self, c: dict) -> str:
+        """The Continue button on a run."""
+        nid, line = self.continue_run(c.get("target", ""))
+        self.store.update(f"commands/{c['id']}", {"status": "done" if nid else "failed", "endedAt": now_iso(),
+                                                  **({"continuedAs": nid} if nid else {"error": line})})
+        return line if nid else f"{c['id']}: refused, {line}"
+
+    def _auto_continue(self, c: dict) -> str:
+        """The owner's pick: continue this paused run at the reset (on), or not (off)."""
+        path, target, on = f"commands/{c['id']}", c.get("target", ""), bool(c.get("on"))
+        old = self.store.get(f"commands/{target}") or {}
+        try:
+            at = datetime.fromisoformat(old["pausedUntilAt"]) if old.get("pausedUntilAt") else None
+        except ValueError:
+            at = None
+        why = ("Only a paused run of this machine can continue at the reset." if old.get("status") != "paused"
+               or old.get("machine") != self.machine or old.get("continuedBy")
+               else "The reset time is unknown: use Continue after the limit lifts." if on and at is None else "")
+        if why:
+            self.store.update(path, {"status": "failed", "endedAt": now_iso(), "error": why})
+            return f"{c['id']}: refused, {why}"
+        auto = self._auto_runs()
+        with self.auto_lock:
+            if on:
+                auto[target] = {"due": at.timestamp() + LIMIT_MARGIN, "by": "owner"}
+            else:
+                auto.pop(target, None)
+        self.store.update(f"commands/{target}", {"autoContinue": on, "autoBy": "owner" if on else None})
+        self.store.update(path, {"status": "done", "endedAt": now_iso()})
+        return f"{c['id']}: {target} {'continues' if on else 'does not continue'} at the reset"
+
+    def _continue_due(self) -> list[str]:
+        """Continues the auto runs whose reset time has passed. No store query here: the list is read on the bridge's
+        start (forget_lost) or on the first pause."""
+        auto, now = self.auto or {}, time.time()
+        with self.auto_lock:
+            due = [k for k, a in auto.items() if a["due"] <= now]
+            for k in due:
+                del auto[k]
+        log = []
+        for k in due:
+            nid, line = self.continue_run(k)
+            log.append(line + " (auto at the reset)" if nid else f"{k}: no auto continue, {line}")
         return log
 
     def _unknown(self, c: dict) -> str:
@@ -675,11 +827,8 @@ class Runs:
                     res = parse_result((folder / f"notes-{i:02d}.out").read_text(encoding="utf-8", errors="replace"))
                 if r["stop"]:
                     break
-                if res.get("api_error") == "usage_limit_reached":  # paused, not failed: safe to restart after the reset
-                    until = str(res.get("result") or "").partition("resets ")[2].strip() or "the usage limit resets"
-                    self.store.update(path, {"status": "paused", "endedAt": now_iso(), "pausedUntil": until,
-                                             "stage": f"Paused at page {i} of {len(pages)}: usage limit",
-                                             "error": redact(str(res.get("result") or ""), 300)})
+                if res.get("api_error") == "usage_limit_reached":  # paused, not failed: safe to continue after the reset
+                    self._pause(cid, res, f"Paused at page {i} of {len(pages)}: usage limit")
                     return
                 if code != 0 or res.get("is_error") or not res.get("result"):
                     raise RuntimeError(f"The notes on page {i} failed: " + str(res.get("result") or f"exit {code}")[:300])
@@ -744,6 +893,17 @@ class Runs:
         r = parse_result(out)
         if r.get("total_cost_usd") is not None:
             fields["costUsd"] = float(r["total_cost_usd"])
+        if not stopped and r.get("api_error") == "usage_limit_reached":
+            # paused, not failed: Continue (or the auto continue at the reset) does the leftover work; an answer's
+            # inbox item stays as it is until then
+            self.store.update(f"commands/{cid}", fields)
+            self._pause(cid, r, "Paused: usage limit")
+            c = self.store.get(f"commands/{cid}") or {}
+            if self.push is not None:
+                self.push.notify(f"Run paused until {c.get('pausedUntil', 'the reset')}",
+                                 "Continue on the page" + (", or it continues by itself at the reset." if c.get("autoContinue") else "."),
+                                 f"/?run={cid}", cid)
+            return f"{cid}: paused, usage limit"
         if stopped:
             fields["status"] = "stopped"
         elif r.get("is_error"):
