@@ -40,7 +40,7 @@
 .run-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .status { font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); }
 .status.running, .status.new { border-color: var(--live); color: var(--live); }
-.status.waiting { border-color: var(--wait-fg); color: var(--wait-fg); }
+.status.waiting, .status.paused { border-color: var(--wait-fg); color: var(--wait-fg); }
 .status.failed, .status.lost { border-color: var(--bad); color: var(--bad); }
 .label { font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
 textarea { line-height: 1.5; }

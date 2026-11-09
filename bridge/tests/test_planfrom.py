@@ -329,3 +329,42 @@ def test_the_plans_own_parts_are_checked_against_the_record(tmp_path):
     again, c2 = check_parts(out, str(tmp_path))  # marks are never doubled on a later version
     assert again["cite"] == out["cite"] and c2["badRefs"] == 1
     assert check_parts(parts, str(tmp_path / "none"))[0] == parts
+
+
+def test_a_restarted_plan_keeps_the_notes_of_unchanged_pages_and_a_usage_limit_pauses_it(tmp_path, monkeypatch):
+    import subprocess
+    import sys
+
+    store, runs, work = setup(tmp_path, monkeypatch)
+    write_log(tmp_path / "logs2")
+    runs.logs = tmp_path / "logs2"
+    real, notes_runs = runs.popen, []
+    limit = json.dumps({"type": "result", "is_error": True, "api_error_status": 429, "api_error": "usage_limit_reached",
+                        "result": "You've hit your 5-hour limit · resets 12:20pm (Asia/Ho_Chi_Minh)"})
+
+    def limited(cmd, **kw):  # every notes run hits the usage limit
+        if "--no-session-persistence" in cmd:
+            notes_runs.append(cmd)
+            return subprocess.Popen([sys.executable, "-c", f"print({limit!r})"], **kw)
+        return real(cmd, **kw)
+
+    runs.popen = limited
+    cmd(store, "p1", action="plan", sourceSessionId="s1", cwd=str(work))
+    c = wait_done(runs, "p1", store, seconds=40)
+    assert c["status"] == "paused" and c["pausedUntil"] == "12:20pm (Asia/Ho_Chi_Minh)" and "page 1 of 1" in c["stage"]
+
+    def counted(cmd, **kw):
+        if "--no-session-persistence" in cmd:
+            notes_runs.append(cmd)
+        return real(cmd, **kw)
+
+    runs.popen, notes_runs[:] = counted, []
+    store.update("commands/p1", {"status": "new"})  # restart the same run: the failed page is written again
+    runs.acted.discard("p1")
+    c = wait_done(runs, "p1", store, seconds=40)
+    assert c["status"] == "done" and len(notes_runs) == 1 and not c.get("reused") and c["pausedUntil"] is None
+    cmd(store, "p2", action="plan", sourceSessionId="s1", cwd=str(work))  # a new run on the same session
+    c = wait_done(runs, "p2", store, seconds=40)
+    assert c["status"] == "done" and len(notes_runs) == 1 and c["reused"] == 1  # no new notes run
+    assert (tmp_path / "out" / "plans" / "p2" / "notes-01.md").read_text(encoding="utf-8") == \
+        (tmp_path / "out" / "plans" / "p1" / "notes-01.md").read_text(encoding="utf-8")

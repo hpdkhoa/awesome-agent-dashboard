@@ -236,7 +236,7 @@ export function RunList({ runs, title = "Runs from the dashboard" }: { runs: Run
           tools={<MoreMenu path={`commands/${r.id}`} />}
           title={
             <span className="run-head">
-              <span className={"status " + r.status}>{r.status === "waiting" ? WAIT_LABEL[r.waitReason ?? "turn"] : r.status}</span>
+              <span className={"status " + r.status}>{r.status === "waiting" ? WAIT_LABEL[r.waitReason ?? "turn"] : r.status === "paused" ? `paused until ${r.pausedUntil ?? "the limit resets"}` : r.status}</span>
               <span>{(r.prompt ?? "").split("\n")[0].slice(0, 90)}</span>
             </span>
           }

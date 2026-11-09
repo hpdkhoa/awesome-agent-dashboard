@@ -625,28 +625,62 @@ class Runs:
         threading.Thread(target=self._read_and_plan, args=(c, log, folder), daemon=True).start()
         return f"{cid}: reading session {src}"
 
+    def _earlier_notes(self, c: dict, folder: Path) -> dict[tuple[int, str], str]:
+        """Notes already written for this session (the owner's words, 2026-11-09: "if you don't see anything then the
+        plan session need to write down to temp folder so I can restart if this issue happen again"; approved: "Yes,
+        build this in the bridge"). {(page number, page text): the notes run's output} from this run's own folder and
+        from every earlier plan run on the same session. Read before write_pages rewrites this folder's pages."""
+        src = c.get("sourceSessionId", "")
+        dirs = [folder] + [Path(x["pagesDir"]) for x in self.store.where("commands", "sourceSessionId", src)
+                           if x.get("action") == "plan" and x.get("pagesDir") and x.get("id") != c["id"]]
+        found: dict[tuple[int, str], str] = {}
+        for d in dirs:
+            for out in sorted(d.glob("notes-*.out")) if d.is_dir() else []:
+                page = d / f"page-{out.stem[6:]}.txt"
+                try:
+                    raw, text = out.read_text(encoding="utf-8", errors="replace"), page.read_text(encoding="utf-8")
+                except (OSError, ValueError):
+                    continue
+                res = parse_result(raw)
+                if res.get("result") and not res.get("is_error") and out.stem[6:].isdigit():
+                    found.setdefault((int(out.stem[6:]), text), raw)
+        return found
+
     def _read_and_plan(self, c: dict, log: Path, folder: Path) -> None:
         path, cid, r = f"commands/{c['id']}", c["id"], self.reading[c["id"]]
         env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
         try:
-            pages, quotes = write_pages(log, folder), {"checked": 0, "marked": 0}
-            self.store.update(path, {"pages": pages, "stage": f"Read {len(pages)} pages"})
+            earlier = self._earlier_notes(c, folder)
+            pages, quotes, reused = write_pages(log, folder), {"checked": 0, "marked": 0}, 0
+            self.store.update(path, {"pages": pages, "stage": f"Read {len(pages)} pages", "pausedUntil": None})
             for i, pg in enumerate(pages, 1):
                 if r["stop"]:
                     break
-                self.store.update(path, {"stage": f"Notes on page {i} of {len(pages)}"})
-                with open(folder / pg["file"], encoding="utf-8") as inp, \
-                        open(folder / f"notes-{i:02d}.out", "w", encoding="utf-8") as out:
-                    r["proc"] = self.popen(note_command(self.claude, i, len(pages)), cwd=str(folder), env=env,
-                                           stdin=inp, stdout=out, stderr=subprocess.DEVNULL)
-                    try:
-                        code = r["proc"].wait(NOTE_SECONDS)
-                    except subprocess.TimeoutExpired:
-                        _kill_tree(r["proc"])
-                        raise RuntimeError(f"The notes on page {i} took over {NOTE_SECONDS // 60} minutes.")
-                res = parse_result((folder / f"notes-{i:02d}.out").read_text(encoding="utf-8", errors="replace"))
+                old = earlier.get((i, (folder / pg["file"]).read_text(encoding="utf-8")))
+                if old is not None:  # the same page as an earlier run: keep its notes, no new notes run
+                    (folder / f"notes-{i:02d}.out").write_text(old, encoding="utf-8")
+                    code, res, reused = 0, parse_result(old), reused + 1
+                    self.store.update(path, {"reused": reused})
+                else:
+                    self.store.update(path, {"stage": f"Notes on page {i} of {len(pages)}"})
+                    with open(folder / pg["file"], encoding="utf-8") as inp, \
+                            open(folder / f"notes-{i:02d}.out", "w", encoding="utf-8") as out:
+                        r["proc"] = self.popen(note_command(self.claude, i, len(pages)), cwd=str(folder), env=env,
+                                               stdin=inp, stdout=out, stderr=subprocess.DEVNULL)
+                        try:
+                            code = r["proc"].wait(NOTE_SECONDS)
+                        except subprocess.TimeoutExpired:
+                            _kill_tree(r["proc"])
+                            raise RuntimeError(f"The notes on page {i} took over {NOTE_SECONDS // 60} minutes.")
+                    res = parse_result((folder / f"notes-{i:02d}.out").read_text(encoding="utf-8", errors="replace"))
                 if r["stop"]:
                     break
+                if res.get("api_error") == "usage_limit_reached":  # paused, not failed: safe to restart after the reset
+                    until = str(res.get("result") or "").partition("resets ")[2].strip() or "the usage limit resets"
+                    self.store.update(path, {"status": "paused", "endedAt": now_iso(), "pausedUntil": until,
+                                             "stage": f"Paused at page {i} of {len(pages)}: usage limit",
+                                             "error": redact(str(res.get("result") or ""), 300)})
+                    return
                 if code != 0 or res.get("is_error") or not res.get("result"):
                     raise RuntimeError(f"The notes on page {i} failed: " + str(res.get("result") or f"exit {code}")[:300])
                 notes, seen, off = mark_quotes(res["result"], (folder / pg["file"]).read_text(encoding="utf-8"), i)

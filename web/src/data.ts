@@ -141,13 +141,15 @@ export type Run = {
   prompt?: string;
   target?: string;
   cwd?: string;
-  status: "new" | "waiting" | "running" | "stopping" | "done" | "stopped" | "failed" | "lost" | "cancelled";
+  status: "new" | "waiting" | "running" | "stopping" | "done" | "stopped" | "failed" | "lost" | "cancelled" | "paused";
   action: "start" | "stop" | "message" | "check" | "plan" | "approve_generated";
   moved?: { from: string; to: string }[]; // approve_generated: the approved files, where they went
   kind?: PlanKind; // a message on a plan
   planId?: string;
   sourceSessionId?: string; // plan from a session: the session it reads
   stage?: string; // plan from a session: where the reading is
+  pausedUntil?: string | null; // plan from a session stopped by the usage limit: when it resets
+  reused?: number; // plan from a session: pages whose notes came from an earlier run
   ownerText?: string;
   stepId?: string; // a Run step message
   planCheck?: boolean; // sent by the plan's Check button (planCheck.ts)
