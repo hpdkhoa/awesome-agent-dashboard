@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { clampWidth, gridColumns, loadLayout, saveLayout, type Layout } from "./layout";
 import { signOut } from "firebase/auth";
 import { auth } from "./firebase";
 import { RECENT_DAYS, useInbox, useMachines, usePlans, useRuns, useSessions, useUsage, useWorkTypes, type Run, type Session, type Tokens } from "./data";
@@ -60,6 +61,20 @@ export function Dashboard() {
   const [wt, setWt] = useState<string>("all");
   const [picked, setPicked] = useState<string | null>(null);
   const [tab, setTab] = useState<"inbox" | "plans" | "sessions" | "runs" | "money" | "rates" | "storage">(opened.get("run") ? "runs" : opened.get("plan") ? "plans" : "inbox");
+  // the left and right panels: drag to resize, hide and show each (layout.ts), remembered in this browser
+  const [layout, setLayout] = useState<Layout>(loadLayout);
+  useEffect(() => saveLayout(layout), [layout]);
+  const drag = (side: "left" | "right") => (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const startX = e.clientX, start = layout[side];
+    const move = (ev: PointerEvent) => {
+      const dx = ev.clientX - startX;
+      setLayout((l) => ({ ...l, [side]: clampWidth(side === "left" ? start + dx : start - dx, window.innerWidth) }));
+    };
+    const up = () => (window.removeEventListener("pointermove", move), window.removeEventListener("pointerup", up));
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
   const [store, setStore] = useState("inbox");
   const [pickedItem, setPickedItem] = useState<string | null>(opened.get("item"));
   const [push, turnOnPush] = usePush();
@@ -94,8 +109,10 @@ export function Dashboard() {
   if (!sessions || !usage || !workTypes || !inbox) return <main className="card">Loading</main>;
 
   return (
-    <div className="app">
+    <div className="app" style={{ gridTemplateColumns: gridColumns(layout) }}>
       <header className="top">
+        <button className="chip panel-btn" title={layout.leftHidden ? "Show the left panel" : "Hide the left panel"}
+          onClick={() => setLayout((l) => ({ ...l, leftHidden: !l.leftHidden }))}>{layout.leftHidden ? "›" : "‹"}</button>
         <strong>Agent dashboard</strong>
         <button className={waiting ? "pill wait" : "pill"} onClick={() => setTab("inbox")}>
           {waiting} waiting for you
@@ -119,9 +136,11 @@ export function Dashboard() {
         <button className="right" onClick={() => signOut(auth)}>
           Sign out
         </button>
+        <button className="chip panel-btn" title={layout.rightHidden ? "Show the right panel" : "Hide the right panel"}
+          onClick={() => setLayout((l) => ({ ...l, rightHidden: !l.rightHidden }))}>{layout.rightHidden ? "‹" : "›"}</button>
       </header>
 
-      <aside className="side">
+      <aside className="side" hidden={layout.leftHidden}>
         <div className="chips">
           {[{ id: "all", sessions: sessions.length }, ...[...workTypes].sort((a, b) => b.lastAt.localeCompare(a.lastAt))].map((w) => (
             <button key={w.id} className={wt === w.id ? "chip on" : "chip"} onClick={() => setWt(w.id)}>
@@ -192,6 +211,7 @@ export function Dashboard() {
         </ul>
         )}
       </aside>
+      <div className="gutter gl" hidden={layout.leftHidden} onPointerDown={drag("left")} title="Drag to resize the left panel" />
 
       <main className="main">
         {tab === "storage" ? (
@@ -229,9 +249,10 @@ export function Dashboard() {
           <p className="muted">Pick a session.</p>
         )}
       </main>
+      <div className="gutter gr" hidden={layout.rightHidden} onPointerDown={drag("right")} title="Drag to resize the right panel" />
       <FileViewer />
 
-      <section className="usage">
+      <section className="usage" hidden={layout.rightHidden}>
         <Section id="usage.days" title="Spend by day" extra={`${usage.length} days, whole history`}>
           <SpendChart usage={usage} />
         </Section>

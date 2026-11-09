@@ -18,6 +18,7 @@ export function Section({
   extra,
   open = true,
   tools,
+  stale,
   children,
 }: {
   id: string;
@@ -25,6 +26,7 @@ export function Section({
   extra?: ReactNode;
   open?: boolean;
   tools?: ReactNode; // beside the header, outside its button (a button cannot hold another)
+  stale?: string; // the plan's update check: why this section is behind the current version (planStale.ts)
   children: ReactNode;
 }) {
   const [isOpen, setOpen] = useState<boolean>(() => remembered()[id] ?? open);
@@ -40,7 +42,7 @@ export function Section({
   }
 
   return (
-    <section className={isOpen ? "sec open" : "sec"}>
+    <section className={(isOpen ? "sec open" : "sec") + (stale ? " stale" : "")} title={stale}>
       <div className="sec-wrap">
         <button className="sec-head" onClick={toggle} aria-expanded={isOpen}>
           <span className="chev" aria-hidden="true">
@@ -48,6 +50,7 @@ export function Section({
           </span>
           <span className="sec-title">{title}</span>
           {extra && <span className="sec-extra">{extra}</span>}
+          {stale && <span className="stale-note">{stale}</span>}
         </button>
         {tools}
       </div>

@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import {
   PLAN_KINDS, runStep, sendPlanMessage, useHarness, usePlanSteps,
-  type InboxItem, type Parts, type Plan, type PlanKind, type PlanVersion, type Run,
+  type InboxItem, type Parts, type Plan, type PlanGenerated, type PlanKind, type PlanStep, type PlanVersion, type Run,
 } from "./data";
 import { isWaiting } from "./Inbox";
 import { openFile, PcText } from "./FileView";
 import { askAbout, QUOTE_EVENT, quotePart, quoteStep, quoteWords, type QuoteAsk } from "./quote";
+import { staleMark, staleness, versionAt } from "./planStale";
+import { usePlanGenerated } from "./data";
 import { Md } from "./Markdown";
 import { MoreMenu } from "./MoreMenu";
 import { diffLines, linkEntries, PART_NAMES, partLines } from "./planDiff";
@@ -181,6 +183,63 @@ function SelectAsk({ root }: { root: React.RefObject<HTMLDivElement | null> }) {
   );
 }
 
+// 7. Results: one card per step run, newest first, grouped by the plan version that was current when it ran (the
+// owner's words, 2026-11-10: "where I can see the result of each build or step?"; the pick: "7. Results, one card per
+// run"): step, state, when, the session's reply read whole from the PC, the files approved for that version.
+function ResultsSection({ plan, v, versions, runs, steps, generated, stale }: {
+  plan: Plan; v: PlanVersion; versions: PlanVersion[]; runs: Run[]; steps: PlanStep[]; generated: PlanGenerated | null; stale?: string;
+}) {
+  const list = runs
+    .filter((r) => r.planId === plan.id && r.stepId && !r.kind && r.action === "message")
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const title = (id: string) => v.parts?.steps.find((s) => s.id === id)?.title ?? "";
+  const report = (r: Run) => {
+    const sv = steps.find((s) => s.stepId === r.stepId);
+    const after = (sv?.versions ?? []).filter((x) => x.at >= (r.startedAt ?? r.createdAt));
+    return after[0];
+  };
+  const groups = new Map<number, Run[]>();
+  for (const r of list) {
+    const n = versionAt(versions, r.createdAt);
+    groups.set(n, [...(groups.get(n) ?? []), r]);
+  }
+  return (
+    <Section id="plan.part.results" title="7. Results" extra={list.length ? `${list.length} step runs` : "none yet"} stale={stale}>
+      {list.length === 0 && <p className="muted small">No step has run yet. Run step on a step in Build, and its result lands here.</p>}
+      {[...groups.entries()].sort((a, b) => b[0] - a[0]).map(([n, rs]) => (
+        <div key={n}>
+          <p className="small muted">on v{n}{n === plan.current ? " · current" : ""}</p>
+          {rs.map((r) => {
+            const rep = report(r);
+            const files = generated?.versions?.[`v${n}`] ?? [];
+            const st = v.parts?.steps.find((s) => s.id === r.stepId);
+            return (
+              <div key={r.id} className="result-card">
+                <div className="result-head">
+                  <span className={"status " + (rep?.state ?? r.status)}>{rep?.state ?? r.status}</span>
+                  <b>{r.stepId} · {title(r.stepId!) || "step no longer in this version"}</b>
+                  <span className="small muted">ran {when(r.startedAt ?? r.createdAt)}{r.endedAt ? ` → ${when(r.endedAt)}` : ""}</span>
+                </div>
+                {st && <p className="small muted">check: {st.check}{rep ? ` → ${rep.state === "done" ? "met, by the session's report" : rep.state}` : " → no report yet"}</p>}
+                {(r.status === "done" || r.status === "lost") && (
+                  <>
+                    <p className="label">Reply</p>
+                    <PcText run={r.id} cwd={plan.cwd} />
+                  </>
+                )}
+                {r.status !== "done" && r.status !== "lost" && r.error && <p className="bad small">{r.error}</p>}
+                <p className="small muted">
+                  files approved for v{n}: {files.length ? files.map((f) => <code key={f.file} className="file-link" role="button" onClick={() => openFile(f.file, plan.cwd)}>{f.file.split(/[\\/]/).pop()}</code>).reduce<React.ReactNode[]>((a, x, i) => (i ? [...a, " · ", x] : [x]), []) : "none"}
+                </p>
+              </div>
+            );
+          })}
+        </div>
+      ))}
+    </Section>
+  );
+}
+
 function RunStep({ plan, step, runs, harness }: { plan: Plan; step: Parts["steps"][number]; runs: Run[]; harness: string }) {
   const [error, setError] = useState("");
   const going = runs.some((r) => r.planId === plan.id && r.stepId === step.id && (r.status === "new" || r.status === "running"));
@@ -245,6 +304,8 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
 }) {
   const steps = usePlanSteps(plan.id) ?? [];
   const ticks = useHarness(plan.id);
+  const generated = usePlanGenerated(plan.id);
+  const [checked, setChecked] = useState<string | null>(null); // when Check plan was pressed
   const harnessNote = buildNote(versions.find((x) => x.n === plan.current)?.harness, ticks);
   const withParts = versions.filter((v) => v.parts).sort((a, b) => a.n - b.n);
   const [picked, setPicked] = useState<number | null>(null);
@@ -256,6 +317,8 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
   const asked = items.filter((i) => i.planId === plan.id);
   const msgs = runs.filter((r) => r.planId === plan.id || (r.action === "plan" && r.id === plan.source?.commandId));
   const root = useRef<HTMLDivElement>(null);
+  const stale = staleness(plan, versions, ticks, generated, steps, runs);
+  const behind = stale.filter((r) => !r.ok).length;
   return (
     <div ref={root}>
       <SelectAsk root={root} />
@@ -274,13 +337,28 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
         {parent?.parts && (
           <button className={diff ? "chip on" : "chip"} onClick={() => setDiff(!diff)}>Changes from v{parent.n}</button>
         )}
+        <button className="chip primary" onClick={() => setChecked(new Date().toLocaleTimeString())} title="Does every section follow the current version?">
+          Check plan{behind ? ` · ${behind} behind` : ""}
+        </button>
       </div>
+      {checked && (
+        // the owner's pick, 2026-11-10: "Both": the list with the fix per line, and a mark on each section header
+        <ul className="check-list">
+          {stale.map((r) => (
+            <li key={r.section}>
+              <span className={"dot " + (r.ok ? "ok" : "stale")} />
+              <span className="small"><b>{r.section}</b>: {r.note}{r.fix ? <> → {r.fix}</> : null}</span>
+            </li>
+          ))}
+          <li><span className="small muted">checked {checked} against v{v.n}; the marks on the section headers show the same live</span></li>
+        </ul>
+      )}
       <p className="change-note small">
         v{v.n} · {when(v.createdAt)} · {v.change ? <b>{KIND_NAME[v.change.kind]}</b> : null}
         {v.change ? `: ${v.change.message}` : v.note} <MoreMenu path={`planVersions/${plan.id}_v${v.n}`} />
       </p>
 
-      <HarnessSection plan={plan} v={v} parent={parent} />
+      <HarnessSection plan={plan} v={v} parent={parent} stale={staleMark(stale, "harness")} />
 
       {PART_NAMES.filter(([k]) => k !== "steps").map(([k, name]) => (
         <Section key={k} id={`plan.part.${k}`} title={name} tools={<PartActions k={k} name={name} lines={partLines(v.parts!, k)} />}>
@@ -291,7 +369,7 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
         </Section>
       ))}
 
-      <Section id="plan.part.steps" title="6. Steps" extra={`${v.parts.steps.length} steps`}>
+      <Section id="plan.part.steps" title="6. Steps" extra={`${v.parts.steps.length} steps`} stale={staleMark(stale, "results")}>
         {before && <DiffBlock a={partLines(before, "steps")} b={partLines(v.parts, "steps")} />}
         {v.parts.steps.map((st) => {
           const sv = steps.find((x) => x.stepId === st.id);
@@ -334,6 +412,8 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
         })}
       </Section>
 
+      <ResultsSection plan={plan} v={v} versions={versions} runs={runs} steps={steps} generated={generated} stale={staleMark(stale, "results")} />
+
       {(v.parts.cite || before?.cite) && (
         // the owner's words, 2026-11-05: "move what the plan read ... out into the cite section like generated section"
         <Section id="plan.part.cite" title="Cite" extra="your words this plan reads" open={false}
@@ -345,7 +425,7 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
         </Section>
       )}
 
-      <GeneratedSection plan={plan} v={v} />
+      <GeneratedSection plan={plan} v={v} stale={staleMark(stale, "generated")} />
 
       <PlanMessage plan={plan} />
       {msgs.length > 0 && <RunList runs={msgs} title="Messages on this plan" />}

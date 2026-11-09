@@ -7,7 +7,7 @@ import { Section } from "./Section";
 
 // The harness section (harness.ts; this file is HarnessView, not Harness, so it never clashes with harness.ts on a case-blind disk): the list as it is in one version, its diff from the parent version, and the
 // owner's checkbox on each item. Only the current version's items can be ticked: a tick approves what is current.
-export function HarnessSection({ plan, v, parent }: { plan: Plan; v: PlanVersion; parent?: PlanVersion }) {
+export function HarnessSection({ plan, v, parent, stale }: { plan: Plan; v: PlanVersion; parent?: PlanVersion; stale?: string }) {
   const ticks = useHarness(plan.id);
   const [diff, setDiff] = useState(false);
   const [error, setError] = useState("");
@@ -17,7 +17,7 @@ export function HarnessSection({ plan, v, parent }: { plan: Plan; v: PlanVersion
   const current = v.n === plan.current;
   const changed = diffLines(before.map(harnessLine), list.map(harnessLine)).filter((l) => l.op !== "same");
   return (
-    <Section id="plan.harness" title="Harness" extra={all ? `${done} of ${all} approved` : "none yet"}>
+    <Section id="plan.harness" title="Harness" stale={stale} extra={all ? `${done} of ${all} approved` : "none yet"}>
       {all === 0 && <p className="muted small">No harness yet. The session lists it in Explore: the tools and context each step needs, and each step's check.</p>}
       {parent && changed.length > 0 && (
         <button className={diff ? "chip on" : "chip"} onClick={() => setDiff(!diff)}>Changes from v{parent.n} ({changed.length})</button>

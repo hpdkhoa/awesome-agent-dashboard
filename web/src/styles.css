@@ -77,11 +77,17 @@ button.danger { border-color: var(--bad); background: var(--danger-bg); color: v
 
 .app {
   display: grid;
-  grid-template-columns: 320px 1fr 300px;
+  grid-template-columns: 320px 6px 1fr 6px 300px; /* set live from layout.ts: the panels resize and hide */
   grid-template-rows: auto 1fr;
-  grid-template-areas: "top top top" "side main usage";
+  grid-template-areas: "top top top top top" "side gl main gr usage";
   height: 100vh;
 }
+.gutter { background: transparent; cursor: col-resize; }
+.gutter:hover, .gutter:active { background: var(--accent); }
+.gl { grid-area: gl; }
+.gr { grid-area: gr; }
+.app > [hidden] { display: none; }
+.panel-btn { padding: 0 8px; font-size: 16px; line-height: 1.2; }
 .top { grid-area: top; display: flex; gap: 16px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--card); flex-wrap: wrap; }
 .top .right { margin-left: auto; }
 .stat { font-size: 13px; }
@@ -126,6 +132,16 @@ button.pill.wait { background: var(--wait); color: var(--wait-fg); border-color:
 .ok-fg { color: var(--live); }
 .part-kinds { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .step-row { border-top: 1px solid var(--line); padding: 8px 0; }
+/* the plan's update check: an amber mark on a section whose data is behind the current version (planStale.ts) */
+.sec.stale > .sec-wrap > .sec-head .sec-title::after { content: " ● behind"; color: var(--wait-fg); font-size: 11px; }
+.stale-note { color: var(--wait-fg); font-size: 11px; margin-left: 6px; }
+.check-list { list-style: none; padding: 0; margin: 6px 0; }
+.check-list li { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; border-bottom: 1px solid var(--line); }
+.check-list .dot { margin-top: 0; }
+.check-list .dot.ok { background: var(--live); border-color: var(--live); }
+.check-list .dot.stale { background: var(--wait-fg); border-color: var(--wait-fg); }
+.result-card { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin: 6px 0; background: var(--card); }
+.result-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .step-actions { display: inline-flex; gap: 4px; margin-left: 6px; vertical-align: middle; }
 .step-actions .chip { padding: 0 8px; font-size: 12px; }
 .float-ask { position: fixed; transform: translateX(-50%); z-index: 20; padding: 3px 10px; border-radius: 999px; background: var(--accent); color: #fff; border: none; font-size: 12px; box-shadow: 0 2px 6px rgba(0,0,0,.3); }
@@ -201,7 +217,8 @@ thead td { border-bottom: 1px solid var(--line); }
 td + td { padding-left: 12px; }
 
 @media (max-width: 900px) {
-  .app { grid-template-columns: 1fr; grid-template-areas: "top" "side" "main" "usage"; height: auto; }
+  .app { grid-template-columns: 1fr !important; grid-template-areas: "top" "side" "main" "usage"; height: auto; }
+  .gutter, .panel-btn { display: none; }
   .side, .usage { border: none; }
   .side { max-height: 50vh; }
   .main { padding: 16px; }

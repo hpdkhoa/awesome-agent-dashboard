@@ -9,7 +9,7 @@ import { Section } from "./Section";
 // The approved files of the version shown, from planGenerated/<plan id>, one fold per kind; pictures show inline.
 const PIC = /\.(png|jpe?g|gif|webp|svg|avif|bmp)$/i;
 
-export function GeneratedSection({ plan, v }: { plan: Plan; v: PlanVersion }) {
+export function GeneratedSection({ plan, v, stale }: { plan: Plan; v: PlanVersion; stale?: string }) {
   const rec = usePlanGenerated(plan.id);
   const files = rec?.versions?.[`v${v.n}`] ?? [];
   // earlier versions' files stay with their own version; listed closed, newest first
@@ -19,7 +19,7 @@ export function GeneratedSection({ plan, v }: { plan: Plan; v: PlanVersion }) {
   const kinds = [...new Set(files.map((f) => f.kind))].sort(
     (a, b) => KINDS.findIndex((k) => k.id === a) - KINDS.findIndex((k) => k.id === b));
   return (
-    <Section id="plan.generated" title="Generated" extra={files.length ? `${files.length} approved · supplement to v${v.n}` : `none for v${v.n}`}>
+    <Section id="plan.generated" title="Generated" stale={stale} extra={files.length ? `${files.length} approved · supplement to v${v.n}` : `none for v${v.n}`}>
       {files.length === 0 && <p className="muted small">No approved files for this version. Generate, then approve the final result.</p>}
       {earlier.length > 0 && (
         <details className="gen-kind">
