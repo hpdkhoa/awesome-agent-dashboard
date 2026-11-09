@@ -3,7 +3,7 @@ import { signOut } from "firebase/auth";
 import { auth } from "./firebase";
 import { RECENT_DAYS, useInbox, useMachines, usePlans, useRuns, useSessions, useUsage, useWorkTypes, type Run, type Session, type Tokens } from "./data";
 import { MessageBox, ModeSwitch, PlanFromSession, RunList, StartForm } from "./Runs";
-import { PlanList, PlanView } from "./Plans";
+import { PlanBoard, PlanList, PlanView } from "./Plans";
 import { usePush, type PushState } from "./notify";
 import { FileViewer, PcText } from "./FileView";
 import { SpendChart } from "./Charts";
@@ -206,8 +206,11 @@ export function Dashboard() {
           </>
         ) : tab === "plans" ? (
           plan ? (
-            <PlanView key={plan.id} plan={plan} items={inbox} session={sessions.find((s) => s.id === plan.sessionId)} runs={runs ?? []}
-              onOpenItem={openItem} />
+            <>
+              <PlanBoard plans={shownPlans} items={inbox} picked={plan.id} onPick={setPickedPlan} />
+              <PlanView key={plan.id} plan={plan} items={inbox} session={sessions.find((s) => s.id === plan.sessionId)} runs={runs ?? []}
+                onOpenItem={openItem} />
+            </>
           ) : (
             <p className="muted">No plans yet.</p>
           )

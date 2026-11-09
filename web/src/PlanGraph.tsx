@@ -168,7 +168,7 @@ function Panel({ plan, versions, asked, pick, onOpenItem }: {
                 </td>
                 <td className="small">
                   {q.status === "open" ? <span className="wait-fg">waiting for you</span> : q.answer ? chip({ id: q.id, title: q.title, choice: q.answer.choice, text: q.answer.text }) : q.status}
-                  {q.answer && plan.status === "open" && q.kind === "question" && (
+                  {q.answer && q.kind === "question" && (
                     <>
                       <br />
                       <Reopen q={q} />

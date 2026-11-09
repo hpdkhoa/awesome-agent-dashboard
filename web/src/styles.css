@@ -236,3 +236,18 @@ td + td { padding-left: 12px; }
 /* The plan's Generated section (GeneratedView.tsx): approved files, pictures inline. */
 .gen-figure { margin: 10px 0; }
 .gen-figure img { max-width: 100%; height: auto; border: 1px solid var(--line, #3a3a3a); border-radius: 8px; background: #1a1a1a; }
+
+/* Plan status and phase (2026-11-09): pills, the status bar and the board by phase */
+.pill { display: inline-block; padding: 0 7px; border-radius: 999px; font-size: 11px; line-height: 16px; border: 1px solid var(--line); }
+.pill.open { background: var(--live); border-color: var(--live); color: #fff; }
+.pill.closed { color: var(--muted); }
+.pill.phase { border-color: var(--accent); color: var(--accent); }
+.status-bar { margin: 8px 0; padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; }
+.status-bar .chips { margin: 4px 0; }
+.board { display: grid; grid-template-columns: repeat(5, minmax(150px, 1fr)); gap: 8px; overflow-x: auto; margin: 8px 0; }
+.board-col { border: 1px solid var(--line); border-radius: 10px; padding: 6px; min-height: 60px; }
+.board-head { font-weight: 600; font-size: 13px; margin-bottom: 6px; }
+.board-card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 6px; margin-bottom: 6px; cursor: pointer; }
+.board-card.on { border-color: var(--accent); }
+.board-card.closed { opacity: 0.7; }
+.board-card .chip { margin-top: 4px; padding: 0 8px; font-size: 12px; }

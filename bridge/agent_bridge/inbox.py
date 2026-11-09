@@ -222,10 +222,13 @@ class Inbox:
         self.beats = 0  # the heartbeat is made once; after that it is only updated, so a deleted one stays deleted
 
     def open_plan(self) -> dict | None:
-        """This session's open plan, the newest if there are several."""
+        """This session's plan: the newest, open or closed. Closed is only a label the owner sets on the page; it never
+        stops work on the plan (the owner's words, 2026-11-09: "make the close plan is just a status, phase can be move
+        back and forth by me so no blocking my action"; choice "Join the newest plan, any status"). A plan moved to the
+        latest format (upgradedTo) is left out: its work goes on in the new plan."""
         if self.session_id == "unknown":
             return None
-        plans = [p for p in self.store.where("plans", "sessionId", self.session_id) if p.get("status") == "open"]
+        plans = [p for p in self.store.where("plans", "sessionId", self.session_id) if not p.get("upgradedTo")]
         return max(plans, key=lambda p: p.get("createdAt", ""), default=None)
 
     def plan_start(self, title: str, text: str = "", note: str = "", parts: dict | None = None, source: str = "",
@@ -384,9 +387,6 @@ class Inbox:
         if ok and sw.get("commandId"):
             self.store.update(f"commands/{sw['commandId']}", {"switchedTo": sw.get("to")})
         return ok
-
-    def plan_close(self, plan_id: str, note: str = "") -> None:
-        self.store.update(f"plans/{plan_id}", {"status": "done", "closeNote": redact(note, 400), "updatedAt": now_iso()})
 
     def post(self, kind: str, title: str, text: str, options: list[dict] | None = None,
              recommended: int | None = None, files: list[str] | None = None, extra: dict | None = None) -> str:
@@ -586,9 +586,9 @@ def server():
         instructions=(
             "The owner's dashboard inbox. Post a decision the owner must make with inbox_ask (give options and mark "
             "the one you recommend), a result to review with inbox_result, and an idea with inbox_suggest. For planning "
-            "with rounds of questions, open a plan with plan_start, post each new version with plan_version, and close "
-            "it with plan_close: every question you ask while it is open joins the round of its current version. "
-            "While a plan is open, every option of every question carries an example (before and after pictures, a "
+            "with rounds of questions, open a plan with plan_start, post each new version with plan_version. Only the "
+            "owner closes or reopens a plan, on the page; closed is a label and never stops work on it. Every question "
+            "you ask joins the round of your plan's current version. While a plan is yours, every option of every question carries an example (before and after pictures, a "
             "code diff with a benchmark, or a draft). A plan with parts makes a new version only when its data "
             "changes; report work on a step with step_update, which never makes a plan version. A plan has a phase: "
             "explore, build, verify, remove, optimize. Every plan starts in explore, where no step runs. Only the "
@@ -728,7 +728,7 @@ def server():
                            phase: str = "", order: str = "", harness: list | None = None) -> str:
         """Post the next version of the plan (the whole text, markdown, or for a plan with parts the whole six parts).
         Only when the plan's data changes; a step moving is step_update. note: one line on what changed and which
-        answers or message caused it. plan_id: this session's open plan when empty. parent: the version it grows
+        answers or message caused it. plan_id: this session's plan when empty. parent: the version it grows
         from; leave it out for the current one, or give an older one when the owner reopened an answer (a branch).
         phase: explore, build, verify, remove or optimize. Only the owner moves a phase, forward or back: when the owner
         orders a move, call this with phase and order (the owner's words), and leave text and parts out for a plain
@@ -737,7 +737,7 @@ def server():
         page. Left out, the list stays as it was."""
         plan_id = plan_id or ((await asyncio.to_thread(inbox.open_plan)) or {}).get("id", "")
         if not plan_id:
-            return "No open plan in this session. Open one with plan_start."
+            return "No plan in this session. Open one with plan_start."
         try:
             n = await asyncio.to_thread(inbox.plan_version, plan_id, text, note, None if parent < 0 else parent, None, parts,
                                       "", phase, order, harness)
@@ -756,7 +756,7 @@ def server():
         numbers, what is open). A step version; never a plan version. Questions asked while a step is now join it."""
         plan_id = plan_id or ((await asyncio.to_thread(inbox.open_plan)) or {}).get("id", "")
         if not plan_id:
-            return "No open plan in this session."
+            return "No plan in this session."
         try:
             n = await asyncio.to_thread(inbox.step_update, plan_id, step_id, state, reply)
         except ValueError as e:
@@ -776,15 +776,6 @@ def server():
         ok = await asyncio.to_thread(inbox.confirm_switch, item_id)
         return text + ("\nThe owner confirmed the switch: make the change now with plan_version." if ok else
                        "\nNo switch: answer only, change nothing.")
-
-    @mcp.tool()
-    async def plan_close(note: str = "", plan_id: str = "") -> str:
-        """Close the plan when the owner approved it or it ended. plan_id: this session's open plan when empty."""
-        plan_id = plan_id or ((await asyncio.to_thread(inbox.open_plan)) or {}).get("id", "")
-        if not plan_id:
-            return "No open plan in this session."
-        await asyncio.to_thread(inbox.plan_close, plan_id, note)
-        return f"Closed plan {plan_id}."
 
     @mcp.tool()
     async def inbox_suggest(title: str, suggestion: str) -> str:

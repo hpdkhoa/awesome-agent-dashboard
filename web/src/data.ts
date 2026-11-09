@@ -89,7 +89,7 @@ export type Example =
 // inbox with planId and round.
 export type Plan = {
   id: string; title: string; sessionId: string; machine: string; cwd: string; workType: string;
-  status: "open" | "done"; current: number; createdAt: string; updatedAt: string; closeNote?: string;
+  status: "open" | "done" | "closed"; current: number; createdAt: string; updatedAt: string; closeNote?: string; // "done": the old word for closed
   format?: number; // plan format number (bridge inbox.py PLAN_FORMAT); none: 1 with parts, else 0
   upgradedTo?: string; // the plan in the latest format this older plan moved to (bridge runs.py _upgrade_first)
   chosen?: number; // the version on the chosen line (default: the newest)
@@ -258,6 +258,11 @@ export const reopenItem = (item: InboxItem, choice: string, text: string) =>
     history: [...(item.history ?? []), ...(item.answer ? [item.answer] : [])],
     answer: { choice, text, at: new Date().toISOString() },
   });
+// Close or reopen a plan: only the owner, on the page (2026-11-09, choice "Only you"). Closed is a label; nothing on
+// the plan stops ("make the close plan is just a status ... no blocking my action").
+export const setPlanStatus = (planId: string, status: "open" | "closed") =>
+  updateDoc(doc(db, "plans", planId), { status, updatedAt: new Date().toISOString() });
+export const isClosed = (p: Pick<Plan, "status">) => p.status !== "open";
 export const chooseVersion = (planId: string, n: number) => updateDoc(doc(db, "plans", planId), { chosen: n });
 export const useRuns = () => useCollection<Run>("commands", orderBy("createdAt", "desc"), limit(100));
 

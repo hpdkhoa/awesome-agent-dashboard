@@ -155,8 +155,15 @@ def test_plan_rounds_follow_its_versions():
     assert store.docs[f"inbox/{q1}"]["round"] == 2
     assert store.docs[f"planVersions/{pid}_v3"]["note"] == "Q1 picked B"
     assert store.docs[f"plans/{pid}"]["current"] == 3
-    ib.plan_close(pid, "approved")
-    assert "planId" not in store.docs[f"inbox/{ib.post('question', 'later', 'x')}"]
+    # closed is only a label the owner sets on the page: the plan keeps its questions and phase moves
+    store.update(f"plans/{pid}", {"status": "closed"})
+    q2 = ib.post("question", "later", "x", [{"label": "C", "differs": "d", "example": {"type": "text", "draft": "x"}}])
+    assert store.docs[f"inbox/{q2}"]["planId"] == pid and store.docs[f"inbox/{q2}"]["round"] == 3
+    assert ib.plan_version(pid, "", "to build", phase="build", order="Move the plan to phase Build.") == 4
+    assert store.docs[f"plans/{pid}"]["phase"] == "build" and store.docs[f"plans/{pid}"]["status"] == "closed"
+    # a plan moved to the latest format hands its questions to the new plan
+    store.update(f"plans/{pid}", {"upgradedTo": "newer"})
+    assert "planId" not in store.docs[f"inbox/{ib.post('question', 'after', 'x')}"]
 
 
 def test_only_this_sessions_open_plan_takes_questions():

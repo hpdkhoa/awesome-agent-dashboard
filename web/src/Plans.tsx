@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { sendApproveGenerated, sendGenerate, usePlanGenerated, sendPhaseOrder, sendPlanCheck, usePlanVersions, type InboxItem, type Plan, type Run, type Session } from "./data";
+import { isClosed, setPlanStatus, sendApproveGenerated, sendGenerate, usePlanGenerated, sendPhaseOrder, sendPlanCheck, usePlanVersions, type InboxItem, type Plan, type Run, type Session } from "./data";
 import { approvals, approvedFiles, checkGenerate, generateFolder, generatePrompt, relPath, versionFolderOf, KINDS, kindName, lastOrder, resumePrompt, type GenerateCheck, type Kind } from "./planCheck";
 import { openFile } from "./FileView";
 import { HarnessSection } from "./HarnessView";
@@ -25,11 +25,11 @@ export function PlanList({ plans, items, picked, onPick }: { plans: Plan[]; item
         const waiting = items.filter((i) => i.planId === p.id && isWaiting(i)).length;
         return (
           <li key={p.id} className={p.id === picked ? "row on" : "row"} onClick={() => onPick(p.id)}>
-            <span className={waiting ? "dot wait" : p.status === "open" ? "dot live" : "dot"} />
+            <span className={waiting ? "dot wait" : isClosed(p) ? "dot" : "dot live"} />
             <div className="grow">
               <div className="title">{p.title}</div>
               <div className="muted small">
-                v{p.current} · {p.workType} · {p.status === "open" ? "open" : "done"}
+                <StatusChips plan={p} />v{p.current} · {p.workType}
                 {waiting > 0 && ` · ${waiting} waiting for you`}
               </div>
             </div>
@@ -113,9 +113,7 @@ function GenerateBox({ plan, items, runs }: { plan: Plan; items: InboxItem[]; ru
             {c.missing.length > 0 ? (
               <button className="primary" disabled={going} onClick={() => generate(c.missing, c.order.note)}>{going ? "Sent" : "Make the missing"}</button>
             ) : (
-              plan.status === "open" && (
-                <button className="chip" disabled={going} onClick={() => sendPlanCheck(plan, resumePrompt).catch(fail)}>{going ? "Sent" : "Resume the plan"}</button>
-              )
+              <button className="chip" disabled={going} onClick={() => sendPlanCheck(plan, resumePrompt).catch(fail)}>{going ? "Sent" : "Resume the plan"}</button>
             )}
             {open.length > 0 && (
               <button className="primary" disabled={approving || pending.length === 0} onClick={approve}>
@@ -132,30 +130,85 @@ function GenerateBox({ plan, items, runs }: { plan: Plan; items: InboxItem[]; ru
   );
 }
 
-// Where the plan is, and the owner's buttons to move it, forward or back (phases.ts). Only the owner moves a phase.
-function PhaseBar({ plan, runs }: { plan: Plan; runs: Run[] }) {
+// The plan's status and phase as two small chips (list rows).
+export function StatusChips({ plan }: { plan: Plan }) {
+  return (
+    <>
+      <span className={isClosed(plan) ? "pill closed" : "pill open"}>{isClosed(plan) ? "Closed" : "Open"}</span>{" "}
+      <span className="pill phase">{phaseName(phaseOf(plan))}</span>{" "}
+    </>
+  );
+}
+
+// The status bar on each plan (the owner's choice, 2026-11-09, "Both"): Status Open or Closed, set only by the owner;
+// Phase as five steps, the current one lit, any other one a Move or Back order (phases.ts). Closed is a label only:
+// every button works on a closed plan ("phase can be move back and forth by me so no blocking my action").
+function StatusBar({ plan, runs }: { plan: Plan; runs: Run[] }) {
   const [error, setError] = useState("");
   const now = phaseOf(plan);
   const at = PHASES.findIndex((p) => p.id === now);
   const going = runs.some((r) => r.planId === plan.id && r.phaseOrder && (r.status === "new" || r.status === "running"));
+  const fail = (e: unknown) => setError(String((e as { code?: string })?.code ?? e));
+  const closed = isClosed(plan);
   return (
-    <div className="phase-bar">
-      <p className="small">
-        <b>Phase: {phaseName(now)}</b> <span className="muted">· {PHASES[at]?.means}</span>
-      </p>
-      {plan.status === "open" && (
-        <div className="chips">
-          {PHASES.filter((p) => p.id !== now).map((p, i) => (
-            <button key={p.id} className="chip" disabled={going} title={p.means}
-              onClick={() => sendPhaseOrder(plan, phasePrompt(p.id), phaseOrder(p.id)).catch((e) => setError(String(e?.code ?? e)))}>
-              {PHASES.findIndex((x) => x.id === p.id) < at ? `Back to ${p.name}` : `Move to ${p.name}`}
-            </button>
-          ))}
-          {going && <span className="small muted">Order sent</span>}
-        </div>
-      )}
+    <div className="phase-bar status-bar">
+      <div className="chips">
+        <b className="small">Status</b>
+        <button className={!closed ? "chip on" : "chip"} disabled={!closed} onClick={() => setPlanStatus(plan.id, "open").catch(fail)}>Open</button>
+        <button className={closed ? "chip on" : "chip"} disabled={closed} onClick={() => setPlanStatus(plan.id, "closed").catch(fail)}>Closed</button>
+        <span className="small muted">a label only: nothing on the plan stops</span>
+      </div>
+      <div className="chips">
+        <b className="small">Phase</b>
+        {PHASES.map((p, i) => (
+          <button key={p.id} className={p.id === now ? "chip on" : "chip"} disabled={going || p.id === now} title={p.means}
+            onClick={() => sendPhaseOrder(plan, phasePrompt(p.id), phaseOrder(p.id)).catch(fail)}>
+            {p.id === now ? p.name : i < at ? `Back to ${p.name}` : `Move to ${p.name}`}
+          </button>
+        ))}
+        {going && <span className="small muted">Order sent</span>}
+      </div>
+      <p className="small muted">{phaseName(now)}: {PHASES[at]?.means}</p>
       {error && <p className="bad small">{error}</p>}
     </div>
+  );
+}
+
+// The board of every plan by phase (the owner's choice, 2026-11-09, "Both"): five columns, one card per plan with its
+// status; Close or Reopen on the card, a click on the card opens the plan.
+export function PlanBoard({ plans, items, picked, onPick }: { plans: Plan[]; items: InboxItem[]; picked?: string; onPick: (id: string) => void }) {
+  const [error, setError] = useState("");
+  const fail = (e: unknown) => setError(String((e as { code?: string })?.code ?? e));
+  const open = plans.filter((p) => !isClosed(p)).length;
+  return (
+    <Section id="plans.board" title={`Board: ${plans.length} plans, ${open} open, ${plans.length - open} closed`}>
+      <div className="board">
+        {PHASES.map((ph) => {
+          const col = plans.filter((p) => phaseOf(p) === ph.id);
+          return (
+            <div key={ph.id} className="board-col">
+              <div className="board-head" title={ph.means}>{ph.name} <span className="muted">{col.length}</span></div>
+              {col.map((p) => {
+                const waiting = items.filter((i) => i.planId === p.id && isWaiting(i)).length;
+                return (
+                  <div key={p.id} className={(p.id === picked ? "board-card on" : "board-card") + (isClosed(p) ? " closed" : "")} onClick={() => onPick(p.id)}>
+                    <div className="small">{p.title}</div>
+                    <div className="small muted">
+                      <span className={isClosed(p) ? "pill closed" : "pill open"}>{isClosed(p) ? "Closed" : "Open"}</span> v{p.current}
+                      {waiting > 0 && <span className="wait-fg"> · {waiting} waiting</span>}
+                    </div>
+                    <button className="chip" onClick={(e) => (e.stopPropagation(), setPlanStatus(p.id, isClosed(p) ? "open" : "closed").catch(fail))}>
+                      {isClosed(p) ? "Reopen" : "Close"}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
+      </div>
+      {error && <p className="bad small">{error}</p>}
+    </Section>
   );
 }
 
@@ -170,7 +223,7 @@ export function PlanView({ plan, items, session, runs = [], onOpenItem }: {
     <article>
       <h1>{plan.title}</h1>
       <p className="meta">
-        Plan · v{plan.current} · {plan.status === "open" ? "open" : "done"} · {plan.workType} · updated {when(plan.updatedAt)}
+        Plan · v{plan.current} · {isClosed(plan) ? "closed" : "open"} · {plan.workType} · updated {when(plan.updatedAt)}
         <br />
         from session: {session?.title ?? plan.sessionId}
         {plan.closeNote && (
@@ -193,7 +246,7 @@ export function PlanView({ plan, items, session, runs = [], onOpenItem }: {
           </button>
         ))}
       </div>
-      <PhaseBar plan={plan} runs={runs} />
+      <StatusBar plan={plan} runs={runs} />
       <GenerateBox plan={plan} items={items} runs={runs} />
       {versions && plan.kind !== "parts" && (() => {
         const cur = versions.find((x) => x.n === plan.current);

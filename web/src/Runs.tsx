@@ -32,7 +32,7 @@ Open the plan with plan_start (a short title). Make images, diagrams, mockups, s
 asks. When an option changes what the owner will see (a screen, a layout, a picture), its example is an image example
 with before and after pictures. Ask each round of questions with inbox_ask, with options and one marked
 recommended. After each round, post the whole plan with plan_version and one line on what changed. Keep asking until
-the owner agrees, then close it with plan_close. Keep the whole plan in this one session.`;
+the owner agrees. Only the owner closes a plan, on the page. Keep the whole plan in this one session.`;
 
 export function StartForm({ machines, plan = false }: { machines: Machine[]; plan?: boolean }) {
   const folders = machines.flatMap((m) => (m.folders ?? []).map((f) => ({ ...f, machine: m.name })));

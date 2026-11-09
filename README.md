@@ -84,9 +84,11 @@ time, the session's own question box opens. Add it once to `~/.claude/settings.j
 
 For planning with rounds of questions, a session opens a plan with `plan_start` (or the page starts one: "Start a
 plan" on the Plans tab runs one session with a folder and a topic), posts each new version with
-`plan_version` (the whole text and one line on what changed), and closes it with `plan_close`. Every question the
-session asks while the plan is open, with `inbox_ask` or its own question box, joins the round of the version it was
-asked on. The Plans tab shows each version, then its questions and your answers, in order (List), or as a tree
+`plan_version` (the whole text and one line on what changed). Every question the session asks, with `inbox_ask` or
+its own question box, joins the round of its newest plan's current version. Only you close or reopen a plan, on the
+page; closed is a label and nothing on the plan stops (phase moves, Resume, reopened answers all work). The Plans tab
+has a board by phase (five columns, a card per plan with Open or Closed, Close or Reopen on the card), and each plan
+has a status bar: Status Open or Closed, and Phase as five steps with the current one lit. The Plans tab shows each version, then its questions and your answers, in order (List), or as a tree
 (Graph): each version keeps its parent and the answers that made it, as they were then. Reopen an answer on the page and
 the session branches the plan from the version that question was asked on; old branches stay, dashed, and one click
 chooses a branch. A card per step shows only your answers, with the session's work (its note and the lines it changed)
