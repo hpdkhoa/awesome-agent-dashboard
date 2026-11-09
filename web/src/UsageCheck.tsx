@@ -62,7 +62,7 @@ function ClaudeBlock() {
     <div className="ucheck">
       <div className="ucheck-head">
         <b>Claude plan</b>
-        <button className="chip" disabled={busy} onClick={check}>{busy ? "Checking" : "Check Claude"}</button>
+        <button className="primary" disabled={busy} onClick={check}>{busy ? "Checking" : "Check Claude"}</button>
       </div>
       {typeof got === "string" && <p className="bad small">{got}</p>}
       {got && typeof got !== "string" && (
@@ -108,7 +108,7 @@ function FirestoreBlock() {
     <div className="ucheck">
       <div className="ucheck-head">
         <b>Firestore</b>
-        <button className="chip" disabled={busy} onClick={check}>{busy ? "Checking" : "Check Firestore"}</button>
+        <button className="primary" disabled={busy} onClick={check}>{busy ? "Checking" : "Check Firestore"}</button>
       </div>
       {typeof got === "string" && <p className="bad small">{got}</p>}
       {t && tier && (

@@ -95,9 +95,9 @@ function StepActions({ step }: { step: Parts["steps"][number] }) {
   const q = quoteStep(step);
   return (
     <span className="step-actions">
-      <button className="chip" title="Ask about this step: Q&A, nothing changes" onClick={() => askAbout({ text: q, kind: "qa", stepId: step.id })}>Ask</button>
-      <button className="chip" title="Change this step: a new plan version" onClick={() => askAbout({ text: q, kind: "step", stepId: step.id })}>Change</button>
-      <button className="chip" title="Put this step, quoted, in the message box" onClick={() => askAbout({ text: q, stepId: step.id })}>Quote</button>
+      <button className="chip second" title="Ask about this step: Q&A, nothing changes" onClick={() => askAbout({ text: q, kind: "qa", stepId: step.id })}>Ask</button>
+      <button className="chip second" title="Change this step: a new plan version" onClick={() => askAbout({ text: q, kind: "step", stepId: step.id })}>Change</button>
+      <button className="chip second" title="Put this step, quoted, in the message box" onClick={() => askAbout({ text: q, stepId: step.id })}>Quote</button>
     </span>
   );
 }
@@ -107,8 +107,8 @@ function PartActions({ k, name, lines }: { k: string; name: string; lines: strin
   const q = quotePart(name, lines);
   return (
     <span className="step-actions">
-      <button className="chip" title="Ask about this part: Q&A, nothing changes" onClick={() => askAbout({ text: q, kind: "qa", part: k })}>Ask</button>
-      <button className="chip" title="Put this part, quoted, in the message box" onClick={() => askAbout({ text: q, part: k })}>Quote</button>
+      <button className="chip second" title="Ask about this part: Q&A, nothing changes" onClick={() => askAbout({ text: q, kind: "qa", part: k })}>Ask</button>
+      <button className="chip second" title="Put this part, quoted, in the message box" onClick={() => askAbout({ text: q, part: k })}>Quote</button>
     </span>
   );
 }
@@ -187,7 +187,7 @@ function RunStep({ plan, step, runs, harness }: { plan: Plan; step: Parts["steps
   const explore = phaseOf(plan) === "explore"; // no step runs before the owner moves the plan to Build
   return (
     <>
-      <button className="chip" disabled={going || explore} title={explore ? "Off in Explore: move the plan to Build first" : undefined} onClick={() => runStep(plan, step, harness).catch((e) => setError(String(e?.code ?? e)))}>
+      <button className="chip primary" disabled={going || explore} title={explore ? "Off in Explore: move the plan to Build first" : undefined} onClick={() => runStep(plan, step, harness).catch((e) => setError(String(e?.code ?? e)))}>
         {going ? "Running" : "Run step"}
       </button>
       {error && <span className="bad small"> {error}</span>}

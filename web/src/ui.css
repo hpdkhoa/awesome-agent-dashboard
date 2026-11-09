@@ -38,10 +38,17 @@
 .main h1 { font-size: 22px; margin-bottom: 4px; }
 .meta { color: var(--muted); font-size: 12px; margin: 0 0 14px; line-height: 1.6; }
 .run-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.status { font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); }
-.status.running, .status.new { border-color: var(--live); color: var(--live); }
-.status.waiting, .status.paused { border-color: var(--wait-fg); color: var(--wait-fg); }
-.status.failed, .status.lost { border-color: var(--bad); color: var(--bad); }
+/* a run's status: a coloured dot and plain text, no box (the owner's words, 2026-11-10: the button must look
+   different from a text like "paused until 11:50pm") */
+.status { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted); }
+.status::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+.status.running, .status.new { color: var(--live); }
+.status.running::before, .status.new::before { background: var(--live); }
+.status.waiting, .status.paused { color: var(--wait-fg); }
+.status.waiting::before, .status.paused::before { background: var(--wait-fg); }
+.status.failed, .status.lost { color: var(--bad); }
+.status.failed::before, .status.lost::before { background: var(--bad); }
+.status.done::before { background: var(--accent); }
 .label { font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
 textarea { line-height: 1.5; }
 textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
