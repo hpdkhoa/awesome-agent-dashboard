@@ -43,14 +43,14 @@ export async function ticket(path: string, cwd: string): Promise<Ticket> {
 export type PcTurn = { n: number; at: string; prompt: string; chars: number };
 export type PcReply = { text: string; chars: number; n?: number; at?: string; prompt?: string; turns?: PcTurn[]; isError?: boolean };
 
-export type PcReplyRef = { session: string; item: string; k: number };
-export async function pcText(body: { session?: string; turn?: number; run?: string; reply?: PcReplyRef }): Promise<PcReply> {
+// One signed call to the bridge on the PC (POST /text, POST /usage): the answer is shown, never stored.
+export async function bridgePost<T>(path: string, body: unknown): Promise<T> {
   const url = await filesUrl();
   if (!url) throw new Error("The file viewer is off: set FILES_URL on the bridge.");
   const token = await auth.currentUser?.getIdToken();
   let r: Response;
   try {
-    r = await fetch(url + "/text", {
+    r = await fetch(url + path, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -60,8 +60,11 @@ export async function pcText(body: { session?: string; turn?: number; run?: stri
   }
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j.error ?? `The bridge answered ${r.status}.`);
-  return j;
+  return j as T;
 }
+
+export type PcReplyRef = { session: string; item: string; k: number };
+export const pcText = (body: { session?: string; turn?: number; run?: string; reply?: PcReplyRef }) => bridgePost<PcReply>("/text", body);
 
 // A session's reply (any turn, the last one first) or a run's result, whole, from the PC.
 export function PcText({ session, run, reply, cwd }: { session?: string; run?: string; reply?: PcReplyRef; cwd: string }) {

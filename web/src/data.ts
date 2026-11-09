@@ -180,10 +180,18 @@ export type Run = {
   error?: string;
 };
 
+// This page tab's own document reads since it loaded (each changed document a listener delivers is one read), for the
+// Firestore usage check (UsageCheck.tsx). The hooks below count what they receive; a few small hooks do not, so it is a floor.
+let reads = 0;
+export const pageReads = () => reads;
+export const countReads = (n: number) => {
+  reads += n;
+};
+
 function useCollection<T>(name: string, ...constraints: QueryConstraint[]): T[] | null {
   const [rows, setRows] = useState<T[] | null>(null);
   useEffect(
-    () => onSnapshot(query(collection(db, name), ...constraints), (s) => setRows(s.docs.map((d) => d.data() as T))),
+    () => onSnapshot(query(collection(db, name), ...constraints), (s) => (countReads(s.docChanges().length), setRows(s.docs.map((d) => d.data() as T)))),
     [name],
   );
   return rows;
@@ -200,7 +208,7 @@ export function useSessions(older: boolean): Session[] | null {
     const q = older
       ? query(collection(db, "sessions"), orderBy("lastAt", "desc"), limit(300))
       : query(collection(db, "sessions"), where("lastAt", ">=", since), orderBy("lastAt", "desc"));
-    return onSnapshot(q, (s) => setRows(s.docs.map((d) => d.data() as Session)));
+    return onSnapshot(q, (s) => (countReads(s.docChanges().length), setRows(s.docs.map((d) => d.data() as Session))));
   }, [older]);
   return rows;
 }

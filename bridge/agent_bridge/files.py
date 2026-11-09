@@ -10,6 +10,9 @@ the tunnel. Two calls:
   folder, and returns a ticket URL that works for 10 minutes.
 - GET /t/<ticket>/<path in that root>: the file's bytes. The ticket covers the file's root, so an html page also loads
   its own images and css. Nothing outside WORK_ROOTS is ever served.
+- POST /usage with the owner's token and {what: "claude" | "firestore"}: the Claude plan windows or the bridge's
+  Firestore counts for today (usage.py), never stored (the owner's pick, 2026-11-09: "Both ... two separated button
+  for claude and firestore").
 - POST /text with the owner's token and {session, turn} or {run}: the whole text of a session's turn or of a run's
   result, read from this PC (texts.py), never stored (the owner's choice, 2026-11-08: "do option 3, the dashboard
   only load the file stored on the PC").
@@ -149,7 +152,7 @@ class Files:
         return full if inside(full, root) and os.path.isfile(full) and not secret(full) else None
 
 
-def handler(files: Files, origins: list[str], texts=None):
+def handler(files: Files, origins: list[str], texts=None, usage=None):
     class H(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
@@ -182,7 +185,7 @@ def handler(files: Files, origins: list[str], texts=None):
                                               "Access-Control-Max-Age": "600"})
 
         def do_POST(self):
-            if self.path not in ("/ticket", "/text") or (self.path == "/text" and texts is None):
+            if self.path not in ("/ticket", "/text", "/usage") or (self.path == "/text" and texts is None) or (self.path == "/usage" and usage is None):
                 return self._json(404, {"error": "not found"})
             auth = self.headers.get("Authorization", "")
             try:
@@ -192,6 +195,9 @@ def handler(files: Files, origins: list[str], texts=None):
                 if self.path == "/text":
                     files.verify(auth[7:])
                     return self._json(200, texts.answer(body))
+                if self.path == "/usage":
+                    files.verify(auth[7:])
+                    return self._json(200, usage.answer(body))
                 self._json(200, files.ticket(auth[7:], str(body.get("path", "")), str(body.get("cwd", ""))))
             except ValueError as e:
                 self._json(404 if str(e).startswith("no ") else 400, {"error": str(e)})
@@ -223,9 +229,18 @@ def handler(files: Files, origins: list[str], texts=None):
     return H
 
 
-def serve(files: Files, origins: list[str], port: int, texts=None) -> ThreadingHTTPServer:
-    """Starts the server on 127.0.0.1:port in a daemon thread. texts: a texts.Texts, for POST /text."""
-    srv = ThreadingHTTPServer(("127.0.0.1", port), handler(files, origins, texts))
+def serve(files: Files, origins: list[str], port: int, texts=None, usage=None) -> ThreadingHTTPServer:
+    """Starts the server on 127.0.0.1:port in a daemon thread. texts: a texts.Texts, for POST /text. usage: a
+    usage.UsageCheck for POST /usage; the bridge's default one when texts is given and usage is not."""
+    if usage is None and texts is not None:
+        from . import firestore as fs
+        from .config import data_dir
+        from .usage import Counter, UsageCheck, default_creds_path
+
+        if fs.counter is None:
+            fs.set_counter(Counter(data_dir() / "firestore-usage.json"))
+        usage = UsageCheck(fs.counter, default_creds_path())
+    srv = ThreadingHTTPServer(("127.0.0.1", port), handler(files, origins, texts, usage))
     srv.daemon_threads = True
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv

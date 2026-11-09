@@ -7,6 +7,7 @@ import { PlanBoard, PlanList, PlanView } from "./Plans";
 import { usePush, type PushState } from "./notify";
 import { FileViewer, PcText } from "./FileView";
 import { SpendChart } from "./Charts";
+import { UsageCheck } from "./UsageCheck";
 import { MoreMenu } from "./MoreMenu";
 
 // A tap on a push opens /?item=<inbox id>, /?run=<command id> or /?plan=<plan id> (bridge/agent_bridge/push.py).
@@ -233,6 +234,9 @@ export function Dashboard() {
       <section className="usage">
         <Section id="usage.days" title="Spend by day" extra={`${usage.length} days, whole history`}>
           <SpendChart usage={usage} />
+        </Section>
+        <Section id="usage.check" title="Usage check" extra="Claude plan · Firestore">
+          <UsageCheck />
         </Section>
         <Section id="usage.workTypes" title="By work type" extra={`all ${usage.length} days`}>
         <table>

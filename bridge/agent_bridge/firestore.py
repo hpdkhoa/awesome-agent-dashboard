@@ -42,6 +42,32 @@ def to_value(v) -> dict:
     raise TypeError(f"cannot store {type(v).__name__}")
 
 
+counter = None  # a usage.Counter: the bridge's own reads, writes and deletes today (set once by set_counter)
+
+
+def set_counter(c) -> None:
+    global counter
+    counter = c
+
+
+def count_call(url: str, body, method, result) -> None:
+    """Adds one REST call to the counter: a get is one read, a runQuery one read per document (at least one), a PATCH
+    one write, a commit one write or delete per entry."""
+    if counter is None:
+        return
+    if url.endswith(":runQuery"):
+        counter.add("reads", max(1, sum(1 for r in (result or []) if isinstance(r, dict) and "document" in r)))
+    elif url.endswith(":commit"):
+        writes = (body or {}).get("writes") or []
+        deletes = sum(1 for w in writes if "delete" in w)
+        counter.add("deletes", deletes)
+        counter.add("writes", len(writes) - deletes)
+    elif method == "PATCH":
+        counter.add("writes", 1)
+    elif body is None:
+        counter.add("reads", 1)
+
+
 class Firestore:
     def __init__(self, session: Session):
         self.s = session
@@ -57,9 +83,13 @@ class Firestore:
         )
         try:
             with urllib.request.urlopen(req, timeout=60) as r:
-                return json.load(r)
+                result = json.load(r)
         except urllib.error.HTTPError as e:
+            if body is None and method is None:
+                count_call(url, None, None, None)  # a missing document is still one read
             raise SystemExit(f"Firestore refused ({e.code}): {e.read().decode()[:300]}") from None
+        count_call(url, body, method, result)
+        return result
 
     def check_owner(self) -> None:
         """Reads meta/owner. Only the owner may; anyone else gets 403 here."""

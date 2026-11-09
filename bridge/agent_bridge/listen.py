@@ -51,6 +51,10 @@ class Feed:
         self.opens = 0
 
     def _on_snapshot(self, docs, changes, read_time) -> None:
+        from . import firestore as fs
+
+        if fs.counter is not None:
+            fs.counter.add("reads", max(1, len(changes or [])))  # each changed document delivered is one read
         rows = {d.id: {**(d.to_dict() or {}), "id": d.id} for d in docs}
         with self.lock:
             self.docs = rows
