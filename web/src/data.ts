@@ -156,7 +156,8 @@ export type Run = {
   pausedUntil?: string | null; // plan from a session stopped by the usage limit: when it resets
   reused?: number; // plan from a session: pages whose notes came from an earlier run
   ownerText?: string;
-  stepId?: string; // a Run step message
+  stepId?: string; // a Run step message, or a message asked on one step (Ask, Change, Quote on the step)
+  part?: string; // a message asked on one part of the plan (Ask or Quote on its header, or selected words in it)
   planCheck?: boolean; // sent by the plan's Check button (planCheck.ts)
   generate?: { kinds: Kind[]; note?: string }; // the owner's Generate order (planCheck.ts)
   phaseOrder?: boolean; // the owner's order to move the plan's phase (phases.ts)
@@ -351,11 +352,13 @@ export const planFromSession = (s: Session, goal = "") => {
   });
 };
 // A message on a plan, with its kind; the owner's text is the prompt, the kind goes as a system prompt.
-export const sendPlanMessage = (plan: Plan, kind: PlanKind, text: string) => {
+// on: the step or part the message was asked on (quote.ts); its reply shows there (the owner's pick, 2026-11-09: "Both").
+export const sendPlanMessage = (plan: Plan, kind: PlanKind, text: string, on?: { stepId?: string; part?: string }) => {
   const id = newId();
   return setDoc(doc(db, "commands", id), {
     id, action: "message", machine: plan.machine, sessionId: plan.sessionId, cwd: plan.cwd, prompt: text, ownerText: text,
     kind, planId: plan.id, status: "new", createdAt: new Date().toISOString(),
+    ...(on?.stepId ? { stepId: on.stepId } : {}), ...(on?.part ? { part: on.part } : {}),
   });
 };
 

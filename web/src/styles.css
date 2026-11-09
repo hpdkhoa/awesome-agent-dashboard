@@ -111,6 +111,11 @@ button.danger { border-color: var(--bad); color: var(--bad); }
 .ok-fg { color: var(--live); }
 .part-kinds { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .step-row { border-top: 1px solid var(--line); padding: 8px 0; }
+.step-actions { display: inline-flex; gap: 4px; margin-left: 6px; vertical-align: middle; }
+.step-actions .chip { padding: 0 8px; font-size: 12px; }
+.float-ask { position: fixed; transform: translateX(-50%); z-index: 20; padding: 3px 10px; border-radius: 999px; background: var(--accent); color: #fff; border: none; font-size: 12px; box-shadow: 0 2px 6px rgba(0,0,0,.3); }
+.on-msgs { margin: 6px 0 0 12px; border-left: 2px solid var(--line); padding-left: 10px; }
+.on-msg + .on-msg { margin-top: 8px; }
 .step-state { display: inline-block; min-width: 52px; text-align: center; font-size: 11px; padding: 1px 6px; border-radius: 6px; border: 1px solid var(--line); margin-right: 8px; }
 .step-state.now { color: var(--accent); border-color: var(--accent); }
 .step-state.done { color: var(--live); border-color: var(--live); }

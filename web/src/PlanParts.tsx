@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   PLAN_KINDS, runStep, sendPlanMessage, useHarness, usePlanSteps,
   type InboxItem, type Parts, type Plan, type PlanKind, type PlanVersion, type Run,
 } from "./data";
 import { isWaiting } from "./Inbox";
-import { openFile } from "./FileView";
+import { openFile, PcText } from "./FileView";
+import { askAbout, QUOTE_EVENT, quotePart, quoteStep, quoteWords, type QuoteAsk } from "./quote";
 import { Md } from "./Markdown";
 import { MoreMenu } from "./MoreMenu";
 import { diffLines, linkEntries, PART_NAMES, partLines } from "./planDiff";
@@ -27,18 +28,42 @@ const HINT: Record<PlanKind, string> = {
   lesson: "Which lesson to check, and what you doubt. The session answers with proof.",
 };
 const when = (iso: string) => new Date(iso).toLocaleString();
+const PART_LABEL: Record<string, string> = { ...Object.fromEntries(PART_NAMES), cite: "Cite" };
+type On = { stepId?: string; part?: string };
 
 function PlanMessage({ plan }: { plan: Plan }) {
   const [kind, setKind] = useState<PlanKind>("qa");
   const [text, setText] = useState("");
+  const [on, setOn] = useState<On | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const box = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    // Ask, Change or Quote on a step or a part, or "Ask about this" on selected words (quote.ts): the quote lands here
+    const fill = (e: Event) => {
+      const q = (e as CustomEvent<QuoteAsk>).detail;
+      if (q.kind) setKind(q.kind);
+      setOn(q.stepId || q.part ? { stepId: q.stepId, part: q.part } : null);
+      setText((t) => (t.trim() ? t.trimEnd() + "\n\n" : "") + q.text + "\n\n");
+      setError("");
+      setTimeout(() => {
+        const el = box.current;
+        if (!el) return;
+        el.scrollIntoView({ block: "center", behavior: "smooth" });
+        el.focus();
+        el.setSelectionRange(el.value.length, el.value.length);
+      }, 0);
+    };
+    window.addEventListener(QUOTE_EVENT, fill);
+    return () => window.removeEventListener(QUOTE_EVENT, fill);
+  }, []);
   async function send() {
     if (!text.trim()) return setError("Write a message first.");
     setBusy(true);
     try {
-      await sendPlanMessage(plan, kind, text.trim());
+      await sendPlanMessage(plan, kind, text.trim(), on ?? undefined);
       setText("");
+      setOn(null);
     } catch (e) {
       setError(String((e as { code?: string }).code ?? e));
     }
@@ -51,11 +76,108 @@ function PlanMessage({ plan }: { plan: Plan }) {
           <button key={k} className={kind === k ? "chip on" : "chip"} onClick={() => setKind(k)}>{name}</button>
         ))}
       </div>
-      <textarea rows={3} value={text} placeholder={HINT[kind]} onChange={(e) => (setText(e.target.value), setError(""))} />
+      <textarea ref={box} rows={3} value={text} placeholder={HINT[kind]} onChange={(e) => (setText(e.target.value), setError(""))} />
+      {on && (
+        <p className="small muted">
+          on {on.stepId ? `step ${on.stepId}` : `part ${PART_LABEL[on.part ?? ""] ?? on.part}`}: the reply shows there{" "}
+          <button className="link" onClick={() => setOn(null)}>clear</button>
+        </p>
+      )}
       {error && <p className="bad small">{error}</p>}
       <p className="muted small">It goes to the plan's session with the same wait rule as any message.</p>
       <button className="primary" disabled={busy} onClick={send}>Send as {KIND_NAME[kind]}</button>
     </Section>
+  );
+}
+
+// Ask (Q&A), Change (a step message) or Quote on one step: the step goes quoted into the message box (quote.ts).
+function StepActions({ step }: { step: Parts["steps"][number] }) {
+  const q = quoteStep(step);
+  return (
+    <span className="step-actions">
+      <button className="chip" title="Ask about this step: Q&A, nothing changes" onClick={() => askAbout({ text: q, kind: "qa", stepId: step.id })}>Ask</button>
+      <button className="chip" title="Change this step: a new plan version" onClick={() => askAbout({ text: q, kind: "step", stepId: step.id })}>Change</button>
+      <button className="chip" title="Put this step, quoted, in the message box" onClick={() => askAbout({ text: q, stepId: step.id })}>Quote</button>
+    </span>
+  );
+}
+
+// Ask or Quote on a part's header.
+function PartActions({ k, name, lines }: { k: string; name: string; lines: string[] }) {
+  const q = quotePart(name, lines);
+  return (
+    <span className="step-actions">
+      <button className="chip" title="Ask about this part: Q&A, nothing changes" onClick={() => askAbout({ text: q, kind: "qa", part: k })}>Ask</button>
+      <button className="chip" title="Put this part, quoted, in the message box" onClick={() => askAbout({ text: q, part: k })}>Quote</button>
+    </span>
+  );
+}
+
+// The messages asked on one step or part, with the session's reply read whole from the PC.
+function OnMessages({ runs, plan, where }: { runs: Run[]; plan: Plan; where: On }) {
+  const list = runs
+    .filter((r) => r.planId === plan.id && r.kind && (where.stepId ? r.stepId === where.stepId : r.part === where.part))
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  if (list.length === 0) return null;
+  return (
+    <div className="on-msgs">
+      {list.map((r) => (
+        <div key={r.id} className="on-msg">
+          <p className="small muted">
+            {KIND_NAME[r.kind!]} · {when(r.createdAt)} · <span className={"status " + r.status}>{r.status}</span>
+          </p>
+          <Md text={r.ownerText ?? r.prompt ?? ""} cwd={plan.cwd} />
+          {(r.status === "done" || r.status === "lost") && (
+            <>
+              <p className="label">Reply</p>
+              <PcText run={r.id} cwd={plan.cwd} />
+            </>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Select words anywhere in the plan: a small "Ask about this" button appears at the selection and quotes just them.
+function SelectAsk({ root }: { root: React.RefObject<HTMLDivElement | null> }) {
+  const [at, setAt] = useState<{ x: number; y: number; text: string; stepId?: string; part?: string } | null>(null);
+  useEffect(() => {
+    const look = () => {
+      const sel = document.getSelection();
+      const text = sel?.toString().trim() ?? "";
+      if (!sel || !text || sel.rangeCount === 0 || !root.current) return setAt(null);
+      const range = sel.getRangeAt(0);
+      const node = range.commonAncestorContainer;
+      const el = node.nodeType === 1 ? (node as Element) : node.parentElement;
+      if (!el || !root.current.contains(el) || el.closest("textarea, .on-msgs, .float-ask")) return setAt(null);
+      const rect = range.getBoundingClientRect();
+      const host = el.closest<HTMLElement>("[data-step],[data-part]");
+      setAt({ x: rect.left + rect.width / 2, y: Math.max(8, rect.top - 34), text, stepId: host?.dataset.step, part: host?.dataset.part });
+    };
+    document.addEventListener("selectionchange", look);
+    document.addEventListener("mouseup", look);
+    window.addEventListener("scroll", look, true);
+    return () => {
+      document.removeEventListener("selectionchange", look);
+      document.removeEventListener("mouseup", look);
+      window.removeEventListener("scroll", look, true);
+    };
+  }, [root]);
+  if (!at) return null;
+  return (
+    <button
+      className="float-ask"
+      style={{ left: at.x, top: at.y }}
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={() => {
+        askAbout({ text: quoteWords(at.text), kind: "qa", stepId: at.stepId, part: at.part });
+        document.getSelection()?.removeAllRanges();
+        setAt(null);
+      }}
+    >
+      Ask about this
+    </button>
   );
 }
 
@@ -133,8 +255,10 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
   const before = diff ? parent?.parts : undefined;
   const asked = items.filter((i) => i.planId === plan.id);
   const msgs = runs.filter((r) => r.planId === plan.id || (r.action === "plan" && r.id === plan.source?.commandId));
+  const root = useRef<HTMLDivElement>(null);
   return (
-    <>
+    <div ref={root}>
+      <SelectAsk root={root} />
       <div className="chips">
         {withParts.map((x) => {
           const starts = phaseStarts(withParts).get(x.n);
@@ -159,8 +283,11 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
       <HarnessSection plan={plan} v={v} parent={parent} />
 
       {PART_NAMES.filter(([k]) => k !== "steps").map(([k, name]) => (
-        <Section key={k} id={`plan.part.${k}`} title={name}>
-          <Part k={k} parts={v.parts!} before={before} plan={plan} />
+        <Section key={k} id={`plan.part.${k}`} title={name} tools={<PartActions k={k} name={name} lines={partLines(v.parts!, k)} />}>
+          <div data-part={k}>
+            <Part k={k} parts={v.parts!} before={before} plan={plan} />
+          </div>
+          <OnMessages runs={runs} plan={plan} where={{ part: k }} />
         </Section>
       ))}
 
@@ -171,14 +298,16 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
           const last = sv?.versions[sv.versions.length - 1];
           const qs = asked.filter((i) => i.stepId === st.id);
           return (
-            <div key={st.id} className="step-row">
+            <div key={st.id} className="step-row" data-step={st.id}>
               <div>
                 <span className={"step-state " + (sv?.state ?? "next")}>{sv?.state ?? "next"}</span>
                 <b>{st.id} · {st.title}</b>{st.new && <span className="tag" title="Work the session's record does not hold">new</span>}{" "}
                 <RunStep plan={plan} step={st} runs={runs} harness={harnessNote} />
+                <StepActions step={st} />
                 {sv && <MoreMenu path={`planSteps/${plan.id}_${st.id}`} />}
               </div>
               <Md text={linkEntries(`${st.does}\n\n**Check:** ${st.check}`, plan)} cwd={plan.cwd} />
+              <OnMessages runs={runs} plan={plan} where={{ stepId: st.id }} />
               {last && (
                 <Section id="plan.step.last" title={`Last reply · step version ${last.n}`} extra={when(last.at)}>
                   <Md text={last.reply} cwd={plan.cwd} />
@@ -207,8 +336,12 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
 
       {(v.parts.cite || before?.cite) && (
         // the owner's words, 2026-11-05: "move what the plan read ... out into the cite section like generated section"
-        <Section id="plan.part.cite" title="Cite" extra="your words this plan reads" open={false}>
-          <Part k="cite" parts={v.parts} before={before} plan={plan} />
+        <Section id="plan.part.cite" title="Cite" extra="your words this plan reads" open={false}
+          tools={<PartActions k="cite" name="Cite" lines={partLines(v.parts!, "cite")} />}>
+          <div data-part="cite">
+            <Part k="cite" parts={v.parts} before={before} plan={plan} />
+          </div>
+          <OnMessages runs={runs} plan={plan} where={{ part: "cite" }} />
         </Section>
       )}
 
@@ -229,6 +362,6 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
           </ul>
         </Section>
       )}
-    </>
+    </div>
   );
 }
