@@ -421,7 +421,8 @@ def test_model_and_effort_come_from_the_run_or_the_setting(tmp_path, monkeypatch
 
     assert model_args("opus", "high") == ["--model", "opus", "--effort", "high"]
     assert model_args("", "") == [] and model_args("rm -rf", "huge") == []  # nothing odd reaches the CLI
-    assert start_command("claude", "x", "sid", "manual", "sonnet", "low")[-4:] == ["--model", "sonnet", "--effort", "low"]
+    c = start_command("claude", "x", "sid", "manual", "sonnet", "low")
+    assert c[c.index("--model") + 1] == "sonnet" and c[c.index("--effort") + 1] == "low"
     assert "--model" not in message_command("claude", "hi", "sid")
     store, runs, work = setup(tmp_path, monkeypatch)
     store.put_many({"meta/runs": {"permissionMode": "manual", "model": "opus", "effort": "high"}})
@@ -435,7 +436,7 @@ def test_model_and_effort_come_from_the_run_or_the_setting(tmp_path, monkeypatch
 
 
 def test_a_one_off_start_keeps_no_session():
-    assert start_command("claude", "x", "sid", keep=False)[-1] == "--no-session-persistence"
+    assert "--no-session-persistence" in start_command("claude", "x", "sid", keep=False)
     assert "--no-session-persistence" not in start_command("claude", "x", "sid")
 
 

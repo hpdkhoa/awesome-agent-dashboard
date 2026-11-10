@@ -125,17 +125,12 @@ def system_args(kind: str = "", step: str = "") -> list[str]:
     text = STYLE
     extra: list[str] = []
     if kind in KIND_PROMPTS:
-        text += "
-
-" + KIND_PROMPTS[kind] + EXAMPLES
+        text += "\n\n" + KIND_PROMPTS[kind] + EXAMPLES
         if kind == "qa":
             extra = ["--disallowedTools", NO_EDITS]
     elif step:
-        text += "
-
-" + STEP_SCOPE.format(step=step)
+        text += "\n\n" + STEP_SCOPE.format(step=step)
     return ["--append-system-prompt", text, *extra]
-
 
 def step_args(step_id: str) -> list[str]:
     """A Run step message: the scope goes as an appended system prompt."""

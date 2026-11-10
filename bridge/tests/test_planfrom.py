@@ -141,7 +141,9 @@ def test_a_plan_message_kind_goes_as_a_system_prompt_and_qa_cannot_edit():
     assert c[2] == "add a test" and "part 6" in c[c.index("--append-system-prompt") + 1]
     qa = message_command("claude", "why?", "sid", "manual", "qa")
     assert qa[qa.index("--disallowedTools") + 1] == "Edit,Write,NotebookEdit"
-    assert kind_args("bogus") == [] and "--append-system-prompt" not in message_command("claude", "hi", "sid")
+    from agent_bridge.planfrom import STYLE
+    plain = message_command("claude", "hi", "sid")
+    assert kind_args("bogus") == [] and plain[plain.index("--append-system-prompt") + 1] == STYLE  # only the reply style
 
 
 def test_plan_from_a_session_reads_pages_writes_notes_then_starts_the_plan_session(tmp_path, monkeypatch):
@@ -303,7 +305,7 @@ def test_a_run_step_message_carries_the_step_scope():
     c = message_command("claude", "Work on step s2: x. Report it with step_update.", "sid", "manual", "", "s2")
     scope = c[c.index("--append-system-prompt") + 1]
     assert "only that step" in scope and "step s2" in scope and "inbox_ask" in scope and "never done in this run" in scope
-    assert "--append-system-prompt" not in message_command("claude", "hi", "sid")
+    assert message_command("claude", "hi", "sid")[message_command("claude", "hi", "sid").index("--append-system-prompt") + 1].count("step") == 0  # no scope without a step
     k = message_command("claude", "why?", "sid", "manual", "qa", "s2")  # a kind keeps its own prompt
     assert "Q&A" in k[k.index("--append-system-prompt") + 1]
 
