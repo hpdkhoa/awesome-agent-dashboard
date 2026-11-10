@@ -231,6 +231,11 @@ def log_wait_reason(logs: Path | None, session_id: str, force: bool = False, pro
 
 
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
+# Exact models and efforts, never the CLI's own default (the owner's words, 2026-11-10: "I don't want default option I
+# want exact option"; picks: claude-opus-5-5 and medium when nothing else is set). An older alias maps to its exact id.
+MODELS = ("claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5")
+ALIASES = {"fable": "claude-fable-5-1", "opus": "claude-opus-5-5", "sonnet": "claude-sonnet-5-5", "haiku": "claude-haiku-5-5"}
+DEFAULT_MODEL, DEFAULT_EFFORT = "claude-opus-5-5", "medium"
 MODEL_RE = re.compile(r"^[a-z][a-z0-9.\-]{1,60}$")  # an alias (fable, opus, sonnet, haiku) or a full model name
 
 
@@ -400,12 +405,14 @@ class Runs:
         return "auto" if (self.store.get("meta/runs") or {}).get("permissionMode") == "auto" else "manual"
 
     def run_with(self, c: dict) -> tuple[str, str]:
-        """(model, effort) for a run: the run's own choice, else the owner's setting in meta/runs, else "" (the CLI's
-        default). The owner's pick, 2026-11-10: "Setting plus a choice on each message"."""
+        """(model, effort) for a run, always exact: the run's own choice, else the owner's setting in meta/runs, else
+        claude-opus-5-5 and medium (the owner's picks, 2026-11-10: "Setting plus a choice on each message"; "I want exact
+        option"). A name that is not one of MODELS, or an effort not in EFFORTS, falls to the next in that order."""
         prefs = self.store.get("meta/runs") or {}
-        model = str(c.get("model") or prefs.get("model") or "")
-        effort = str(c.get("effort") or prefs.get("effort") or "")
-        return (model if MODEL_RE.match(model) else ""), (effort if effort in EFFORTS else "")
+        exact = lambda m: ALIASES.get(str(m or ""), str(m or ""))
+        model = next((m for m in (exact(c.get("model")), exact(prefs.get("model"))) if m in MODELS), DEFAULT_MODEL)
+        effort = next((e for e in (c.get("effort"), prefs.get("effort")) if e in EFFORTS), DEFAULT_EFFORT)
+        return model, effort
 
     def step(self, todo: list[dict] | None = None) -> list[str]:
         """Acts on the commands still to do. `todo` comes from the listener (listen.py); without it, ask Firestore."""

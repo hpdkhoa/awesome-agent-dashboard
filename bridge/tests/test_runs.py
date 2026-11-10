@@ -426,13 +426,18 @@ def test_model_and_effort_come_from_the_run_or_the_setting(tmp_path, monkeypatch
     assert "--model" not in message_command("claude", "hi", "sid")
     store, runs, work = setup(tmp_path, monkeypatch)
     store.put_many({"meta/runs": {"permissionMode": "manual", "model": "opus", "effort": "high"}})
-    assert runs.run_with({"id": "c"}) == ("opus", "high")  # the setting
-    assert runs.run_with({"id": "c", "model": "haiku", "effort": "low"}) == ("haiku", "low")  # the run's own choice
-    assert runs.run_with({"id": "c", "model": "x y", "effort": "max"}) == ("", "max")  # a bad name falls to the CLI default
-    cmd(store, "c1", action="start", folder=str(work), prompt="hello", model="sonnet")
+    assert runs.run_with({"id": "c"}) == ("claude-opus-5-5", "high")  # the setting, an old alias made exact
+    assert runs.run_with({"id": "c", "model": "claude-haiku-5-5", "effort": "low"}) == ("claude-haiku-5-5", "low")
+    assert runs.run_with({"id": "c", "model": "x y", "effort": "huge"}) == ("claude-opus-5-5", "high")  # bad: the setting
+    store.put_many({"meta/runs": {"permissionMode": "manual"}})
+    assert runs.run_with({"id": "c"}) == ("claude-opus-5-5", "medium")  # never the CLI default: the owner's picks
+    store.put_many({"meta/runs": {"permissionMode": "manual", "model": "opus", "effort": "high"}})
+    cmd(store, "c1", action="start", folder=str(work), prompt="hello", model="claude-sonnet-5-5")
     runs.step()
     c = store.get("commands/c1")
-    assert c["model"] == "sonnet" and c["effort"] == "high"
+    assert c["model"] == "claude-sonnet-5-5" and c["effort"] == "high"
+    c = start_command("claude", "x", "sid", "manual", *runs.run_with({"id": "c"}))
+    assert c[c.index("--model") + 1] == "claude-opus-5-5" and c[c.index("--effort") + 1] == "high"
 
 
 def test_a_one_off_start_keeps_no_session():

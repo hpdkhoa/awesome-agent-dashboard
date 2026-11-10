@@ -1,7 +1,7 @@
 import { useState } from "react";
 import {
   cancelMessage, checkSession, continueRun, forceMessage, setAutoContinue, planFromSession, PLAN_KINDS, sendMessage, setRunMode, startRun, stopRun, useRunMode,
-  EFFORTS, FRESH_OVER, MODELS, setRunPrefs, useRunPrefs, type Fresh, type RunWith,
+  EFFORTS, exactEffort, exactModel, FRESH_OVER, MODELS, setRunPrefs, useRunPrefs, type Fresh, type RunWith,
   type Machine, type Run, type Session,
 } from "./data";
 import { num, usd } from "./Dashboard";
@@ -36,18 +36,19 @@ recommended. After each round, post the whole plan with plan_version and one lin
 the owner agrees. Only the owner closes a plan, on the page. Keep the whole plan in this one session.`;
 
 // Model and effort for one run, preset to the setting on the Runs tab (the owner's pick, 2026-11-10: "Setting plus a
-// choice on each message"). "default" keeps the setting; the setting's own "default" keeps the CLI's model and effort.
+// choice on each message"). Exact names only, no "default" (2026-11-10: "I want exact option"); untouched, it shows the setting.
 export function RunWithPicker({ value, onChange, compact = false, fresh = false }: { value: RunWith; onChange: (w: RunWith) => void; compact?: boolean; fresh?: boolean }) {
   const prefs = useRunPrefs();
-  const name = (list: [string, string][], v: string) => list.find(([k]) => k === v)?.[1] ?? v;
-  const label = (list: [string, string][], pref: string) => `default${pref ? ` (${name(list, pref)})` : ""}`;
+  // the exact values; untouched, the run takes the Runs tab setting, shown here by its exact name
+  const model = value.model || exactModel(prefs?.model);
+  const effort = value.effort || exactEffort(prefs?.effort);
   return (
-    <span className={"run-with" + (compact ? " compact" : "")} title="Model and effort for this run; default keeps the setting on the Runs tab">
-      <select value={value.model ?? ""} onChange={(e) => onChange({ ...value, model: e.target.value })} aria-label="model">
-        {MODELS.map(([k, n]) => <option key={k} value={k}>{k ? n : label(MODELS, prefs?.model ?? "")}</option>)}
+    <span className={"run-with" + (compact ? " compact" : "")} title="Model and effort for this run; starts on the setting on the Runs tab">
+      <select value={model} onChange={(e) => onChange({ ...value, model: e.target.value })} aria-label="model">
+        {MODELS.map(([k, n]) => <option key={k} value={k}>{n}</option>)}
       </select>
-      <select value={value.effort ?? ""} onChange={(e) => onChange({ ...value, effort: e.target.value })} aria-label="effort">
-        {EFFORTS.map(([k, n]) => <option key={k} value={k}>{k ? n : label(EFFORTS, prefs?.effort ?? "")}</option>)}
+      <select value={effort} onChange={(e) => onChange({ ...value, effort: e.target.value })} aria-label="effort">
+        {EFFORTS.map(([k, n]) => <option key={k} value={k}>{n}</option>)}
       </select>
       {fresh && (
         <select value={value.fresh ?? "auto"} onChange={(e) => onChange({ ...value, fresh: e.target.value as Fresh })} aria-label="fresh session with a handoff"
@@ -226,12 +227,12 @@ export function ModeSwitch() {
       <button className={mode === "manual" ? "tab on" : "tab"} onClick={() => setRunMode("manual")}>Manual</button>
       <button className={mode === "auto" ? "tab on" : "tab"} onClick={() => setRunMode("auto")}>Auto</button>
       <span className="label">Model</span>
-      <select value={prefs?.model ?? ""} onChange={(e) => setRunPrefs({ model: e.target.value })} aria-label="default model">
-        {MODELS.map(([k, n]) => <option key={k} value={k}>{k ? n : "CLI default"}</option>)}
+      <select value={exactModel(prefs?.model)} onChange={(e) => setRunPrefs({ model: e.target.value })} aria-label="model setting">
+        {MODELS.map(([k, n]) => <option key={k} value={k}>{n}</option>)}
       </select>
       <span className="label">Effort</span>
-      <select value={prefs?.effort ?? ""} onChange={(e) => setRunPrefs({ effort: e.target.value })} aria-label="default effort">
-        {EFFORTS.map(([k, n]) => <option key={k} value={k}>{k ? n : "CLI default"}</option>)}
+      <select value={exactEffort(prefs?.effort)} onChange={(e) => setRunPrefs({ effort: e.target.value })} aria-label="effort setting">
+        {EFFORTS.map(([k, n]) => <option key={k} value={k}>{n}</option>)}
       </select>
       <span className="label">Fresh with a handoff over</span>
       <select value={prefs?.freshOver ?? 300000} onChange={(e) => setRunPrefs({ freshOver: Number(e.target.value) })} aria-label="fresh session over"

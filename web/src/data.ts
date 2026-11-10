@@ -326,8 +326,17 @@ export type RunMode = "manual" | "auto";
 export type Fresh = "auto" | "always" | "never";
 export type RunWith = { model?: string; effort?: string; fresh?: Fresh }; // fresh: a fresh session with a handoff (handoff.py)
 export const FRESH_OVER: [number, string][] = [[0, "off"], [100000, "100k tokens"], [200000, "200k tokens"], [300000, "300k tokens"], [500000, "500k tokens"], [800000, "800k tokens"]];
-export const MODELS: [string, string][] = [["", "default"], ["fable", "Fable"], ["opus", "Opus"], ["sonnet", "Sonnet"], ["haiku", "Haiku"]];
-export const EFFORTS: [string, string][] = [["", "default"], ["low", "low"], ["medium", "medium"], ["high", "high"], ["xhigh", "xhigh"], ["max", "max"]];
+// Exact models and efforts, no "default" (the owner's words, 2026-11-10: "I don't want default option I want exact
+// option"; picks claude-opus-5-5 and medium). The bridge uses the same list and the same picks (runs.py run_with).
+export const MODELS: [string, string][] = [["claude-fable-5-1", "claude-fable-5-1"], ["claude-opus-5-5", "claude-opus-5-5"],
+  ["claude-sonnet-5-5", "claude-sonnet-5-5"], ["claude-haiku-5-5", "claude-haiku-5-5"]];
+export const EFFORTS: [string, string][] = [["low", "low"], ["medium", "medium"], ["high", "high"], ["xhigh", "xhigh"], ["max", "max"]];
+export const DEFAULT_MODEL = "claude-opus-5-5";
+export const DEFAULT_EFFORT = "medium";
+const ALIAS: Record<string, string> = { fable: "claude-fable-5-1", opus: "claude-opus-5-5", sonnet: "claude-sonnet-5-5", haiku: "claude-haiku-5-5" };
+// the exact model and effort the setting stands for (an older alias made exact, nothing set: the owner's picks)
+export const exactModel = (m?: string) => { const x = ALIAS[m ?? ""] ?? m ?? ""; return MODELS.some(([k]) => k === x) ? x : DEFAULT_MODEL; };
+export const exactEffort = (e?: string) => (EFFORTS.some(([k]) => k === e) ? e! : DEFAULT_EFFORT);
 export type RunPrefs = { mode: RunMode; model: string; effort: string; freshOver: number };
 export function useRunPrefs(): RunPrefs | null {
   const [p, setP] = useState<RunPrefs | null>(null);
