@@ -116,7 +116,7 @@ def main(argv: list[str] | None = None) -> None:
     while True:
         try:
             if time.time() >= next_sync:
-                next_sync = time.time() + a.every
+                next_sync = time.time() + getattr(a, "every", 0)  # sync has no --every: it runs once
                 r = run(cfg, a.days, store, dry_run=a.dry_run, deleted=gone.paths if gone is not None else lambda: None)
                 print(
                     f"{stamp()} sessions {r['sessions']}, tokens {r['tokens']:,}, "
