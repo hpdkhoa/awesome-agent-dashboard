@@ -5,7 +5,7 @@ import {
 } from "./data";
 import { isWaiting } from "./Inbox";
 import { openFile, PcText } from "./FileView";
-import { askAbout, QUOTE_EVENT, quotePart, quoteStep, quoteWords, type QuoteAsk } from "./quote";
+import { askAbout, forPlan, QUOTE_EVENT, quotePart, quoteStep, takeQuote } from "./quote";
 import { staleMark, staleness, versionAt } from "./planStale";
 import { usePlanGenerated } from "./data";
 import { Md } from "./Markdown";
@@ -45,8 +45,9 @@ function PlanMessage({ plan }: { plan: Plan }) {
   const box = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
     // Ask, Change or Quote on a step or a part, or "Ask about this" on selected words (quote.ts): the quote lands here
-    const fill = (e: Event) => {
-      const q = (e as CustomEvent<QuoteAsk>).detail;
+    const fill = () => {
+      const q = takeQuote(forPlan(plan.id));
+      if (!q) return;
       if (q.kind) setKind(q.kind);
       setOn(q.stepId || q.part ? { stepId: q.stepId, part: q.part } : null);
       setText((t) => (t.trim() ? t.trimEnd() + "\n\n" : "") + q.text + "\n\n");
@@ -59,9 +60,10 @@ function PlanMessage({ plan }: { plan: Plan }) {
         el.setSelectionRange(el.value.length, el.value.length);
       }, 0);
     };
+    fill(); // a quote made on another tab, waiting for this plan's box
     window.addEventListener(QUOTE_EVENT, fill);
     return () => window.removeEventListener(QUOTE_EVENT, fill);
-  }, []);
+  }, [plan.id]);
   async function send() {
     if (!text.trim()) return setError("Write a message first.");
     setBusy(true);
@@ -142,48 +144,6 @@ function OnMessages({ runs, plan, where }: { runs: Run[]; plan: Plan; where: On 
         </div>
       ))}
     </div>
-  );
-}
-
-// Select words anywhere in the plan: a small "Ask about this" button appears at the selection and quotes just them.
-function SelectAsk({ root }: { root: React.RefObject<HTMLDivElement | null> }) {
-  const [at, setAt] = useState<{ x: number; y: number; text: string; stepId?: string; part?: string } | null>(null);
-  useEffect(() => {
-    const look = () => {
-      const sel = document.getSelection();
-      const text = sel?.toString().trim() ?? "";
-      if (!sel || !text || sel.rangeCount === 0 || !root.current) return setAt(null);
-      const range = sel.getRangeAt(0);
-      const node = range.commonAncestorContainer;
-      const el = node.nodeType === 1 ? (node as Element) : node.parentElement;
-      if (!el || !root.current.contains(el) || el.closest("textarea, .on-msgs, .float-ask")) return setAt(null);
-      const rect = range.getBoundingClientRect();
-      const host = el.closest<HTMLElement>("[data-step],[data-part]");
-      setAt({ x: rect.left + rect.width / 2, y: Math.max(8, rect.top - 34), text, stepId: host?.dataset.step, part: host?.dataset.part });
-    };
-    document.addEventListener("selectionchange", look);
-    document.addEventListener("mouseup", look);
-    window.addEventListener("scroll", look, true);
-    return () => {
-      document.removeEventListener("selectionchange", look);
-      document.removeEventListener("mouseup", look);
-      window.removeEventListener("scroll", look, true);
-    };
-  }, [root]);
-  if (!at) return null;
-  return (
-    <button
-      className="float-ask"
-      style={{ left: at.x, top: at.y }}
-      onMouseDown={(e) => e.preventDefault()}
-      onClick={() => {
-        askAbout({ text: quoteWords(at.text), kind: "qa", stepId: at.stepId, part: at.part });
-        document.getSelection()?.removeAllRanges();
-        setAt(null);
-      }}
-    >
-      Ask about this
-    </button>
   );
 }
 
@@ -436,8 +396,7 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
   const stale = staleness(plan, versions, ticks, generated, steps, runs);
   const behind = stale.filter((r) => !r.ok).length;
   return (
-    <div ref={root}>
-      <SelectAsk root={root} />
+    <div ref={root} data-quote-plan={plan.id}>
       <div className="chips">
         {withParts.map((x) => {
           const starts = phaseStarts(withParts).get(x.n);

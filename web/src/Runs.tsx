@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { forSession, QUOTE_EVENT, takeQuote } from "./quote";
 import {
   cancelMessage, checkSession, continueRun, forceMessage, setAutoContinue, planFromSession, PLAN_KINDS, sendMessage, setRunMode, startRun, stopRun, useRunMode,
   EFFORTS, exactEffort, exactModel, FRESH_OVER, MODELS, setRunPrefs, useRunPrefs, type Fresh, type RunWith,
@@ -157,6 +158,25 @@ export const remoteUrl = (id: string) => `https://claude.ai/code/${id.replace(/^
 
 export function MessageBox({ s, runs }: { s: Session; runs: Run[] }) {
   const [text, setText] = useState("");
+  const box = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    // "Ask about this" on words of this session or of its runs (SelectAsk.tsx): the quote lands here
+    const fill = () => {
+      const q = takeQuote(forSession(s.id));
+      if (!q) return;
+      setText((t) => (t.trim() ? t.trimEnd() + "\n\n" : "") + q.text + "\n\n");
+      setTimeout(() => {
+        const el = box.current;
+        if (!el) return;
+        el.scrollIntoView({ block: "center", behavior: "smooth" });
+        el.focus();
+        el.setSelectionRange(el.value.length, el.value.length);
+      }, 0);
+    };
+    fill();
+    window.addEventListener(QUOTE_EVENT, fill);
+    return () => window.removeEventListener(QUOTE_EVENT, fill);
+  }, [s.id]);
   const [w, setW] = useState<RunWith>({});
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -178,6 +198,7 @@ export function MessageBox({ s, runs }: { s: Session; runs: Run[] }) {
   return (
     <Section id="session.message" title="Send a message to this session" extra={mine.length ? `${mine.length} sent` : ""}>
       <textarea
+        ref={box}
         rows={3}
         value={text}
         placeholder="What should the session do next? (markdown works)"
@@ -309,6 +330,11 @@ function ContinueBar({ r }: { r: Run }) {
   );
 }
 
+// Where words of a run are quoted (SelectAsk.tsx): a plan's run to the plan's box, any other run to its session's box;
+// a one-off run has no session to send to.
+const quoteTarget = (r: Run): Record<string, string> =>
+  r.planId ? { "data-quote-plan": r.planId } : r.sessionId && !r.noSession ? { "data-quote-session": r.sessionId } : {};
+
 export function RunList({ runs, title = "Runs from the dashboard" }: { runs: Run[]; title?: string }) {
   const shown = runs.filter((r) => r.action === "start" || r.action === "message" || r.action === "plan");
   return (
@@ -344,6 +370,7 @@ export function RunList({ runs, title = "Runs from the dashboard" }: { runs: Run
             </>
           }
         >
+          <div {...quoteTarget(r)}>
           <p className="label">Prompt</p>
           <Md text={r.prompt} cwd={r.cwd ?? r.folder ?? ""} />
           {(r.status === "done" || r.status === "lost") && (
@@ -352,6 +379,7 @@ export function RunList({ runs, title = "Runs from the dashboard" }: { runs: Run
               <PcText run={r.id} cwd={r.cwd ?? r.folder ?? ""} />
             </>
           )}
+          </div>
           {r.error && <p className="bad small">{r.error}</p>}
           {r.status === "running" && (
             <div className="actions">

@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { SelectAsk } from "./SelectAsk";
+import { QUOTE_EVENT, type QuoteAsk } from "./quote";
 import { clampWidth, gridColumns, loadLayout, saveLayout, type Layout } from "./layout";
 import { signOut } from "firebase/auth";
 import { auth } from "./firebase";
@@ -61,6 +63,28 @@ export function Dashboard() {
   const [wt, setWt] = useState<string>("all");
   const [picked, setPicked] = useState<string | null>(null);
   const [tab, setTab] = useState<"inbox" | "plans" | "sessions" | "runs" | "money" | "rates" | "storage">(opened.get("run") ? "runs" : opened.get("plan") ? "plans" : "inbox");
+  // "Ask about this" on words of a plan, a session or a run (SelectAsk.tsx): open the plan or the session whose message
+  // box takes the quote, if it is not on screen (the owner's words, 2026-11-10: "when in sessions and run then the cite
+  // will direct to the message box")
+  const mainRef = useRef<HTMLElement>(null);
+  const known = useRef<Session[]>([]);
+  known.current = sessions ?? [];
+  useEffect(() => {
+    const go = (e: Event) => {
+      const q = (e as CustomEvent<QuoteAsk>).detail;
+      if (q.planId) {
+        setPickedPlan(q.planId);
+        setTab("plans");
+      } else if (q.sessionId) {
+        setWt("all");
+        if (!known.current.some((x) => x.id === q.sessionId)) setOlder(true); // older than the recent days
+        setPicked(q.sessionId);
+        setTab("sessions");
+      }
+    };
+    window.addEventListener(QUOTE_EVENT, go);
+    return () => window.removeEventListener(QUOTE_EVENT, go);
+  }, []);
   // the left and right panels: drag to resize, hide and show each (layout.ts), remembered in this browser
   const [layout, setLayout] = useState<Layout>(loadLayout);
   useEffect(() => saveLayout(layout), [layout]);
@@ -213,7 +237,8 @@ export function Dashboard() {
       </aside>
       <div className="gutter gl" hidden={layout.leftHidden} onPointerDown={drag("left")} title="Drag to resize the left panel" />
 
-      <main className="main">
+      <main className="main" ref={mainRef}>
+        <SelectAsk root={mainRef} />
         {tab === "storage" ? (
           <StorageView name={store} />
         ) : tab === "money" ? (
@@ -307,7 +332,7 @@ function TokenTable({ t }: { t: Tokens }) {
 
 function SessionView({ s, runs }: { s: Session; runs: Run[] }) {
   return (
-    <article>
+    <article data-quote-session={s.id}>
       <h1>{s.title}</h1>
       <p className="meta">
         {s.workType} · {s.machine} · {s.cwd}

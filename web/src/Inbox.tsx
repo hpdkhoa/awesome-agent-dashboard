@@ -183,7 +183,7 @@ export function InboxView({ item, session, plan, onOpenPlan, items = [] }: {
   const open = item.status === "open";
   const body = item.kind === "approval" ? "```json\n" + item.text + "\n```" : item.text;
   return (
-    <article>
+    <article {...(item.planId ? { "data-quote-plan": item.planId } : item.sessionId && item.sessionId !== "unknown" ? { "data-quote-session": item.sessionId } : {})}>
       <h1>{item.title}</h1>
       <p className="meta">
         {KIND[item.kind]} · {item.workType} · {item.machine} · {ago(item.createdAt)} · {STATUS[item.status]}
