@@ -296,7 +296,7 @@ function DecisionsSection({ plan, versions, asked, onOpenItem }: {
                 {chosen.map((o) => (
                   <div key={o.label} className="decision-pick">
                     {o.detail && <p className="small muted">{o.detail}</p>}
-                    {o.example && <Example e={o.example} cwd={q.cwd || plan.cwd} />}
+                    <KeptExample q={q} o={o} cwd={q.cwd || plan.cwd} />
                   </div>
                 ))}
                 {q.answer && !chosen.length && <p className="small muted">Your own answer: no option of the list.</p>}
@@ -305,7 +305,7 @@ function DecisionsSection({ plan, versions, asked, onOpenItem }: {
                     {others.map((o) => (
                       <div key={o.label} className="decision-pick">
                         <p className="small"><b>{o.label}</b>{o.detail ? ` · ${o.detail}` : ""}</p>
-                        {o.example && <Example e={o.example} cwd={q.cwd || plan.cwd} />}
+                        <KeptExample q={q} o={o} cwd={q.cwd || plan.cwd} />
                       </div>
                     ))}
                   </Section>
@@ -316,6 +316,28 @@ function DecisionsSection({ plan, versions, asked, onOpenItem }: {
         </div>
       ))}
     </Section>
+  );
+}
+
+// An option's example as kept at the answer: image files from the snapshot copy in the plan folder (bridge
+// snapshot.py), so a later file with the same name never replaces the picture decided on. A source written after the
+// answer, or missing, is marked on the card.
+function KeptExample({ q, o, cwd }: { q: InboxItem; o: InboxItem["options"][number]; cwd: string }) {
+  const e = o.example;
+  if (!e) return null;
+  if (e.type !== "image") return <Example e={e} cwd={cwd} />;
+  const kept = q.snapshot?.files?.[o.label];
+  const shown = kept ? { ...e, before: kept.before ?? e.before, after: kept.after ?? e.after } : e;
+  const changed = [e.before, e.after].filter((f) => q.snapshot?.changed?.includes(f));
+  const missing = [e.before, e.after].filter((f) => q.snapshot?.missing?.includes(f));
+  return (
+    <>
+      <Example e={shown} cwd={cwd} />
+      {!q.snapshot && q.answer && <p className="small wait-fg">Not kept yet: shows the file as it is now (the bridge keeps a copy when it sees the answer).</p>}
+      {changed.length > 0 && <p className="small bad">⚠ Written after your answer, so this copy may not be the picture you decided on: {changed.join(", ")}</p>}
+      {missing.length > 0 && <p className="small bad">⚠ Missing on the PC at the answer: {missing.join(", ")}</p>}
+      {kept && !changed.length && !missing.length && <p className="small muted">✓ Kept as at your answer ({new Date(q.snapshot!.at).toLocaleString()})</p>}
+    </>
   );
 }
 

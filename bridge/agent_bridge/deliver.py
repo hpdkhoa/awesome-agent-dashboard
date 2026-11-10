@@ -22,6 +22,7 @@ import uuid
 from datetime import datetime, timezone
 
 from .inbox import answer_text, ask_back_text, is_live, now_iso, open_ask
+from .snapshot import take as take_snapshot
 
 RETRY_SECONDS = 600
 
@@ -46,6 +47,11 @@ def deliver(store, machine: str, claude: str | None) -> list[str]:
             continue  # approvals are only ever answered live, inside the waiting run
         if item.get("machine") != machine or item.get("sessionId") in (None, "", "unknown"):
             continue
+        try:  # the decision's pictures as they are at the answer (snapshot.py); never blocks the answer
+            if take_snapshot(store, item):
+                log.append(f"{item['id']}: pictures kept in the plan folder")
+        except OSError as e:
+            log.append(f"{item['id']}: snapshot failed, {e}")
         if is_live(store, item["sessionId"]):
             continue  # the session's inbox_ask is still waiting and takes the answer itself
         a = item.get("answer") or {}

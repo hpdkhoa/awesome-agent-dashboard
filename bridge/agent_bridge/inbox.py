@@ -483,6 +483,12 @@ class Inbox:
         item = self.store.get(f"inbox/{item_id}")
         if not item or item.get("status") != "answered":
             return None
+        try:  # the decision's pictures as they are at the answer (snapshot.py); never blocks the answer
+            from .snapshot import take
+
+            take(self.store, item)
+        except OSError:
+            pass
         self.store.update(f"inbox/{item_id}", {"status": "delivered", "deliveredAt": now_iso(), "deliveredVia": "live"})
         return answer_text(item)
 

@@ -91,6 +91,13 @@ def main(argv: list[str] | None = None) -> None:
                     push=pusher(store, cfg.owner_email))
         for line in runs.forget_lost():
             print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} run {line}", flush=True)
+        try:  # plan questions answered before snapshots existed (snapshot.py), once per start
+            from .snapshot import backfill
+
+            for line in backfill(store, cfg.machine):
+                print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} snapshot {line}", flush=True)
+        except Exception as e:
+            print(f"snapshot backfill failed: {e}", flush=True)
         if cfg.files_url:
             from .files import Files, firebase_verifier, serve
 
