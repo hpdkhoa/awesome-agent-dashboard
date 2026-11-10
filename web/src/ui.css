@@ -66,3 +66,7 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
   .md th, .md td { min-width: 7em; }
 }
 .run-all { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 10px; }
+/* 8. Decisions: one card per question, the pick's example shown */
+.decision { border-top: 1px solid var(--line); padding: 8px 0; }
+.decision > p { margin: 0 0 4px; }
+.decision-pick { margin: 6px 0; max-width: 720px; }

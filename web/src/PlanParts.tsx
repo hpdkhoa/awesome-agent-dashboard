@@ -9,6 +9,7 @@ import { askAbout, QUOTE_EVENT, quotePart, quoteStep, quoteWords, type QuoteAsk 
 import { staleMark, staleness, versionAt } from "./planStale";
 import { usePlanGenerated } from "./data";
 import { Md } from "./Markdown";
+import { Example } from "./Example";
 import { MoreMenu } from "./MoreMenu";
 import { diffLines, linkEntries, PART_NAMES, partLines } from "./planDiff";
 import { phaseName, phaseOf, phaseStarts } from "./phases";
@@ -259,6 +260,65 @@ function RunStep({ plan, step, runs, harness }: { plan: Plan; step: Parts["steps
   );
 }
 
+// 8. Decisions (the owner's words, 2026-11-10: "I see the missing in images and artifacts after I approved, no where to
+// found them so make approved section so something similar so I can see what decisions have been made"): every answered
+// question of the plan by round, the option picked with its drawing, image or draft, the owner's note, the version it
+// made, and the other options folded.
+function DecisionsSection({ plan, versions, asked, onOpenItem }: {
+  plan: Plan; versions: PlanVersion[]; asked: InboxItem[]; onOpenItem: (id: string) => void;
+}) {
+  const qs = asked.filter((q) => q.kind === "question" || q.kind === "suggestion" || q.kind === "result")
+    .sort((a, b) => (a.round ?? 0) - (b.round ?? 0) || a.createdAt.localeCompare(b.createdAt));
+  const answered = qs.filter((q) => q.answer);
+  const rounds = [...new Set(qs.map((q) => q.round ?? 0))];
+  const madeIn = (q: InboxItem) => versions.find((v) => v.madeBy?.some((d) => d.id === q.id || (d.title === q.title && d.choice === q.answer?.choice)))?.n;
+  return (
+    <Section id="plan.part.decisions" title="8. Decisions" extra={`${answered.length} decided · ${qs.length - answered.length} waiting`}>
+      {qs.length === 0 && <p className="muted small">No question asked on this plan yet.</p>}
+      {rounds.map((r) => (
+        <div key={r}>
+          <h3 className="small muted">{r ? `Round on v${r}` : "Before v1"}</h3>
+          {qs.filter((q) => (q.round ?? 0) === r).map((q) => {
+            const picked = q.answer ? (q.multi ? q.answer.choice.split(", ") : [q.answer.choice]) : [];
+            const chosen = q.options.filter((o) => picked.includes(o.label));
+            const others = q.options.filter((o) => !picked.includes(o.label));
+            const made = q.answer ? madeIn(q) : undefined;
+            return (
+              <div key={q.id} className="decision">
+                <p>
+                  <button className="link" onClick={() => onOpenItem(q.id)}>{q.title}</button>{" "}
+                  {q.answer
+                    ? <span className="status done">{q.answer.choice}{made ? ` · made v${made}` : ""} · {new Date(q.answer.at).toLocaleString()}</span>
+                    : <span className="status waiting">waiting for you</span>}
+                </p>
+                {q.answer?.text && <p className="small">Your note: {q.answer.text}</p>}
+                {q.history?.length ? <p className="small muted">Earlier: {q.history.map((h) => h.choice).join(" → ")}</p> : null}
+                {chosen.map((o) => (
+                  <div key={o.label} className="decision-pick">
+                    {o.detail && <p className="small muted">{o.detail}</p>}
+                    {o.example && <Example e={o.example} cwd={q.cwd || plan.cwd} />}
+                  </div>
+                ))}
+                {q.answer && !chosen.length && <p className="small muted">Your own answer: no option of the list.</p>}
+                {q.answer && others.length > 0 && (
+                  <Section id="plan.decision.others" title={`Not picked (${others.length})`} open={false}>
+                    {others.map((o) => (
+                      <div key={o.label} className="decision-pick">
+                        <p className="small"><b>{o.label}</b>{o.detail ? ` · ${o.detail}` : ""}</p>
+                        {o.example && <Example e={o.example} cwd={q.cwd || plan.cwd} />}
+                      </div>
+                    ))}
+                  </Section>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ))}
+    </Section>
+  );
+}
+
 // Run all steps: one press; the bridge runs the steps not done in order and stops on a fail (bridge chain.py).
 function RunAll({ plan, steps, total }: { plan: Plan; steps: PlanStep[]; total: number }) {
   const chain = usePlanChain(plan.id);
@@ -451,6 +511,8 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
       </Section>
 
       <ResultsSection plan={plan} v={v} versions={versions} runs={runs} steps={steps} generated={generated} stale={staleMark(stale, "results")} />
+
+      <DecisionsSection plan={plan} versions={versions} asked={asked} onOpenItem={onOpenItem} />
 
       {(v.parts.cite || before?.cite) && (
         // the owner's words, 2026-11-05: "move what the plan read ... out into the cite section like generated section"
