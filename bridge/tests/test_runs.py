@@ -471,3 +471,17 @@ def test_a_message_over_the_size_goes_to_a_fresh_session_with_a_handoff(tmp_path
     runs.step()
     assert store.get("commands/m4")["sessionId"] == "old-session" and "freshFrom" not in store.get("commands/m4")  # "never" resumes
     wait_done(runs, "m4", store)
+
+
+def test_every_run_carries_the_owners_reply_style_once():
+    from agent_bridge.planfrom import STYLE
+
+    for c in (start_command("claude", "x", "sid"), message_command("claude", "hi", "sid"),
+              message_command("claude", "hi", "sid", kind="qa"), message_command("claude", "hi", "sid", step="s3"),
+              start_command("claude", "x", "sid", kind="qa", step="s3")):
+        assert c.count("--append-system-prompt") == 1
+        text = c[c.index("--append-system-prompt") + 1]
+        assert text.startswith(STYLE)
+    assert "step s3" in message_command("claude", "hi", "sid", step="s3")[-1] or "step s3" in " ".join(message_command("claude", "hi", "sid", step="s3"))
+    qa = message_command("claude", "hi", "sid", kind="qa")
+    assert "--disallowedTools" in qa and "Ask about the plan" in " ".join(qa) or "--disallowedTools" in qa

@@ -109,6 +109,34 @@ STEP_SCOPE = (
 )
 
 
+# The owner's reply style, in every run the dashboard starts (the owner's words, 2026-11-10: "I have a global rule to
+# answer me with least verbose and in bullet points if I not ask anything else ... apply it to every new messages, run,
+# plan and every result handle back to me").
+STYLE = (
+    "Reply to the owner least verbose and in bullet points: one line per point, no paragraphs, no headers, unless the "
+    "owner asks for another form. This holds for your final reply, every inbox question, result and suggestion, every "
+    "step report and every plan text you write."
+)
+
+
+def system_args(kind: str = "", step: str = "") -> list[str]:
+    """One appended system prompt for a run: the owner's reply style, then a plan message's kind prompt or a Run
+    step's scope (a run has at most one appended system prompt)."""
+    text = STYLE
+    extra: list[str] = []
+    if kind in KIND_PROMPTS:
+        text += "
+
+" + KIND_PROMPTS[kind] + EXAMPLES
+        if kind == "qa":
+            extra = ["--disallowedTools", NO_EDITS]
+    elif step:
+        text += "
+
+" + STEP_SCOPE.format(step=step)
+    return ["--append-system-prompt", text, *extra]
+
+
 def step_args(step_id: str) -> list[str]:
     """A Run step message: the scope goes as an appended system prompt."""
     return ["--append-system-prompt", STEP_SCOPE.format(step=step_id)] if step_id else []

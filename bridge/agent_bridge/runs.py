@@ -61,7 +61,7 @@ from .archiver import Archiver
 from .handoff import CHOICES, DEFAULT_FRESH_OVER, handoff_prompt, last_context, should_fresh
 from .digest import find_log, write_pages
 from .inbox import KINDS, PLAN_FORMAT, format_of, now_iso
-from .planfrom import NO_EDITS, kind_args, mark_quotes, note_command, plan_prompt, step_args
+from .planfrom import NO_EDITS, mark_quotes, note_command, plan_prompt, system_args
 from .redact import redact
 
 APPROVAL_TOOL = "mcp__agent-inbox__inbox_approve"
@@ -250,12 +250,12 @@ def mode_args(mode: str) -> list[str]:
 
 
 def start_command(claude: str, prompt: str, session_id: str, mode: str = "manual", model: str = "", effort: str = "",
-                  keep: bool = True) -> list[str]:
+                  keep: bool = True, kind: str = "", step: str = "") -> list[str]:
     """keep=False: a one-off job whose session is never saved (--no-session-persistence), so it leaves no log and no
     session on the dashboard (the owner's words, 2026-11-10: "A "don't keep the session" tick on Start")."""
     return [claude, "-p", prompt, "--output-format", "json", "--session-id", session_id,
             "--permission-prompt-tool", APPROVAL_TOOL, *mode_args(mode), *model_args(model, effort),
-            *([] if keep else ["--no-session-persistence"])]
+            *([] if keep else ["--no-session-persistence"]), *system_args(kind, step)]
 
 
 # Generated files (the owner's choice, 2026-11-04: "use The project folder and add .gitignore"; approved: named by
@@ -285,7 +285,7 @@ def message_command(claude: str, message: str, session_id: str, mode: str = "man
     """kind: a plan message's kind (qa, goal, step, rule, lesson); step: a Run step's step id. Either goes as an
     appended system prompt; a Run step has no kind."""
     return [claude, "-p", message, "--output-format", "json", "--resume", session_id,
-            "--permission-prompt-tool", APPROVAL_TOOL, *mode_args(mode), *(kind_args(kind) or step_args(step)),
+            "--permission-prompt-tool", APPROVAL_TOOL, *mode_args(mode), *system_args(kind, step),
             *model_args(model, effort)]
 
 
@@ -710,7 +710,7 @@ class Runs:
         prompt = handoff_prompt(sid, str(path or ""), turns, text, plan_id, context)
         mode, kind = self.mode(), c.get("kind") if c.get("kind") in KINDS else ""
         model, effort = self.run_with(c)
-        cmd = start_command(self.claude, prompt, new_sid, mode, model, effort) + (kind_args(kind) or step_args(str(c.get("stepId") or "")[:20]))
+        cmd = start_command(self.claude, prompt, new_sid, mode, model, effort, kind=kind, step=str(c.get("stepId") or "")[:20])
         p = self._spawn(c["id"], cmd, cwd)
         self.store.update(f"commands/{c['id']}", {"status": "running", "workType": wt, "pid": p.pid, "startedAt": now_iso(),
                                                   "permissionMode": mode, "model": model, "effort": effort,
