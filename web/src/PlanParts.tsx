@@ -296,7 +296,8 @@ function KeptExample({ q, o, cwd }: { q: InboxItem; o: InboxItem["options"][numb
       {!q.snapshot && q.answer && <p className="small wait-fg">Not kept yet: shows the file as it is now (the bridge keeps a copy when it sees the answer).</p>}
       {changed.length > 0 && <p className="small bad">⚠ Written after your answer, so this copy may not be the picture you decided on: {changed.join(", ")}</p>}
       {missing.length > 0 && <p className="small bad">⚠ Missing on the PC at the answer: {missing.join(", ")}</p>}
-      {kept && !changed.length && !missing.length && <p className="small muted">✓ Kept as at your answer ({new Date(q.snapshot!.at).toLocaleString()})</p>}
+      {q.snapshot?.pointed && <p className="small muted">✓ Pointed to {q.snapshot.pointed.to.split(/[\\/]/).pop()} on your word ({new Date(q.snapshot.pointed.at).toLocaleString()})</p>}
+      {kept && !q.snapshot?.pointed && !changed.length && !missing.length && <p className="small muted">✓ Kept as at your answer ({new Date(q.snapshot!.at).toLocaleString()})</p>}
     </>
   );
 }

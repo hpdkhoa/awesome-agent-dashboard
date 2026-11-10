@@ -70,7 +70,8 @@ export type InboxItem = {
   stepId?: string; // asked while this step of the plan was running
   // the decision's pictures copied into the plan folder at the answer (bridge snapshot.py): option label -> copies;
   // changed: source files written after the answer; missing: source files not found
-  snapshot?: { at: string; takenAt: string; files: Record<string, { before?: string; after?: string }>; changed: string[]; missing: string[] };
+  snapshot?: { at: string; takenAt: string; files: Record<string, { before?: string; after?: string }>; changed: string[]; missing: string[];
+    pointed?: { to: string; at: string; by: string } }; // the owner pointed the decision to another file
   // one batch: questions asked together show as one entry and are answered together (2026-11-07)
   batchId?: string; batchIndex?: number; batchSize?: number;
   draft?: { choice: string; text: string; at: string }; // your latest saved answer, used when the batch is sent

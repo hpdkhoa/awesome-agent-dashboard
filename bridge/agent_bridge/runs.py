@@ -295,6 +295,18 @@ def message_command(claude: str, message: str, session_id: str, mode: str = "man
             *model_args(model, effort)]
 
 
+GEN_KINDS = ("mockup", "diagram", "image", "chart", "screenshot", "data", "docs")  # web/src/planCheck.ts KINDS, and docs
+GEN_BY_EXT = {".png": "image", ".jpg": "image", ".jpeg": "image", ".svg": "image", ".webp": "image", ".gif": "image",
+              ".csv": "data", ".json": "data", ".html": "mockup", ".htm": "mockup", ".md": "docs"}
+
+
+def generated_kind(name: str) -> str:
+    """A generated file's kind: its name's first word when that is a kind (mockup-x.png), else by its type (a numbered
+    picture in a subfolder, 1-plans-board-PASS.png, is an image)."""
+    first = name.split("-", 1)[0].lower()
+    return first if first in GEN_KINDS else GEN_BY_EXT.get(os.path.splitext(name)[1].lower(), "file")
+
+
 class _Ended:
     """Stands in for the process of a run whose output file is complete but whose process an earlier bridge owned."""
 
@@ -779,15 +791,19 @@ class Runs:
         moved, skipped = [], []
         for rel in c.get("keep") or []:
             src = (Path(cwd) / str(rel)).resolve()
-            if src.is_file() and src.parent == base:  # already in the version folder (made before tmp/): approved in place
+            # subfolders count too (the owner, 2026-11-10: "do as suggested": "let Approve take subfolders"), e.g.
+            # <version>/pictures/1-plans-board-PASS.png
+            if src.is_file() and base in src.parents and tmp not in src.parents:  # already in the version folder: approved in place
                 moved.append({"from": str(rel), "to": src.relative_to(Path(cwd).resolve()).as_posix()})
                 continue
             if not src.is_file() or tmp not in src.parents:
                 skipped.append(str(rel))
                 continue
-            dest, n = base / src.name, 2
+            at = base / src.parent.relative_to(tmp)  # tmp/pictures/x.png goes to <version>/pictures/x.png
+            at.mkdir(parents=True, exist_ok=True)
+            dest, n = at / src.name, 2
             while dest.exists():  # never overwrite: -2, -3
-                dest = base / f"{src.stem}-{n}{src.suffix}"
+                dest = at / f"{src.stem}-{n}{src.suffix}"
                 n += 1
             shutil.move(str(src), str(dest))
             moved.append({"from": str(rel), "to": dest.relative_to(Path(cwd).resolve()).as_posix()})
@@ -803,7 +819,7 @@ class Runs:
                 name = m["to"].rsplit("/", 1)[-1]
                 if any(x.get("file") == m["to"] for x in rec["versions"][key]):
                     continue
-                rec["versions"][key].append({"file": m["to"], "kind": name.split("-", 1)[0], "at": now_iso()})
+                rec["versions"][key].append({"file": m["to"], "kind": generated_kind(name), "at": now_iso()})
             self.store.put_many({f"planGenerated/{plan['id']}": rec})
         removed = 0
         for item_id in c.get("drop") or []:

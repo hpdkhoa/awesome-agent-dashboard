@@ -176,3 +176,25 @@ def test_a_ticked_file_already_in_the_version_folder_is_approved_in_place_once(t
     assert (v3 / "diagram-old.svg").exists() and (v3 / "chart-left.svg").exists()  # an unticked file outside tmp/ stays
     gen = store.get("planGenerated/pl1")["versions"]["v3"]
     assert [g["file"] for g in gen] == [".plan_data/pl1/v3/diagram-old.svg"]
+
+
+def test_approve_takes_subfolders_in_place_and_from_tmp(tmp_path, monkeypatch):
+    # the owner, 2026-11-10: "do as suggested" ("let Approve take subfolders"): v5/pictures/ was left out before
+    from agent_bridge.runs import generated_kind
+    from test_runs import cmd, setup
+    store, runs, work = setup(tmp_path, monkeypatch)
+    v5 = work / ".plan_data" / "pl1" / "v5"
+    (v5 / "pictures").mkdir(parents=True)
+    (v5 / "pictures" / "1-plans-board-PASS.png").write_bytes(b"p")
+    (v5 / "tmp" / "shots").mkdir(parents=True)
+    (v5 / "tmp" / "shots" / "screenshot-a.png").write_bytes(b"s")
+    store.put_many({"plans/pl1": {"id": "pl1", "sessionId": "s1"}})
+    cmd(store, "a1", action="approve_generated", planId="pl1", cwd=str(work), folder=".plan_data/pl1/v5",
+        keep=[".plan_data/pl1/v5/pictures/1-plans-board-PASS.png", ".plan_data/pl1/v5/tmp/shots/screenshot-a.png"], drop=[])
+    runs.step()
+    assert [m["to"] for m in store.get("commands/a1")["moved"]] == [
+        ".plan_data/pl1/v5/pictures/1-plans-board-PASS.png", ".plan_data/pl1/v5/shots/screenshot-a.png"]
+    assert (v5 / "shots" / "screenshot-a.png").exists() and not (v5 / "tmp").exists()
+    gen = store.get("planGenerated/pl1")["versions"]["v5"]
+    assert [g["kind"] for g in gen] == ["image", "screenshot"]
+    assert generated_kind("mockup-prototype-3.html") == "mockup" and generated_kind("REPORT.md") == "docs"

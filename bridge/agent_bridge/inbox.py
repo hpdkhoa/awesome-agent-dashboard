@@ -39,6 +39,7 @@ from datetime import datetime, timezone
 
 from .aggregate import work_type_of
 from .redact import redact
+from .filelinks import refuse_dead_links
 from .planfrom import check_parts
 
 BEAT_SECONDS = 60
@@ -248,6 +249,8 @@ class Inbox:
         if parts is not None:
             parts = clean_parts(parts)
             doc["kind"] = "parts"
+        # every file link opens on the dashboard (filelinks.py); checked before the plan is made
+        refuse_dead_links(text if text.strip() else parts_markdown(parts or {}), self.cwd, [r for _, r in self.roots])
         if source:
             c = self.store.get(f"commands/{source}") or {}
             if c.get("action") == "plan":
@@ -300,6 +303,7 @@ class Inbox:
         parent = current if parent is None else parent
         if not 0 <= parent <= current:
             raise ValueError(f"plan {plan_id} has no version {parent}")
+        given = parts is not None or bool(text.strip())  # the session's own data: its file links are checked
         if parts is None and not text.strip() and phase != was:  # a plain version: the parent's data, a new phase
             base = self.store.get(f"planVersions/{plan_id}_v{parent}") or {}
             parts, text = base.get("parts"), base.get("text", "")
@@ -312,6 +316,8 @@ class Inbox:
             # step s8: the parts of a plan read from a session are checked against its record; bad #n and quotes marked
             parts, checks = check_parts(parts, (plan.get("source") or {}).get("pagesDir", ""))
             text = text if text.strip() else parts_markdown(parts)
+        if given:  # every file link opens on the dashboard (filelinks.py)
+            refuse_dead_links(text, plan.get("cwd") or self.cwd, [r for _, r in self.roots])
         asked = {i["id"]: i for i in self.store.where("inbox", "planId", plan_id)}
         if answers is None:
             answers = [k for k, i in asked.items() if int(i.get("round", 0)) == parent and i.get("answer")]
