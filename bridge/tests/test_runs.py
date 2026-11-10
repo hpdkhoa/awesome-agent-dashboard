@@ -437,3 +437,37 @@ def test_model_and_effort_come_from_the_run_or_the_setting(tmp_path, monkeypatch
 def test_a_one_off_start_keeps_no_session():
     assert start_command("claude", "x", "sid", keep=False)[-1] == "--no-session-persistence"
     assert "--no-session-persistence" not in start_command("claude", "x", "sid")
+
+
+def test_a_message_over_the_size_goes_to_a_fresh_session_with_a_handoff(tmp_path, monkeypatch):
+    store, runs, work = setup(tmp_path, monkeypatch)
+    log = tmp_path / "logs" / "proj" / "old-session.jsonl"
+    log.write_text("\n".join(json.dumps(x) for x in [
+        {"type": "user", "timestamp": "2026-11-10T01:00:00Z", "origin": {"kind": "human"}, "message": {"content": "first ask"}},
+        {"type": "assistant", "timestamp": "2026-11-10T01:00:05Z", "message": {"id": "a1", "model": "m", "content": [{"type": "text", "text": "first reply"}],
+                                                                                "usage": {"input_tokens": 5, "cache_read_input_tokens": 350000}}},
+        {"type": "assistant", "timestamp": "2026-11-10T01:00:06Z", "message": {"stop_reason": "end_turn", "model": "m", "content": []}},
+    ]) + "\n", encoding="utf-8")
+    store.put_many({"plans/pl": {"id": "pl", "sessionId": "old-session", "status": "open", "kind": "parts", "format": 1}})
+    cmd(store, "m1", action="message", sessionId="old-session", cwd=str(work), prompt="carry on", planId="pl", kind="qa")
+    line = runs.step()[0]
+    assert "fresh session" in line and "handoff from old-session" in line and "350,005 tokens" in line
+    c = store.get("commands/m1")
+    assert c["freshFrom"] == "old-session" and c["sessionId"] != "old-session" and c["contextTokens"] == 350005
+    assert store.get("plans/pl")["sessionId"] == c["sessionId"] and store.get("plans/pl")["previousSessionId"] == "old-session"
+    c = wait_done(runs, "m1", store)
+    assert c["status"] == "done" and "first reply" in Texts(None, tmp_path / "out").run("m1")["text"]  # the handoff reached claude
+    # under the size, or "never": resume as before
+    store.put_many({"meta/runs": {"freshOver": 1000000}})
+    cmd(store, "m2", action="message", sessionId="old-session", cwd=str(work), prompt="again")
+    assert "sent to session old-session" in runs.step()[0]
+    wait_done(runs, "m2", store)
+    cmd(store, "m3", action="message", sessionId="old-session", cwd=str(work), prompt="again", fresh="always")
+    runs.step()
+    assert store.get("commands/m3")["freshFrom"] == "old-session"  # "always" wins over the size rule
+    wait_done(runs, "m3", store)
+    store.put_many({"meta/runs": {"freshOver": 10}})
+    cmd(store, "m4", action="message", sessionId="old-session", cwd=str(work), prompt="again", fresh="never")
+    runs.step()
+    assert store.get("commands/m4")["sessionId"] == "old-session" and "freshFrom" not in store.get("commands/m4")  # "never" resumes
+    wait_done(runs, "m4", store)

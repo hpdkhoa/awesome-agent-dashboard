@@ -170,6 +170,7 @@ export type Run = {
   permissionMode?: RunMode; // the setting the bridge read when this run went
   model?: string; effort?: string; // what the run went with: its own choice, else the setting in meta/runs (RunWith)
   noSession?: boolean; // a one-off start: its session is never saved, so no messages can follow
+  freshFrom?: string; contextTokens?: number; // the message went to a fresh session with a handoff from this one (handoff.py)
   // "Check now": what the bridge's wait rule saw for the session (bridge runs.py session_status)
   check?: { turn: boolean; lastFrom: string; open: boolean | null; openSince: string | null; openIn: "app" | "terminal" | null };
   createdAt: string;
@@ -319,21 +320,23 @@ export const checkSession = (machine: string, sessionId: string) => {
 export type RunMode = "manual" | "auto";
 // Model and effort for a run (the owner's words, 2026-11-10: "select model and effort"; the pick: "Setting plus a
 // choice on each message"): "" means the setting on the Runs tab, which itself may be "" for the CLI's own default.
-export type RunWith = { model?: string; effort?: string };
+export type Fresh = "auto" | "always" | "never";
+export type RunWith = { model?: string; effort?: string; fresh?: Fresh }; // fresh: a fresh session with a handoff (handoff.py)
+export const FRESH_OVER: [number, string][] = [[0, "off"], [100000, "100k tokens"], [200000, "200k tokens"], [300000, "300k tokens"], [500000, "500k tokens"], [800000, "800k tokens"]];
 export const MODELS: [string, string][] = [["", "default"], ["fable", "Fable"], ["opus", "Opus"], ["sonnet", "Sonnet"], ["haiku", "Haiku"]];
 export const EFFORTS: [string, string][] = [["", "default"], ["low", "low"], ["medium", "medium"], ["high", "high"], ["xhigh", "xhigh"], ["max", "max"]];
-export type RunPrefs = { mode: RunMode; model: string; effort: string };
+export type RunPrefs = { mode: RunMode; model: string; effort: string; freshOver: number };
 export function useRunPrefs(): RunPrefs | null {
   const [p, setP] = useState<RunPrefs | null>(null);
   useEffect(() => onSnapshot(doc(db, "meta", "runs"), (d) => {
     const x = d.data() ?? {};
-    setP({ mode: x.permissionMode === "auto" ? "auto" : "manual", model: String(x.model ?? ""), effort: String(x.effort ?? "") });
+    setP({ mode: x.permissionMode === "auto" ? "auto" : "manual", model: String(x.model ?? ""), effort: String(x.effort ?? ""), freshOver: x.freshOver == null ? 300000 : Number(x.freshOver) });
   }), []);
   return p;
 }
-export const setRunPrefs = (p: Partial<{ model: string; effort: string }>) =>
+export const setRunPrefs = (p: Partial<{ model: string; effort: string; freshOver: number }>) =>
   setDoc(doc(db, "meta", "runs"), { ...p, changedAt: new Date().toISOString() }, { merge: true });
-const withRun = (w?: RunWith) => ({ ...(w?.model ? { model: w.model } : {}), ...(w?.effort ? { effort: w.effort } : {}) });
+const withRun = (w?: RunWith) => ({ ...(w?.model ? { model: w.model } : {}), ...(w?.effort ? { effort: w.effort } : {}), ...(w?.fresh && w.fresh !== "auto" ? { fresh: w.fresh } : {}) });
 export function useRunMode(): RunMode | null {
   const [mode, setMode] = useState<RunMode | null>(null);
   useEffect(() => onSnapshot(doc(db, "meta", "runs"), (d) => setMode(d.data()?.permissionMode === "auto" ? "auto" : "manual")), []);

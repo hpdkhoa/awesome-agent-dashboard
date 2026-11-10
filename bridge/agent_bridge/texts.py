@@ -33,7 +33,7 @@ def _text_of(content) -> str:
     return ""
 
 
-def turns_of(path: Path) -> list[dict]:
+def turns_of(path: Path, prompt_chars: int = PROMPT_PREVIEW) -> list[dict]:
     """The turns of one log: each starts at a line the owner (or a dashboard message) typed and ends with the last
     assistant text before the next one. A response streams as several lines with one message id: the last line of an
     id holds its whole text, so the turn's reply is the last id's last line."""
@@ -61,7 +61,7 @@ def turns_of(path: Path) -> list[dict]:
     out = []
     for t in turns:
         text = next(reversed(t["_ids"].values()), "") if t["_ids"] else ""
-        out.append({"n": t["n"], "at": t["at"], "prompt": redact(t["prompt"], PROMPT_PREVIEW), "text": redact(text, NO_CAP)})
+        out.append({"n": t["n"], "at": t["at"], "prompt": redact(t["prompt"], prompt_chars), "text": redact(text, NO_CAP)})
     return out
 
 

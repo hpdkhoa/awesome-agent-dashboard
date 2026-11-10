@@ -1,10 +1,10 @@
 import { useState } from "react";
 import {
   cancelMessage, checkSession, continueRun, forceMessage, setAutoContinue, planFromSession, PLAN_KINDS, sendMessage, setRunMode, startRun, stopRun, useRunMode,
-  EFFORTS, MODELS, setRunPrefs, useRunPrefs, type RunWith,
+  EFFORTS, FRESH_OVER, MODELS, setRunPrefs, useRunPrefs, type Fresh, type RunWith,
   type Machine, type Run, type Session,
 } from "./data";
-import { usd } from "./Dashboard";
+import { num, usd } from "./Dashboard";
 import { Md } from "./Markdown";
 import { PcText } from "./FileView";
 import { MoreMenu } from "./MoreMenu";
@@ -37,7 +37,7 @@ the owner agrees. Only the owner closes a plan, on the page. Keep the whole plan
 
 // Model and effort for one run, preset to the setting on the Runs tab (the owner's pick, 2026-11-10: "Setting plus a
 // choice on each message"). "default" keeps the setting; the setting's own "default" keeps the CLI's model and effort.
-export function RunWithPicker({ value, onChange, compact = false }: { value: RunWith; onChange: (w: RunWith) => void; compact?: boolean }) {
+export function RunWithPicker({ value, onChange, compact = false, fresh = false }: { value: RunWith; onChange: (w: RunWith) => void; compact?: boolean; fresh?: boolean }) {
   const prefs = useRunPrefs();
   const name = (list: [string, string][], v: string) => list.find(([k]) => k === v)?.[1] ?? v;
   const label = (list: [string, string][], pref: string) => `default${pref ? ` (${name(list, pref)})` : ""}`;
@@ -49,6 +49,14 @@ export function RunWithPicker({ value, onChange, compact = false }: { value: Run
       <select value={value.effort ?? ""} onChange={(e) => onChange({ ...value, effort: e.target.value })} aria-label="effort">
         {EFFORTS.map(([k, n]) => <option key={k} value={k}>{k ? n : label(EFFORTS, prefs?.effort ?? "")}</option>)}
       </select>
+      {fresh && (
+        <select value={value.fresh ?? "auto"} onChange={(e) => onChange({ ...value, fresh: e.target.value as Fresh })} aria-label="fresh session with a handoff"
+          title="A fresh session with a handoff keeps turns fast; auto follows the size rule on the Runs tab">
+          <option value="auto">handoff: auto{prefs ? ` (over ${prefs.freshOver ? num(prefs.freshOver) : "off"})` : ""}</option>
+          <option value="always">fresh with a handoff</option>
+          <option value="never">resume as is</option>
+        </select>
+      )}
     </span>
   );
 }
@@ -177,7 +185,7 @@ export function MessageBox({ s, runs }: { s: Session; runs: Run[] }) {
           setError("");
         }}
       />
-      <RunWithPicker value={w} onChange={setW} />
+      <RunWithPicker value={w} onChange={setW} fresh />
       {error && <p className="bad small">{error}</p>}
       <p className="small">
         <StatusLine check={check} />{" "}
@@ -225,7 +233,12 @@ export function ModeSwitch() {
       <select value={prefs?.effort ?? ""} onChange={(e) => setRunPrefs({ effort: e.target.value })} aria-label="default effort">
         {EFFORTS.map(([k, n]) => <option key={k} value={k}>{k ? n : "CLI default"}</option>)}
       </select>
-      <span className="muted small">Model and effort for every run from here on, unless a message picks its own.</span>
+      <span className="label">Fresh with a handoff over</span>
+      <select value={prefs?.freshOver ?? 300000} onChange={(e) => setRunPrefs({ freshOver: Number(e.target.value) })} aria-label="fresh session over"
+        title="A message to a session whose context is over this size goes to a fresh session with a handoff: faster turns, less of your 5-hour window">
+        {FRESH_OVER.map(([k, n]) => <option key={k} value={k}>{n}</option>)}
+      </select>
+      <span className="muted small">Model and effort for every run from here on, unless a message picks its own. Over the size, a message starts a fresh session with a handoff (the last turns and the plan) instead of resuming the whole conversation.</span>
       <span className="muted small">
         {mode === "auto"
           ? "Claude Code's safety check approves most steps; the inbox gets the rest. For every run from here on."
@@ -322,6 +335,7 @@ export function RunList({ runs, title = "Runs from the dashboard" }: { runs: Run
               · {r.workType ?? ""} · {r.machine} ·{" "}
               {r.permissionMode === "auto" && <>auto · </>}
               {r.noSession && <>one-off · </>}
+              {r.freshFrom && <>fresh with a handoff from {r.freshFrom.slice(0, 8)} ({num(r.contextTokens ?? 0)} tok) · </>}
               {r.model && <>{r.model} · </>}
               {r.effort && <>{r.effort} · </>}
               {ago(r.startedAt ?? r.createdAt)}

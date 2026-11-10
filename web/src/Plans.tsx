@@ -78,7 +78,7 @@ function GenerateBox({ plan, items, runs }: { plan: Plan; items: InboxItem[]; ru
       </div>
       <textarea rows={2} value={note} placeholder="What it is for (optional), e.g. the delete flow, phone width" onChange={(e) => setNote(e.target.value)} />
       <div className="chips">
-        <RunWithPicker value={w} onChange={setW} />{" "}
+        <RunWithPicker value={w} onChange={setW} fresh />{" "}
         <button className="primary" disabled={going || kinds.length === 0} onClick={() => generate(kinds, note)}>{going ? "Sent" : "Generate"}</button>
         <button className="chip" disabled={!order} onClick={() => order && setC(checkGenerate(plan, order, items))}>Check</button>
       </div>

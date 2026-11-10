@@ -89,7 +89,7 @@ function PlanMessage({ plan }: { plan: Plan }) {
       )}
       {error && <p className="bad small">{error}</p>}
       <p className="muted small">It goes to the plan's session with the same wait rule as any message.</p>
-      <RunWithPicker value={w} onChange={setW} />{" "}
+      <RunWithPicker value={w} onChange={setW} fresh />{" "}
       <button className="primary" disabled={busy} onClick={send}>Send as {KIND_NAME[kind]}</button>
     </Section>
   );
@@ -253,7 +253,7 @@ function RunStep({ plan, step, runs, harness }: { plan: Plan; step: Parts["steps
       <button className="chip primary" disabled={going || explore} title={explore ? "Off in Explore: move the plan to Build first" : undefined} onClick={() => runStep(plan, step, harness, w).catch((e) => setError(String(e?.code ?? e)))}>
         {going ? "Running" : "Run step"}
       </button>
-      {!explore && <RunWithPicker value={w} onChange={setW} compact />}
+      {!explore && <RunWithPicker value={w} onChange={setW} compact fresh />}
       {error && <span className="bad small"> {error}</span>}
     </>
   );

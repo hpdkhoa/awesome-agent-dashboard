@@ -58,6 +58,7 @@ from pathlib import Path
 
 from .aggregate import work_type_of
 from .archiver import Archiver
+from .handoff import CHOICES, DEFAULT_FRESH_OVER, handoff_prompt, last_context, should_fresh
 from .digest import find_log, write_pages
 from .inbox import KINDS, PLAN_FORMAT, format_of, now_iso
 from .planfrom import NO_EDITS, kind_args, mark_quotes, note_command, plan_prompt, step_args
@@ -650,6 +651,9 @@ class Runs:
             self.store.update(path, {"status": "failed", "error": NO_CLI})
             self._answer_back(c, {"status": "answered", "error": NO_CLI})
             return f"{c['id']}: no claude CLI"
+        fresh, context = self._fresh_choice(c, sid)
+        if fresh:
+            return self._fresh_message(c, sid, cwd, text, wt, context)
         why = self.wait_reason(sid, bool(c.get("force")))
         if why:
             if c.get("status") != "waiting" or c.get("waitReason") != why:
@@ -675,6 +679,46 @@ class Runs:
             self.archiver.ask_unarchive(c["id"])
             self.store.update(path, {"archive": "unarchiving"})
         return f"{c['id']}: sent to session {sid}"
+
+    def _log_of(self, sid: str):
+        files = list(self.logs.glob(f"*/{sid}.jsonl")) if self.logs and self.logs.is_dir() else []
+        return max(files, key=lambda p: p.stat().st_size) if files else None
+
+    def _fresh_choice(self, c: dict, sid: str) -> tuple[bool, int]:
+        """(start a fresh session with a handoff?, the old session's context in tokens). The message's own choice
+        (auto, always, never) over the owner's size rule in meta/runs freshOver (handoff.py; the owner's pick,
+        2026-11-10: "Both")."""
+        choice = c.get("fresh") if c.get("fresh") in CHOICES else "auto"
+        prefs = self.store.get("meta/runs") or {}
+        over = prefs.get("freshOver")
+        over = DEFAULT_FRESH_OVER if over is None else int(over)
+        path = self._log_of(sid)
+        context = last_context(path) if path else 0
+        if choice == "auto" and path is None:
+            return False, 0  # nothing to measure: resume as before
+        return should_fresh(choice, context, over), context
+
+    def _fresh_message(self, c: dict, sid: str, cwd: str, text: str, wt: str, context: int) -> str:
+        """The message goes to a new session with a handoff built from the old session's log on this PC. A plan the
+        message belongs to moves to the new session; the run row links the two."""
+        from .texts import turns_of
+
+        path = self._log_of(sid)
+        turns = turns_of(path, 2000) if path else []
+        new_sid = str(uuid.uuid4())
+        plan_id = str(c.get("planId") or "")
+        prompt = handoff_prompt(sid, str(path or ""), turns, text, plan_id, context)
+        mode, kind = self.mode(), c.get("kind") if c.get("kind") in KINDS else ""
+        model, effort = self.run_with(c)
+        cmd = start_command(self.claude, prompt, new_sid, mode, model, effort) + (kind_args(kind) or step_args(str(c.get("stepId") or "")[:20]))
+        p = self._spawn(c["id"], cmd, cwd)
+        self.store.update(f"commands/{c['id']}", {"status": "running", "workType": wt, "pid": p.pid, "startedAt": now_iso(),
+                                                  "permissionMode": mode, "model": model, "effort": effort,
+                                                  "sessionId": new_sid, "freshFrom": sid, "contextTokens": context, "waitReason": None})
+        self._answer_back(c, {"waitReason": None})
+        if plan_id and self.store.get(f"plans/{plan_id}"):
+            self.store.update(f"plans/{plan_id}", {"sessionId": new_sid, "previousSessionId": sid, "updatedAt": now_iso()})
+        return f"{c['id']}: fresh session {new_sid} with a handoff from {sid} ({context:,} tokens of context)"
 
     def _ask_archive(self, c: dict, sid: str, cwd: str) -> bool:
         """After 1 minute of waiting for a session open in the app, ask the archiver (archiver.py) to free it."""
