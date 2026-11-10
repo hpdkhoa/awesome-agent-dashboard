@@ -65,3 +65,4 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
   th, td { overflow-wrap: normal; word-break: normal; min-width: 6em; }
   .md th, .md td { min-width: 7em; }
 }
+.run-all { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 10px; }

@@ -410,6 +410,29 @@ export const runStep = (plan: Plan, step: Parts["steps"][number], harness = "", 
   });
 };
 
+// Run all steps (the owner's words, 2026-11-10: "an automatic job or way to start all the steps without need me to press
+// every single one"; picks "Chain, stop on fail", "Button only"): the bridge runs the steps not done, one after another
+// (bridge chain.py); it stops on a fail and pushes. Stop ends the chain after the run going now.
+export type PlanChain = { planId: string; state: "on" | "stopped" | "done"; stepId?: string | null; runId?: string | null;
+  left?: number; reason?: string | null; startedAt?: string; endedAt?: string | null };
+export function usePlanChain(planId: string | undefined): PlanChain | null {
+  const [c, setC] = useState<PlanChain | null>(null);
+  useEffect(() => {
+    if (!planId) return;
+    return onSnapshot(doc(db, "planChains", planId), (s) => setC((s.data() as PlanChain) ?? null));
+  }, [planId]);
+  return c;
+}
+export const runAllSteps = (plan: Plan, harness = "", w?: RunWith) => {
+  const id = newId();
+  return setDoc(doc(db, "commands", id), {
+    id, action: "chain", machine: plan.machine, planId: plan.id, harness, prompt: "Run all steps",
+    status: "new", createdAt: new Date().toISOString(), ...withRun(w),
+  });
+};
+export const stopChain = (planId: string) =>
+  setDoc(doc(db, "planChains", planId), { state: "stopped", reason: "stopped by the owner", endedAt: new Date().toISOString() }, { merge: true });
+
 // The owner's order to move the plan's phase (phases.ts): a plain message; the session records a plain version.
 export const sendPhaseOrder = (plan: Plan, text: string, order: string) => {
   const id = newId();

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  PLAN_KINDS, runStep, sendPlanMessage, useHarness, usePlanSteps,
+  PLAN_KINDS, runAllSteps, runStep, sendPlanMessage, stopChain, useHarness, usePlanChain, usePlanSteps,
   type InboxItem, type Parts, type Plan, type PlanGenerated, type PlanKind, type PlanStep, type PlanVersion, type Run,
 } from "./data";
 import { isWaiting } from "./Inbox";
@@ -259,6 +259,35 @@ function RunStep({ plan, step, runs, harness }: { plan: Plan; step: Parts["steps
   );
 }
 
+// Run all steps: one press; the bridge runs the steps not done in order and stops on a fail (bridge chain.py).
+function RunAll({ plan, steps, total, harness }: { plan: Plan; steps: PlanStep[]; total: number; harness: string }) {
+  const chain = usePlanChain(plan.id);
+  const [error, setError] = useState("");
+  const [w, setW] = useState<RunWith>({});
+  if (phaseOf(plan) === "explore") return null;
+  const on = chain?.state === "on";
+  const done = steps.filter((x) => x.state === "done").length;
+  return (
+    <div className="run-all">
+      {on ? (
+        <button className="danger" onClick={() => stopChain(plan.id).catch((e) => setError(String(e?.code ?? e)))}>Stop run all</button>
+      ) : (
+        <button className="primary" disabled={done >= total} title={done >= total ? "Every step is done; rerun one by hand" : undefined}
+          onClick={() => runAllSteps(plan, harness, w).catch((e) => setError(String(e?.code ?? e)))}>
+          Run all steps ({total - done} not done)
+        </button>
+      )}
+      {!on && <RunWithPicker value={w} onChange={setW} compact fresh />}
+      {chain && (
+        <span className={"status " + (on ? "running" : chain.state === "done" ? "done" : "failed")}>
+          {on ? `running ${chain.stepId ?? "…"}${chain.left ? ` · ${chain.left} left` : ""}` : chain.state === "done" ? `all done · ${chain.reason ?? ""}` : `stopped · ${chain.reason ?? ""}`}
+        </span>
+      )}
+      {error && <span className="bad small"> {error}</span>}
+    </div>
+  );
+}
+
 function DiffBlock({ a, b }: { a: string[]; b: string[] }) {
   const d = diffLines(a, b);
   if (!d.some((x) => x.op !== "same")) return <p className="muted small">No change.</p>;
@@ -376,6 +405,10 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
 
       <Section id="plan.part.steps" title="6. Steps" extra={`${v.parts.steps.length} steps`} stale={staleMark(stale, "results")}>
         {before && <DiffBlock a={partLines(before, "steps")} b={partLines(v.parts, "steps")} />}
+        {!before && v.n === plan.current && (
+          <RunAll plan={plan} total={v.parts.steps.length} harness={harnessNote}
+            steps={steps.filter((x) => v.parts!.steps.some((st) => st.id === x.stepId))} />
+        )}
         {v.parts.steps.map((st) => {
           const sv = steps.find((x) => x.stepId === st.id);
           const last = sv?.versions[sv.versions.length - 1];

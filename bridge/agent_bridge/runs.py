@@ -61,6 +61,7 @@ from .archiver import Archiver
 from .handoff import CHOICES, DEFAULT_FRESH_OVER, handoff_prompt, last_context, should_fresh
 from .digest import find_log, write_pages
 from .inbox import KINDS, PLAN_FORMAT, format_of, now_iso
+from .chain import Chains
 from .planfrom import NO_EDITS, mark_quotes, note_command, plan_prompt, system_args
 from .redact import redact
 
@@ -366,12 +367,13 @@ class Runs:
         # store once on the first step, so a bridge restart keeps them
         self.auto: dict[str, dict] | None = None
         self.auto_lock = threading.Lock()  # a plan pauses from its reading thread
+        self.chains = Chains(store, machine, push)  # chain.py: Run all steps, one step after another
 
     def forget_lost(self) -> list[str]:
         """On start: runs an earlier bridge on this machine left running. One whose .out already holds claude's
         complete result is finished from that file as if its process had just ended (the owner's choice, 2026-11-08:
         "Finish from the .out file"); the rest can no longer be followed and are lost. Also reads the paused runs that
-        continue by themselves at the reset."""
+        continue by themselves at the reset, and the Run all steps chains left on."""
         log = [f"{k}: continues by itself at the reset" for k in self._auto_runs()]
         for c in self.store.where("commands", "status", "running"):
             if c.get("machine") != self.machine or c["id"] in self.procs:
@@ -386,7 +388,7 @@ class Runs:
             self.store.update(f"commands/{c['id']}", {"status": "lost", "endedAt": now_iso(), "error": error})
             self._answer_back(c, {"status": "answered", "error": error})
             log.append(f"{c['id']}: lost to a bridge restart")
-        return log
+        return log + self.chains.resume()  # chain.py: a chain left on goes on with the steps not done
 
     def _answer_back(self, c: dict, fields: dict) -> None:
         """Writes a delivered answer's outcome on its inbox item."""
@@ -424,6 +426,7 @@ class Runs:
                     else self._stop(c) if action == "stop" else self._check(c) if action == "check"
                     else self._plan(c) if action == "plan" else self._approve_generated(c) if action == "approve_generated"
                     else self._delete_plan_files(c) if action == "delete_plan_files"
+                    else self.chains.start(c) if action == "chain"
                     else self._continue(c) if action == "continue" else self._auto_continue(c) if action == "auto_continue"
                     else self._unknown(c))
             if line:
@@ -494,7 +497,7 @@ class Runs:
             new = {"action": "message", "sessionId": old.get("sessionId", ""), "cwd": old.get("cwd") or old.get("folder", ""),
                    "prompt": prompt if prompt.startswith(CONTINUE_NOTE) else CONTINUE_NOTE + prompt,
                    **{k: old[k] for k in ("kind", "planId", "stepId", "inboxId", "ownerText", "generate", "planCheck",
-                                          "phaseOrder") if k in old}}
+                                          "phaseOrder", "chain") if k in old}}
         self.store.put_many({f"commands/{nid}": {"id": nid, "machine": self.machine, "status": "new",
                                                  "createdAt": now_iso(), "continueOf": target, **new}})
         with self.auto_lock:
@@ -1009,4 +1012,5 @@ class Runs:
             what = "message" if c.get("action") == "message" else "run"
             self.push.notify(f"{what.capitalize()} {fields['status']}: {c.get('workType') or c.get('folder') or ''}".rstrip(": "),
                              body or "No text.", f"/?run={cid}", cid)
-        return f"{cid}: {fields['status']}"
+        after = self.chains.after(c) if c.get("chain") else None
+        return f"{cid}: {fields['status']}" + (f"; {after}" if after else "")
