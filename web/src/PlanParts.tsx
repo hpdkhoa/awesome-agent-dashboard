@@ -260,7 +260,7 @@ function RunStep({ plan, step, runs, harness }: { plan: Plan; step: Parts["steps
 }
 
 // Run all steps: one press; the bridge runs the steps not done in order and stops on a fail (bridge chain.py).
-function RunAll({ plan, steps, total, harness }: { plan: Plan; steps: PlanStep[]; total: number; harness: string }) {
+function RunAll({ plan, steps, total }: { plan: Plan; steps: PlanStep[]; total: number }) {
   const chain = usePlanChain(plan.id);
   const [error, setError] = useState("");
   const [w, setW] = useState<RunWith>({});
@@ -273,7 +273,7 @@ function RunAll({ plan, steps, total, harness }: { plan: Plan; steps: PlanStep[]
         <button className="danger" onClick={() => stopChain(plan.id).catch((e) => setError(String(e?.code ?? e)))}>Stop run all</button>
       ) : (
         <button className="primary" disabled={done >= total} title={done >= total ? "Every step is done; rerun one by hand" : undefined}
-          onClick={() => runAllSteps(plan, harness, w).catch((e) => setError(String(e?.code ?? e)))}>
+          onClick={() => runAllSteps(plan, w).catch((e) => setError(String(e?.code ?? e)))}>
           Run all steps ({total - done} not done)
         </button>
       )}
@@ -406,7 +406,7 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
       <Section id="plan.part.steps" title="6. Steps" extra={`${v.parts.steps.length} steps`} stale={staleMark(stale, "results")}>
         {before && <DiffBlock a={partLines(before, "steps")} b={partLines(v.parts, "steps")} />}
         {!before && v.n === plan.current && (
-          <RunAll plan={plan} total={v.parts.steps.length} harness={harnessNote}
+          <RunAll plan={plan} total={v.parts.steps.length}
             steps={steps.filter((x) => v.parts!.steps.some((st) => st.id === x.stepId))} />
         )}
         {v.parts.steps.map((st) => {

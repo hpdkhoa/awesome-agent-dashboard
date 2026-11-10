@@ -22,6 +22,27 @@ from .inbox import now_iso
 GOING = ("new", "running", "waiting", "stopping")
 
 
+def item_hash(h: dict) -> str:
+    """FNV-1a, 32 bits, the same as the page's itemHash (web/src/harness.ts): a tick holds it, so an item whose text
+    changed shows unticked until the owner approves it again."""
+    x = 0x811C9DC5
+    for ch in f"{h.get('kind', '')}:{h.get('item', '')}":
+        x = ((x ^ ord(ch)) * 0x01000193) & 0xFFFFFFFF
+    return f"{x:08x}"
+
+
+def harness_note(items: list[dict] | None, ticks: dict | None) -> str:
+    """The same note as the page's buildNote (web/src/harness.ts), made when each step starts, from the harness of the
+    plan's current version and the owner's ticks then (the owner's words, 2026-11-04: "the unticked item won't be used
+    or added into build phase")."""
+    if not items:
+        return ""
+    t = (ticks or {}).get("items") or {}
+    ok = [h["id"] for h in items if (t.get(h["id"]) or {}).get("ok") and t[h["id"]].get("hash") == item_hash(h)]
+    left = [h["id"] for h in items if h["id"] not in ok]
+    return f" Use only the approved harness items: {', '.join(ok) or 'none'}." + (f" Not approved, left out: {', '.join(left)}." if left else "")
+
+
 def step_text(step: dict, harness: str = "") -> str:
     """The same words as the page's Run step (web/src/data.ts runStep)."""
     return f"Work on step {step['id']}: {step['title']}. Report it with step_update.{harness}"
@@ -35,14 +56,14 @@ class Chains:
         self.store, self.machine, self.push = store, machine, push
 
     def start(self, c: dict) -> str:
-        """The page's Run all steps: {action: "chain", planId, harness, model, effort, fresh}."""
+        """The page's Run all steps: {action: "chain", planId, model, effort, fresh}."""
         pid = str(c.get("planId") or "")
         old = self.store.get(f"planChains/{pid}") or {}
         if old.get("state") == "on" and (self.store.get(f"commands/{old.get('runId')}") or {}).get("status") in GOING:
             self.store.update(f"commands/{c['id']}", {"status": "failed", "endedAt": now_iso(), "error": "Run all steps is already going."})
             return f"{c['id']}: refused, chain {pid} already going"
         ch = {"planId": pid, "machine": self.machine, "state": "on", "startedAt": now_iso(), "updatedAt": now_iso(),
-              "runId": None, "stepId": None, "reason": None, "endedAt": None, "harness": str(c.get("harness") or ""),
+              "runId": None, "stepId": None, "reason": None, "endedAt": None,
               **{k: c.get(k) or None for k in ("model", "effort", "fresh")}}
         self.store.put_many({f"planChains/{pid}": ch})
         self.store.update(f"commands/{c['id']}", {"status": "done", "endedAt": now_iso()})
@@ -100,7 +121,7 @@ class Chains:
             return self._stop(ch, f"{len(steps)} of {len(steps)} steps done", "done")
         st = left[0]
         nid = uuid.uuid4().hex[:20]
-        text = step_text(st, str(ch.get("harness") or ""))
+        text = step_text(st, harness_note(v.get("harness"), self.store.get(f"planHarness/{pid}")))
         w = {k: ch[k] for k in ("model", "effort", "fresh") if ch.get(k)}
         self.store.put_many({f"commands/{nid}": {
             "id": nid, "action": "message", "machine": plan.get("machine") or self.machine, "sessionId": plan.get("sessionId", ""),

@@ -423,10 +423,11 @@ export function usePlanChain(planId: string | undefined): PlanChain | null {
   }, [planId]);
   return c;
 }
-export const runAllSteps = (plan: Plan, harness = "", w?: RunWith) => {
+// The harness note is made by the bridge as each step starts, from the ticks then (chain.py harness_note).
+export const runAllSteps = (plan: Plan, w?: RunWith) => {
   const id = newId();
   return setDoc(doc(db, "commands", id), {
-    id, action: "chain", machine: plan.machine, planId: plan.id, harness, prompt: "Run all steps",
+    id, action: "chain", machine: plan.machine, planId: plan.id, prompt: "Run all steps",
     status: "new", createdAt: new Date().toISOString(), ...withRun(w),
   });
 };
