@@ -172,6 +172,7 @@ textarea { width: 100%; font: inherit; padding: 8px 10px; border-radius: 8px; bo
 .actions { display: flex; gap: 8px; margin-top: 10px; }
 .mode-switch { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 14px; }
 .run-with { display: inline-flex; gap: 6px; margin: 6px 0; vertical-align: middle; }
+.keep-session { display: block; margin: 4px 0; }
 .run-with select { font-size: 13px; padding: 3px 6px; }
 .run-with.compact { margin: 0 0 0 6px; }
 .run-with.compact select { font-size: 11px; padding: 0 4px; }

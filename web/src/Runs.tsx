@@ -57,6 +57,7 @@ export function StartForm({ machines, plan = false }: { machines: Machine[]; pla
   const folders = machines.flatMap((m) => (m.folders ?? []).map((f) => ({ ...f, machine: m.name })));
   const [pick, setPick] = useState(0);
   const [w, setW] = useState<RunWith>({});
+  const [keep, setKeep] = useState(true);
   const [prompt, setPrompt] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -67,7 +68,7 @@ export function StartForm({ machines, plan = false }: { machines: Machine[]; pla
     if (!prompt.trim()) return setError("Write what the session should do first.");
     setBusy(true);
     try {
-      await startRun(f.machine, f.path, plan ? planPrompt(prompt.trim()) : prompt.trim(), w);
+      await startRun(f.machine, f.path, plan ? planPrompt(prompt.trim()) : prompt.trim(), w, plan || keep);
       setPrompt("");
     } catch (e) {
       setError(String((e as { code?: string }).code ?? e));
@@ -85,6 +86,12 @@ export function StartForm({ machines, plan = false }: { machines: Machine[]; pla
         ))}
       </select>
       <RunWithPicker value={w} onChange={setW} />
+      {!plan && (
+        <label className="small keep-session">
+          <input type="checkbox" checked={keep} onChange={(e) => setKeep(e.target.checked)} /> keep the session
+          <span className="muted"> (untick for a one-off job: nothing is saved, no session on the list, no message after)</span>
+        </label>
+      )}
       <textarea
         rows={3}
         value={prompt}
@@ -314,6 +321,7 @@ export function RunList({ runs, title = "Runs from the dashboard" }: { runs: Run
               {r.quotes ? ` · quotes ${r.quotes.checked} checked, ${r.quotes.marked} marked` : ""}{" "}
               · {r.workType ?? ""} · {r.machine} ·{" "}
               {r.permissionMode === "auto" && <>auto · </>}
+              {r.noSession && <>one-off · </>}
               {r.model && <>{r.model} · </>}
               {r.effort && <>{r.effort} · </>}
               {ago(r.startedAt ?? r.createdAt)}

@@ -169,6 +169,7 @@ export type Run = {
   force?: boolean;
   permissionMode?: RunMode; // the setting the bridge read when this run went
   model?: string; effort?: string; // what the run went with: its own choice, else the setting in meta/runs (RunWith)
+  noSession?: boolean; // a one-off start: its session is never saved, so no messages can follow
   // "Check now": what the bridge's wait rule saw for the session (bridge runs.py session_status)
   check?: { turn: boolean; lastFrom: string; open: boolean | null; openSince: string | null; openIn: "app" | "terminal" | null };
   createdAt: string;
@@ -278,9 +279,12 @@ export const useRuns = () => useCollection<Run>("commands", orderBy("createdAt",
 const newId = () => crypto.randomUUID().replace(/-/g, "").slice(0, 20);
 
 // Commands the bridge on that machine carries out: start claude in a registered folder, or stop a run it started.
-export const startRun = (machine: string, folder: string, prompt: string, w?: RunWith) => {
+// keep=false: a one-off job, its session never saved (the owner's words, 2026-11-10: "A "don't keep the session" tick").
+export const startRun = (machine: string, folder: string, prompt: string, w?: RunWith, keep = true) => {
   const id = newId();
-  return setDoc(doc(db, "commands", id), { id, action: "start", machine, folder, prompt, status: "new", createdAt: new Date().toISOString(), ...withRun(w) });
+  return setDoc(doc(db, "commands", id), {
+    id, action: "start", machine, folder, prompt, status: "new", createdAt: new Date().toISOString(), ...withRun(w), ...(keep ? {} : { noSession: true }),
+  });
 };
 // A message to an existing session: the bridge resumes it with the message once it is closed.
 export const sendMessage = (machine: string, sessionId: string, cwd: string, prompt: string, w?: RunWith) => {

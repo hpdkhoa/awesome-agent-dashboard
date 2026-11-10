@@ -16,7 +16,7 @@ from .logs import FileState, read_lines, session_files
 class State:
     """Per log file: how far it was read and what it held; per document: the hash last written. Kept outside the repo."""
 
-    VERSION = 2  # 2: text keeps its line breaks; an older state is read again from the logs
+    VERSION = 3  # 3: dashboard messages count as prompts (logs.py is_prompt); an older state is read again from the logs
 
     def __init__(self, path: Path):
         self.path = path

@@ -149,3 +149,15 @@ def test_deleted_documents_are_not_written_again(tmp_path, monkeypatch):
     store.docs["meta/deleted"] = {"paths": {}}  # the owner clears the tombstones: both come back
     sync.run(cfg, 36500, store)
     assert "sessions/s1" in store.docs and "sessions/s2" in store.docs
+
+
+def test_dashboard_messages_count_as_prompts(tmp_path):
+    from agent_bridge.logs import is_prompt
+
+    sdk = {"type": "user", "timestamp": T1, "entrypoint": "sdk-cli", "userType": "external", "promptId": "p1", "message": {"content": "do it"}}
+    tool = {"type": "user", "timestamp": T2, "entrypoint": "sdk-cli", "message": {"content": [{"type": "tool_result", "content": "x"}]}}
+    assert is_prompt(sdk) and is_prompt(human(T1, "x")) and not is_prompt({"type": "user", "message": {"content": "?"}})
+    p = tmp_path / "s.jsonl"
+    write(p, [sdk, tool, assistant("m1", T2, text="done")])
+    st = read_lines(p, FileState())
+    assert st.prompts == 1 and st.first_prompt == "do it"

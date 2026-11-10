@@ -432,3 +432,8 @@ def test_model_and_effort_come_from_the_run_or_the_setting(tmp_path, monkeypatch
     runs.step()
     c = store.get("commands/c1")
     assert c["model"] == "sonnet" and c["effort"] == "high"
+
+
+def test_a_one_off_start_keeps_no_session():
+    assert start_command("claude", "x", "sid", keep=False)[-1] == "--no-session-persistence"
+    assert "--no-session-persistence" not in start_command("claude", "x", "sid")

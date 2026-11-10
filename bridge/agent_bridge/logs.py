@@ -61,6 +61,15 @@ def _text_of(content) -> str:
     return ""
 
 
+def is_prompt(d: dict) -> bool:
+    """A user line the owner wrote: typed in the app or a terminal (origin human), or sent by the bridge through
+    `claude -p` (entrypoint sdk-*, a promptId). A dashboard message is a prompt too (the owner's words, 2026-11-10:
+    "Count -p prompts as prompts"). Tool results have no text and never count."""
+    if (d.get("origin") or {}).get("kind") == "human":
+        return True
+    return bool(d.get("promptId")) or str(d.get("entrypoint") or "").startswith("sdk")
+
+
 def read_lines(path: Path, st: FileState) -> FileState:
     """Reads the complete lines after st.offset and folds them into st. A half-written last line is left for next time."""
     with open(path, "rb") as f:
@@ -91,7 +100,7 @@ def _fold(d: dict, st: FileState) -> None:
     kind = d.get("type")
     if kind == "custom-title" and d.get("customTitle"):
         st.title = redact(d["customTitle"], 120)
-    elif kind == "user" and (d.get("origin") or {}).get("kind") == "human" and not d.get("isMeta"):
+    elif kind == "user" and not d.get("isMeta") and is_prompt(d):
         text = _text_of((d.get("message") or {}).get("content"))
         if text.strip():
             st.prompts += 1

@@ -248,9 +248,13 @@ def mode_args(mode: str) -> list[str]:
     return ["--permission-mode", "auto"] if mode == "auto" else []
 
 
-def start_command(claude: str, prompt: str, session_id: str, mode: str = "manual", model: str = "", effort: str = "") -> list[str]:
+def start_command(claude: str, prompt: str, session_id: str, mode: str = "manual", model: str = "", effort: str = "",
+                  keep: bool = True) -> list[str]:
+    """keep=False: a one-off job whose session is never saved (--no-session-persistence), so it leaves no log and no
+    session on the dashboard (the owner's words, 2026-11-10: "A "don't keep the session" tick on Start")."""
     return [claude, "-p", prompt, "--output-format", "json", "--session-id", session_id,
-            "--permission-prompt-tool", APPROVAL_TOOL, *mode_args(mode), *model_args(model, effort)]
+            "--permission-prompt-tool", APPROVAL_TOOL, *mode_args(mode), *model_args(model, effort),
+            *([] if keep else ["--no-session-persistence"])]
 
 
 # Generated files (the owner's choice, 2026-11-04: "use The project folder and add .gitignore"; approved: named by
@@ -572,10 +576,11 @@ class Runs:
             return f"{c['id']}: no claude CLI"
         sid, mode = str(uuid.uuid4()), self.mode()
         model, effort = self.run_with(c)
-        p = self._spawn(c["id"], start_command(self.claude, prompt, sid, mode, model, effort), c["folder"])
+        keep = not c.get("noSession")
+        p = self._spawn(c["id"], start_command(self.claude, prompt, sid, mode, model, effort, keep), c["folder"])
         self.store.update(path, {"status": "running", "sessionId": sid, "workType": wt, "pid": p.pid,
                                  "startedAt": now_iso(), "permissionMode": mode, "model": model, "effort": effort})
-        return f"{c['id']}: started session {sid} in {c['folder']}"
+        return f"{c['id']}: started {'one-off (not kept) ' if not keep else ''}session {sid} in {c['folder']}"
 
     def wait_reason(self, session_id: str, force: bool = False) -> str | None:
         """"turn", "app", or None when the message can go now."""
