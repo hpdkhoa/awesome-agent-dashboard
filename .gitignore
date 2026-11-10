@@ -26,3 +26,6 @@ __pycache__/
 
 # Files a plan's Generate makes (agent dashboard), one folder per plan version
 .plan_data/
+
+# Desktop avatar (Rust build output)
+avatar/target/

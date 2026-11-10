@@ -130,6 +130,20 @@ class Firestore:
         rows = self._call(f"{self.base}:runQuery", q)
         return [{k: from_value(v) for k, v in r["document"].get("fields", {}).items()} for r in rows if "document" in r]
 
+    def query(self, collection: str, field: str = "", op: str = "EQUAL", value=None, order: str = "",
+              limit: int = 0) -> list[dict]:
+        """One query: an optional filter (op: EQUAL, IN, GREATER_THAN_OR_EQUAL, ...), an optional newest-first order on
+        one field, an optional limit. One filter or one order needs no composite index."""
+        sq: dict = {"from": [{"collectionId": collection}]}
+        if field:
+            sq["where"] = {"fieldFilter": {"field": {"fieldPath": field}, "op": op, "value": to_value(value)}}
+        if order:
+            sq["orderBy"] = [{"field": {"fieldPath": order}, "direction": "DESCENDING"}]
+        if limit:
+            sq["limit"] = limit
+        rows = self._call(f"{self.base}:runQuery", {"structuredQuery": sq})
+        return [{k: from_value(v) for k, v in r["document"].get("fields", {}).items()} for r in rows if "document" in r]
+
     def put_many(self, docs: dict[str, dict]) -> int:
         """Replaces each document (path -> fields), 400 per commit. Returns how many were written."""
         items = list(docs.items())

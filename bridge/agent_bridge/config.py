@@ -41,6 +41,8 @@ class Config:
     files_url: str = ""  # the public address the owner's Cloudflare Tunnel routes to the file viewer (files.py)
     files_port: int = 8793
     site_origins: tuple[str, ...] = ()  # the page origins allowed to ask the file viewer
+    status_port: int = 8794  # the desktop avatar's read-only /status (status.py); 127.0.0.1, never tunnelled
+    status_hosts: tuple[tuple[str, str], ...] = ()  # name=host pairs whose ssh and Ollama ports /status checks
 
     @classmethod
     def load(cls, env_path: Path | None = None) -> Config:
@@ -57,5 +59,8 @@ class Config:
         logs = Path(env.get("CLAUDE_LOGS") or Path.home() / ".claude" / "projects")
         machine = env.get("MACHINE_NAME") or socket.gethostname()
         origins = tuple(o.strip().rstrip("/") for o in env.get("SITE_ORIGINS", "").split(";") if o.strip())
+        hosts = tuple((n.strip(), h.strip()) for n, _, h in
+                      (p.partition("=") for p in env.get("STATUS_HOSTS", "").split(";")) if n.strip() and h.strip())
         return cls(project, key, machine, logs, roots, env.get("CLAUDE_BIN", ""), env.get("OWNER_EMAIL", ""),
-                   env.get("FILES_URL", "").rstrip("/"), int(env.get("FILES_PORT") or 8793), origins)
+                   env.get("FILES_URL", "").rstrip("/"), int(env.get("FILES_PORT") or 8793), origins,
+                   int(env.get("STATUS_PORT") or 8794), hosts)

@@ -110,6 +110,10 @@ def main(argv: list[str] | None = None) -> None:
                   list(cfg.site_origins), cfg.files_port, Texts(cfg.logs, data_dir() / "runs"))
             store.put_many({"meta/files": {"url": cfg.files_url}})
             print(f"file viewer on 127.0.0.1:{cfg.files_port} for {cfg.files_url}", flush=True)
+        from .status import Status, serve as serve_status
+
+        serve_status(Status(store, cfg.machine, cfg.status_hosts, runs), cfg.status_port)
+        print(f"avatar status on 127.0.0.1:{cfg.status_port}/status", flush=True)
         feed = gone = None
         try:
             from .listen import CommandFeed, DeletedFeed, firestore_client
@@ -131,6 +135,10 @@ def main(argv: list[str] | None = None) -> None:
                     f"{r['toWrite'] if a.dry_run else r['written']}",
                     flush=True,
                 )
+                if store is not None and a.cmd == "watch":
+                    from .status import heartbeat
+
+                    heartbeat(store, cfg.machine)  # after the sync, which rewrites machines/<this machine>
                 if store is not None:
                     for line in deliver(store, cfg.machine, claude):
                         print(f"{stamp()} inbox {line}", flush=True)
