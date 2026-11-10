@@ -55,3 +55,13 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
 
 .tab { white-space: nowrap; font-size: 13px; }
 .tab .count { display: inline-block; }
+
+/* Phone tables (the owner's words, 2026-11-10: "the table goes too many columns then wrap text make each column display
+   only a few character. use iPhone 13 screen size as the norm"; iPhone 13 = 390 px wide). A wide table scrolls sideways
+   instead of squeezing: words never break inside, each column keeps a readable width. */
+.md th, .md td { overflow-wrap: normal; word-break: normal; min-width: 7em; }
+@media (max-width: 560px) {
+  table { display: block; width: auto; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  th, td { overflow-wrap: normal; word-break: normal; min-width: 6em; }
+  .md th, .md td { min-width: 7em; }
+}
