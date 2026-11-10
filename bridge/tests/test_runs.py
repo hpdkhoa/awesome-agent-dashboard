@@ -414,3 +414,21 @@ def test_a_plan_below_the_format_number_is_rebuilt_and_one_at_it_is_not(tmp_path
     store.put_many({"commands/m2": {"id": "m2"}})
     go, _ = runs._upgrade_first({"id": "m2", "planId": "a"})  # parts but no number: format 1, below 2
     assert not go and store.get("commands/m2")["waitReason"] == "upgrade"
+
+
+def test_model_and_effort_come_from_the_run_or_the_setting(tmp_path, monkeypatch):
+    from agent_bridge.runs import model_args
+
+    assert model_args("opus", "high") == ["--model", "opus", "--effort", "high"]
+    assert model_args("", "") == [] and model_args("rm -rf", "huge") == []  # nothing odd reaches the CLI
+    assert start_command("claude", "x", "sid", "manual", "sonnet", "low")[-4:] == ["--model", "sonnet", "--effort", "low"]
+    assert "--model" not in message_command("claude", "hi", "sid")
+    store, runs, work = setup(tmp_path, monkeypatch)
+    store.put_many({"meta/runs": {"permissionMode": "manual", "model": "opus", "effort": "high"}})
+    assert runs.run_with({"id": "c"}) == ("opus", "high")  # the setting
+    assert runs.run_with({"id": "c", "model": "haiku", "effort": "low"}) == ("haiku", "low")  # the run's own choice
+    assert runs.run_with({"id": "c", "model": "x y", "effort": "max"}) == ("", "max")  # a bad name falls to the CLI default
+    cmd(store, "c1", action="start", folder=str(work), prompt="hello", model="sonnet")
+    runs.step()
+    c = store.get("commands/c1")
+    assert c["model"] == "sonnet" and c["effort"] == "high"

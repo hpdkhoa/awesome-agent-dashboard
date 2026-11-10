@@ -7,6 +7,8 @@ import { GeneratedSection } from "./GeneratedView";
 import { PHASES, phaseName, phaseOf, phaseOrder, phasePrompt, phaseStarts } from "./phases";
 import { MoreMenu } from "./MoreMenu";
 import { PartsView } from "./PlanParts";
+import { RunWithPicker } from "./Runs";
+import type { RunWith } from "./data";
 import { isWaiting } from "./Inbox";
 import { Md } from "./Markdown";
 import { PlanGraph } from "./PlanGraph";
@@ -54,7 +56,8 @@ function GenerateBox({ plan, items, runs }: { plan: Plan; items: InboxItem[]; ru
   const going = runs.some((r) => r.planId === plan.id && (r.generate || r.planCheck) && (r.status === "new" || r.status === "running"));
   const order = lastOrder(plan, runs);
   const fail = (e: unknown) => setError(String((e as { code?: string })?.code ?? e));
-  const generate = (ks: Kind[], n: string) => sendGenerate(plan, ks, n, generatePrompt(ks, n, generateFolder(plan))).then(() => setC(null)).catch(fail);
+  const [w, setW] = useState<RunWith>({});
+  const generate = (ks: Kind[], n: string) => sendGenerate(plan, ks, n, generatePrompt(ks, n, generateFolder(plan)), w).then(() => setC(null)).catch(fail);
   const [ticked, setTicked] = useState<string[]>([]);
   const done = approvedFiles(usePlanGenerated(plan.id));
   const pending = c ? approvals(c, ticked, plan.id, plan.cwd, done) : [];
@@ -75,6 +78,7 @@ function GenerateBox({ plan, items, runs }: { plan: Plan; items: InboxItem[]; ru
       </div>
       <textarea rows={2} value={note} placeholder="What it is for (optional), e.g. the delete flow, phone width" onChange={(e) => setNote(e.target.value)} />
       <div className="chips">
+        <RunWithPicker value={w} onChange={setW} />{" "}
         <button className="primary" disabled={going || kinds.length === 0} onClick={() => generate(kinds, note)}>{going ? "Sent" : "Generate"}</button>
         <button className="chip" disabled={!order} onClick={() => order && setC(checkGenerate(plan, order, items))}>Check</button>
       </div>

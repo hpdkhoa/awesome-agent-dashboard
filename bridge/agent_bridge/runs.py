@@ -228,14 +228,29 @@ def log_wait_reason(logs: Path | None, session_id: str, force: bool = False, pro
     return None
 
 
+EFFORTS = ("low", "medium", "high", "xhigh", "max")
+MODEL_RE = re.compile(r"^[a-z][a-z0-9.\-]{1,60}$")  # an alias (fable, opus, sonnet, haiku) or a full model name
+
+
+def model_args(model: str = "", effort: str = "") -> list[str]:
+    """--model and --effort for a run (the owner's words, 2026-11-10: "I don't have any choice to select model and
+    effort add it"). Empty means the CLI's own default; anything not a model name or effort level is dropped."""
+    out: list[str] = []
+    if model and MODEL_RE.match(model):
+        out += ["--model", model]
+    if effort in EFFORTS:
+        out += ["--effort", effort]
+    return out
+
+
 def mode_args(mode: str) -> list[str]:
     """Only "auto" changes the mode; anything else stays Manual. Bypass is never passed."""
     return ["--permission-mode", "auto"] if mode == "auto" else []
 
 
-def start_command(claude: str, prompt: str, session_id: str, mode: str = "manual") -> list[str]:
+def start_command(claude: str, prompt: str, session_id: str, mode: str = "manual", model: str = "", effort: str = "") -> list[str]:
     return [claude, "-p", prompt, "--output-format", "json", "--session-id", session_id,
-            "--permission-prompt-tool", APPROVAL_TOOL, *mode_args(mode)]
+            "--permission-prompt-tool", APPROVAL_TOOL, *mode_args(mode), *model_args(model, effort)]
 
 
 # Generated files (the owner's choice, 2026-11-04: "use The project folder and add .gitignore"; approved: named by
@@ -261,11 +276,12 @@ def ensure_plan_data_ignored(cwd: str) -> bool:
 
 
 def message_command(claude: str, message: str, session_id: str, mode: str = "manual", kind: str = "",
-                    step: str = "") -> list[str]:
+                    step: str = "", model: str = "", effort: str = "") -> list[str]:
     """kind: a plan message's kind (qa, goal, step, rule, lesson); step: a Run step's step id. Either goes as an
     appended system prompt; a Run step has no kind."""
     return [claude, "-p", message, "--output-format", "json", "--resume", session_id,
-            "--permission-prompt-tool", APPROVAL_TOOL, *mode_args(mode), *(kind_args(kind) or step_args(step))]
+            "--permission-prompt-tool", APPROVAL_TOOL, *mode_args(mode), *(kind_args(kind) or step_args(step)),
+            *model_args(model, effort)]
 
 
 class _Ended:
@@ -375,6 +391,14 @@ class Runs:
     def mode(self) -> str:
         """The owner's one setting for every run, read when a run starts: "auto" or "manual"."""
         return "auto" if (self.store.get("meta/runs") or {}).get("permissionMode") == "auto" else "manual"
+
+    def run_with(self, c: dict) -> tuple[str, str]:
+        """(model, effort) for a run: the run's own choice, else the owner's setting in meta/runs, else "" (the CLI's
+        default). The owner's pick, 2026-11-10: "Setting plus a choice on each message"."""
+        prefs = self.store.get("meta/runs") or {}
+        model = str(c.get("model") or prefs.get("model") or "")
+        effort = str(c.get("effort") or prefs.get("effort") or "")
+        return (model if MODEL_RE.match(model) else ""), (effort if effort in EFFORTS else "")
 
     def step(self, todo: list[dict] | None = None) -> list[str]:
         """Acts on the commands still to do. `todo` comes from the listener (listen.py); without it, ask Firestore."""
@@ -547,9 +571,10 @@ class Runs:
             self.store.update(path, {"status": "failed", "error": NO_CLI})
             return f"{c['id']}: no claude CLI"
         sid, mode = str(uuid.uuid4()), self.mode()
-        p = self._spawn(c["id"], start_command(self.claude, prompt, sid, mode), c["folder"])
+        model, effort = self.run_with(c)
+        p = self._spawn(c["id"], start_command(self.claude, prompt, sid, mode, model, effort), c["folder"])
         self.store.update(path, {"status": "running", "sessionId": sid, "workType": wt, "pid": p.pid,
-                                 "startedAt": now_iso(), "permissionMode": mode})
+                                 "startedAt": now_iso(), "permissionMode": mode, "model": model, "effort": effort})
         return f"{c['id']}: started session {sid} in {c['folder']}"
 
     def wait_reason(self, session_id: str, force: bool = False) -> str | None:
@@ -636,9 +661,10 @@ class Runs:
                 ensure_plan_data_ignored(cwd)
             except OSError:
                 pass  # a read-only .gitignore never stops the order; the session's files still go to .plan_data
-        p = self._spawn(c["id"], message_command(self.claude, text, sid, mode, kind, str(c.get("stepId") or "")[:20]), cwd)
+        model, effort = self.run_with(c)
+        p = self._spawn(c["id"], message_command(self.claude, text, sid, mode, kind, str(c.get("stepId") or "")[:20], model, effort), cwd)
         self.store.update(path, {"status": "running", "workType": wt, "pid": p.pid, "startedAt": now_iso(),
-                                 "permissionMode": mode})
+                                 "permissionMode": mode, "model": model, "effort": effort})
         self._answer_back(c, {"waitReason": None})
         if self.archiver.of(c["id"]) == "archived":
             self.archiver.ask_unarchive(c["id"])
@@ -841,7 +867,7 @@ class Runs:
                 return
             sid = str(uuid.uuid4())
             prompt = plan_prompt(c.get("sourceSessionId", ""), folder, len(pages), cid, str(c.get("goal") or "")[:2000])
-            cmd = start_command(self.claude, prompt, sid, self.mode()) + ["--add-dir", str(folder), "--disallowedTools", NO_EDITS]
+            cmd = start_command(self.claude, prompt, sid, self.mode(), *self.run_with(c)) + ["--add-dir", str(folder), "--disallowedTools", NO_EDITS]
             p = self._spawn(cid, cmd, c.get("cwd", ""))
             self.store.update(path, {"sessionId": sid, "pid": p.pid, "stage": "Writing the plan", "prompt": prompt})
         except Exception as e:  # a failed page run or an unreadable log ends this plan, never the bridge

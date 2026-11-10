@@ -168,6 +168,7 @@ export type Run = {
   archive?: string; archiveNote?: string | null;
   force?: boolean;
   permissionMode?: RunMode; // the setting the bridge read when this run went
+  model?: string; effort?: string; // what the run went with: its own choice, else the setting in meta/runs (RunWith)
   // "Check now": what the bridge's wait rule saw for the session (bridge runs.py session_status)
   check?: { turn: boolean; lastFrom: string; open: boolean | null; openSince: string | null; openIn: "app" | "terminal" | null };
   createdAt: string;
@@ -277,15 +278,15 @@ export const useRuns = () => useCollection<Run>("commands", orderBy("createdAt",
 const newId = () => crypto.randomUUID().replace(/-/g, "").slice(0, 20);
 
 // Commands the bridge on that machine carries out: start claude in a registered folder, or stop a run it started.
-export const startRun = (machine: string, folder: string, prompt: string) => {
+export const startRun = (machine: string, folder: string, prompt: string, w?: RunWith) => {
   const id = newId();
-  return setDoc(doc(db, "commands", id), { id, action: "start", machine, folder, prompt, status: "new", createdAt: new Date().toISOString() });
+  return setDoc(doc(db, "commands", id), { id, action: "start", machine, folder, prompt, status: "new", createdAt: new Date().toISOString(), ...withRun(w) });
 };
 // A message to an existing session: the bridge resumes it with the message once it is closed.
-export const sendMessage = (machine: string, sessionId: string, cwd: string, prompt: string) => {
+export const sendMessage = (machine: string, sessionId: string, cwd: string, prompt: string, w?: RunWith) => {
   const id = newId();
   return setDoc(doc(db, "commands", id), {
-    id, action: "message", machine, sessionId, cwd, prompt, status: "new", createdAt: new Date().toISOString(),
+    id, action: "message", machine, sessionId, cwd, prompt, status: "new", createdAt: new Date().toISOString(), ...withRun(w),
   });
 };
 // A message or an answer that waits on a session last used in the app or a terminal: cancel it, or send it anyway
@@ -312,6 +313,23 @@ export const checkSession = (machine: string, sessionId: string) => {
 // all kinds not set every run"). Manual: every approval comes to the inbox. Auto: Claude Code's safety check decides
 // most, the inbox is the fallback. The bridge reads it when a run goes (bridge runs.py mode()).
 export type RunMode = "manual" | "auto";
+// Model and effort for a run (the owner's words, 2026-11-10: "select model and effort"; the pick: "Setting plus a
+// choice on each message"): "" means the setting on the Runs tab, which itself may be "" for the CLI's own default.
+export type RunWith = { model?: string; effort?: string };
+export const MODELS: [string, string][] = [["", "default"], ["fable", "Fable"], ["opus", "Opus"], ["sonnet", "Sonnet"], ["haiku", "Haiku"]];
+export const EFFORTS: [string, string][] = [["", "default"], ["low", "low"], ["medium", "medium"], ["high", "high"], ["xhigh", "xhigh"], ["max", "max"]];
+export type RunPrefs = { mode: RunMode; model: string; effort: string };
+export function useRunPrefs(): RunPrefs | null {
+  const [p, setP] = useState<RunPrefs | null>(null);
+  useEffect(() => onSnapshot(doc(db, "meta", "runs"), (d) => {
+    const x = d.data() ?? {};
+    setP({ mode: x.permissionMode === "auto" ? "auto" : "manual", model: String(x.model ?? ""), effort: String(x.effort ?? "") });
+  }), []);
+  return p;
+}
+export const setRunPrefs = (p: Partial<{ model: string; effort: string }>) =>
+  setDoc(doc(db, "meta", "runs"), { ...p, changedAt: new Date().toISOString() }, { merge: true });
+const withRun = (w?: RunWith) => ({ ...(w?.model ? { model: w.model } : {}), ...(w?.effort ? { effort: w.effort } : {}) });
 export function useRunMode(): RunMode | null {
   const [mode, setMode] = useState<RunMode | null>(null);
   useEffect(() => onSnapshot(doc(db, "meta", "runs"), (d) => setMode(d.data()?.permissionMode === "auto" ? "auto" : "manual")), []);
@@ -366,22 +384,22 @@ export const planFromSession = (s: Session, goal = "") => {
 };
 // A message on a plan, with its kind; the owner's text is the prompt, the kind goes as a system prompt.
 // on: the step or part the message was asked on (quote.ts); its reply shows there (the owner's pick, 2026-11-09: "Both").
-export const sendPlanMessage = (plan: Plan, kind: PlanKind, text: string, on?: { stepId?: string; part?: string }) => {
+export const sendPlanMessage = (plan: Plan, kind: PlanKind, text: string, on?: { stepId?: string; part?: string }, w?: RunWith) => {
   const id = newId();
   return setDoc(doc(db, "commands", id), {
     id, action: "message", machine: plan.machine, sessionId: plan.sessionId, cwd: plan.cwd, prompt: text, ownerText: text,
-    kind, planId: plan.id, status: "new", createdAt: new Date().toISOString(),
+    kind, planId: plan.id, status: "new", createdAt: new Date().toISOString(), ...withRun(w),
     ...(on?.stepId ? { stepId: on.stepId } : {}), ...(on?.part ? { part: on.part } : {}),
   });
 };
 
 // Run step (the owner's words, 2026-11-03: "Add Ren step button"): a plain message to the plan's session.
-export const runStep = (plan: Plan, step: Parts["steps"][number], harness = "") => {
+export const runStep = (plan: Plan, step: Parts["steps"][number], harness = "", w?: RunWith) => {
   const id = newId();
   const text = `Work on step ${step.id}: ${step.title}. Report it with step_update.${harness}`;
   return setDoc(doc(db, "commands", id), {
     id, action: "message", machine: plan.machine, sessionId: plan.sessionId, cwd: plan.cwd, prompt: text, ownerText: text,
-    planId: plan.id, stepId: step.id, status: "new", createdAt: new Date().toISOString(),
+    planId: plan.id, stepId: step.id, status: "new", createdAt: new Date().toISOString(), ...withRun(w),
   });
 };
 
@@ -395,12 +413,12 @@ export const sendPhaseOrder = (plan: Plan, text: string, order: string) => {
 };
 
 // The owner's Generate order (planCheck.ts): a plain message to the plan's session, with the kinds asked.
-export const sendGenerate = (plan: Plan, kinds: string[], note: string, text: string) => {
+export const sendGenerate = (plan: Plan, kinds: string[], note: string, text: string, w?: RunWith) => {
   const id = newId();
   const order = `Generate: ${kinds.join(", ")}${note.trim() ? `. Note: ${note.trim()}` : ""}`;
   return setDoc(doc(db, "commands", id), {
     id, action: "message", machine: plan.machine, sessionId: plan.sessionId, cwd: plan.cwd, prompt: text, ownerText: order,
-    planId: plan.id, generate: { kinds, note: note.trim() }, status: "new", createdAt: new Date().toISOString(),
+    planId: plan.id, generate: { kinds, note: note.trim() }, status: "new", createdAt: new Date().toISOString(), ...withRun(w),
   });
 };
 

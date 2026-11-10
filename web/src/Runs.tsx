@@ -1,6 +1,7 @@
 import { useState } from "react";
 import {
   cancelMessage, checkSession, continueRun, forceMessage, setAutoContinue, planFromSession, PLAN_KINDS, sendMessage, setRunMode, startRun, stopRun, useRunMode,
+  EFFORTS, MODELS, setRunPrefs, useRunPrefs, type RunWith,
   type Machine, type Run, type Session,
 } from "./data";
 import { usd } from "./Dashboard";
@@ -34,9 +35,28 @@ with before and after pictures. Ask each round of questions with inbox_ask, with
 recommended. After each round, post the whole plan with plan_version and one line on what changed. Keep asking until
 the owner agrees. Only the owner closes a plan, on the page. Keep the whole plan in this one session.`;
 
+// Model and effort for one run, preset to the setting on the Runs tab (the owner's pick, 2026-11-10: "Setting plus a
+// choice on each message"). "default" keeps the setting; the setting's own "default" keeps the CLI's model and effort.
+export function RunWithPicker({ value, onChange, compact = false }: { value: RunWith; onChange: (w: RunWith) => void; compact?: boolean }) {
+  const prefs = useRunPrefs();
+  const name = (list: [string, string][], v: string) => list.find(([k]) => k === v)?.[1] ?? v;
+  const label = (list: [string, string][], pref: string) => `default${pref ? ` (${name(list, pref)})` : ""}`;
+  return (
+    <span className={"run-with" + (compact ? " compact" : "")} title="Model and effort for this run; default keeps the setting on the Runs tab">
+      <select value={value.model ?? ""} onChange={(e) => onChange({ ...value, model: e.target.value })} aria-label="model">
+        {MODELS.map(([k, n]) => <option key={k} value={k}>{k ? n : label(MODELS, prefs?.model ?? "")}</option>)}
+      </select>
+      <select value={value.effort ?? ""} onChange={(e) => onChange({ ...value, effort: e.target.value })} aria-label="effort">
+        {EFFORTS.map(([k, n]) => <option key={k} value={k}>{k ? n : label(EFFORTS, prefs?.effort ?? "")}</option>)}
+      </select>
+    </span>
+  );
+}
+
 export function StartForm({ machines, plan = false }: { machines: Machine[]; plan?: boolean }) {
   const folders = machines.flatMap((m) => (m.folders ?? []).map((f) => ({ ...f, machine: m.name })));
   const [pick, setPick] = useState(0);
+  const [w, setW] = useState<RunWith>({});
   const [prompt, setPrompt] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -47,7 +67,7 @@ export function StartForm({ machines, plan = false }: { machines: Machine[]; pla
     if (!prompt.trim()) return setError("Write what the session should do first.");
     setBusy(true);
     try {
-      await startRun(f.machine, f.path, plan ? planPrompt(prompt.trim()) : prompt.trim());
+      await startRun(f.machine, f.path, plan ? planPrompt(prompt.trim()) : prompt.trim(), w);
       setPrompt("");
     } catch (e) {
       setError(String((e as { code?: string }).code ?? e));
@@ -64,6 +84,7 @@ export function StartForm({ machines, plan = false }: { machines: Machine[]; pla
           </option>
         ))}
       </select>
+      <RunWithPicker value={w} onChange={setW} />
       <textarea
         rows={3}
         value={prompt}
@@ -120,6 +141,7 @@ export const remoteUrl = (id: string) => `https://claude.ai/code/${id.replace(/^
 
 export function MessageBox({ s, runs }: { s: Session; runs: Run[] }) {
   const [text, setText] = useState("");
+  const [w, setW] = useState<RunWith>({});
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const mine = runs.filter((r) => r.action === "message" && r.sessionId === s.id);
@@ -129,7 +151,7 @@ export function MessageBox({ s, runs }: { s: Session; runs: Run[] }) {
     if (!text.trim()) return setError("Write a message first.");
     setBusy(true);
     try {
-      await sendMessage(s.machine, s.id, s.cwd, text.trim());
+      await sendMessage(s.machine, s.id, s.cwd, text.trim(), w);
       setText("");
     } catch (e) {
       setError(String((e as { code?: string }).code ?? e));
@@ -148,6 +170,7 @@ export function MessageBox({ s, runs }: { s: Session; runs: Run[] }) {
           setError("");
         }}
       />
+      <RunWithPicker value={w} onChange={setW} />
       {error && <p className="bad small">{error}</p>}
       <p className="small">
         <StatusLine check={check} />{" "}
@@ -180,12 +203,22 @@ export function MessageBox({ s, runs }: { s: Session; runs: Run[] }) {
 // One switch for every run the dashboard sends: starts, plans, messages and late answers.
 export function ModeSwitch() {
   const mode = useRunMode();
+  const prefs = useRunPrefs();
   if (!mode) return null;
   return (
     <div className="mode-switch">
       <span className="label">Approvals</span>
       <button className={mode === "manual" ? "tab on" : "tab"} onClick={() => setRunMode("manual")}>Manual</button>
       <button className={mode === "auto" ? "tab on" : "tab"} onClick={() => setRunMode("auto")}>Auto</button>
+      <span className="label">Model</span>
+      <select value={prefs?.model ?? ""} onChange={(e) => setRunPrefs({ model: e.target.value })} aria-label="default model">
+        {MODELS.map(([k, n]) => <option key={k} value={k}>{k ? n : "CLI default"}</option>)}
+      </select>
+      <span className="label">Effort</span>
+      <select value={prefs?.effort ?? ""} onChange={(e) => setRunPrefs({ effort: e.target.value })} aria-label="default effort">
+        {EFFORTS.map(([k, n]) => <option key={k} value={k}>{k ? n : "CLI default"}</option>)}
+      </select>
+      <span className="muted small">Model and effort for every run from here on, unless a message picks its own.</span>
       <span className="muted small">
         {mode === "auto"
           ? "Claude Code's safety check approves most steps; the inbox gets the rest. For every run from here on."
@@ -281,6 +314,8 @@ export function RunList({ runs, title = "Runs from the dashboard" }: { runs: Run
               {r.quotes ? ` · quotes ${r.quotes.checked} checked, ${r.quotes.marked} marked` : ""}{" "}
               · {r.workType ?? ""} · {r.machine} ·{" "}
               {r.permissionMode === "auto" && <>auto · </>}
+              {r.model && <>{r.model} · </>}
+              {r.effort && <>{r.effort} · </>}
               {ago(r.startedAt ?? r.createdAt)}
               {r.costUsd != null && <> · {usd(r.costUsd)}</>}
             </>

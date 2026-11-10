@@ -15,7 +15,8 @@ import { phaseName, phaseOf, phaseStarts } from "./phases";
 import { HarnessSection } from "./HarnessView";
 import { GeneratedSection } from "./GeneratedView";
 import { buildNote } from "./harness";
-import { RunList } from "./Runs";
+import { RunList, RunWithPicker } from "./Runs";
+import type { RunWith } from "./data";
 import { Section } from "./Section";
 
 // A plan with six parts (plan from a session; the owner's words, 2026-11-03, in cc/dashboard/SESSION_PLAN.md).
@@ -36,6 +37,7 @@ type On = { stepId?: string; part?: string };
 function PlanMessage({ plan }: { plan: Plan }) {
   const [kind, setKind] = useState<PlanKind>("qa");
   const [text, setText] = useState("");
+  const [w, setW] = useState<RunWith>({});
   const [on, setOn] = useState<On | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -63,7 +65,7 @@ function PlanMessage({ plan }: { plan: Plan }) {
     if (!text.trim()) return setError("Write a message first.");
     setBusy(true);
     try {
-      await sendPlanMessage(plan, kind, text.trim(), on ?? undefined);
+      await sendPlanMessage(plan, kind, text.trim(), on ?? undefined, w);
       setText("");
       setOn(null);
     } catch (e) {
@@ -87,6 +89,7 @@ function PlanMessage({ plan }: { plan: Plan }) {
       )}
       {error && <p className="bad small">{error}</p>}
       <p className="muted small">It goes to the plan's session with the same wait rule as any message.</p>
+      <RunWithPicker value={w} onChange={setW} />{" "}
       <button className="primary" disabled={busy} onClick={send}>Send as {KIND_NAME[kind]}</button>
     </Section>
   );
@@ -242,13 +245,15 @@ function ResultsSection({ plan, v, versions, runs, steps, generated, stale }: {
 
 function RunStep({ plan, step, runs, harness }: { plan: Plan; step: Parts["steps"][number]; runs: Run[]; harness: string }) {
   const [error, setError] = useState("");
+  const [w, setW] = useState<RunWith>({});
   const going = runs.some((r) => r.planId === plan.id && r.stepId === step.id && (r.status === "new" || r.status === "running"));
   const explore = phaseOf(plan) === "explore"; // no step runs before the owner moves the plan to Build
   return (
     <>
-      <button className="chip primary" disabled={going || explore} title={explore ? "Off in Explore: move the plan to Build first" : undefined} onClick={() => runStep(plan, step, harness).catch((e) => setError(String(e?.code ?? e)))}>
+      <button className="chip primary" disabled={going || explore} title={explore ? "Off in Explore: move the plan to Build first" : undefined} onClick={() => runStep(plan, step, harness, w).catch((e) => setError(String(e?.code ?? e)))}>
         {going ? "Running" : "Run step"}
       </button>
+      {!explore && <RunWithPicker value={w} onChange={setW} compact />}
       {error && <span className="bad small"> {error}</span>}
     </>
   );

@@ -171,6 +171,10 @@ button.pill.wait { background: var(--wait); color: var(--wait-fg); border-color:
 textarea { width: 100%; font: inherit; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: inherit; }
 .actions { display: flex; gap: 8px; margin-top: 10px; }
 .mode-switch { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 14px; }
+.run-with { display: inline-flex; gap: 6px; margin: 6px 0; vertical-align: middle; }
+.run-with select { font-size: 13px; padding: 3px 6px; }
+.run-with.compact { margin: 0 0 0 6px; }
+.run-with.compact select { font-size: 11px; padding: 0 4px; }
 code { font-size: 12px; }
 .mono { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
 .pad { padding: 12px; }
