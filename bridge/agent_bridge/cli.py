@@ -83,7 +83,7 @@ def main(argv: list[str] | None = None) -> None:
         store = Firestore(Session(cfg))
         store.check_owner()
     claude = find_claude(cfg.claude_bin)
-    runs = gone = None
+    runs = gone = publisher = None
     if store is not None and a.cmd == "watch":
         from .push import pusher
 
@@ -110,16 +110,19 @@ def main(argv: list[str] | None = None) -> None:
                   list(cfg.site_origins), cfg.files_port, Texts(cfg.logs, data_dir() / "runs"))
             store.put_many({"meta/files": {"url": cfg.files_url}})
             print(f"file viewer on 127.0.0.1:{cfg.files_port} for {cfg.files_url}", flush=True)
-        from .status import Status, serve as serve_status
+        from .status import Publisher, Status, serve as serve_status
 
-        serve_status(Status(store, cfg.machine, cfg.status_hosts, runs), cfg.status_port)
+        status = Status(store, cfg.machine, cfg.status_hosts, runs)
+        serve_status(status, cfg.status_port)
+        publisher = Publisher(store, cfg.machine)
         print(f"avatar status on 127.0.0.1:{cfg.status_port}/status", flush=True)
         feed = gone = None
         try:
-            from .listen import CommandFeed, DeletedFeed, firestore_client
+            from .listen import AccountFeeds, CommandFeed, DeletedFeed, firestore_client
 
             client = firestore_client(store.s)
             feed, gone = CommandFeed(client), DeletedFeed(client)
+            status.feeds = AccountFeeds(client)  # p10: the avatar's counts from listens, not a 20-read round
         except ImportError:
             print("google-cloud-firestore is not installed: asking for commands every 5 s instead of listening", flush=True)
     stamp = lambda: time.strftime("%Y-%m-%d %H:%M:%S")
@@ -136,15 +139,18 @@ def main(argv: list[str] | None = None) -> None:
                     flush=True,
                 )
                 if store is not None and a.cmd == "watch":
-                    from .status import heartbeat
-
-                    heartbeat(store, cfg.machine)  # after the sync, which rewrites machines/<this machine>
+                    # p10: this bridge's state into machines/<this machine>, on a change or every 5 min; at once when
+                    # the sync above replaced that record (which drops the published fields)
+                    publisher.publish(status.publish_state(), force=r.get("machineWritten", False))
                 if store is not None:
                     for line in deliver(store, cfg.machine, claude):
                         print(f"{stamp()} inbox {line}", flush=True)
             if runs is not None:
                 for line in runs.step(feed.current() if feed is not None else None):
                     print(f"{stamp()} run {line}", flush=True)
+            if publisher is not None:
+                # p11: every 5 s turn; writes only when a value changed (an avatar sees it within ~5 s), else nothing
+                publisher.publish(status.publish_state())
         except (Exception, SystemExit) as e:
             if a.cmd == "sync":
                 raise

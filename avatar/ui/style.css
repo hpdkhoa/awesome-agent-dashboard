@@ -2,8 +2,14 @@
 :root{--blue:#00e5ff;--green:#39ff14;--pink:#ff2bd6;--yellow:#ffe600;--purple:#b026ff;--orange:#ff8a00;--dim:#4a6a75}
 *{box-sizing:border-box}
 html,body{margin:0;background:transparent;overflow:hidden;font-family:Tahoma,Verdana,sans-serif;user-select:none}
-.wrap{display:inline-block;padding:14px 16px;--c:var(--blue);filter:drop-shadow(0 0 8px var(--c)) drop-shadow(0 0 3px var(--c));transition:filter .2s}
-.wrap:hover{filter:drop-shadow(0 0 14px var(--c)) drop-shadow(0 0 5px var(--c))}
+.wrap{position:absolute;display:block;padding:14px 16px;--c:var(--blue)}
+/* p8 fix 2: the glow is its own GPU layer behind the box (drawn once), so a changing row or number never re-runs the
+   blur; hover fades a stronger glow in (opacity only, no redraw) */
+.glow,.glow2{position:absolute;left:16px;top:14px;right:16px;bottom:14px;pointer-events:none;will-change:transform}
+.glow i,.glow2 i{position:absolute;inset:0;background:var(--c);clip-path:polygon(0 0,calc(100% - 16px) 0,100% 16px,100% 100%,16px 100%,0 calc(100% - 16px))}
+.glow{filter:drop-shadow(0 0 8px var(--c)) drop-shadow(0 0 3px var(--c))}
+.glow2{filter:drop-shadow(0 0 14px var(--c)) drop-shadow(0 0 5px var(--c));opacity:0;transition:opacity .2s;will-change:opacity}
+.wrap:hover .glow2{opacity:1}
 .wrap.going{--c:var(--green)}.wrap.off{--c:var(--pink)}
 .box{position:relative;width:280px;color:var(--blue);font-size:13px;line-height:1.55;padding:12px 14px 10px;cursor:move;
  clip-path:polygon(0 0,calc(100% - 16px) 0,100% 16px,100% 100%,16px 100%,0 calc(100% - 16px));
@@ -23,7 +29,56 @@ html,body{margin:0;background:transparent;overflow:hidden;font-family:Tahoma,Ver
 .bar i.now{background:#0a2a30;box-shadow:inset 0 0 0 1px var(--yellow)}
 .load{display:flex;gap:8px;margin-top:6px;border-top:1px solid #0a3a44;padding-top:6px}
 .load div{flex:1}.load b{display:block;height:4px;background:#0a2a30;margin-top:2px}
-.load b span{display:block;height:100%;width:0;transition:width .4s}
+.load b span{display:block;height:100%;width:100%;transform:scaleX(0);transform-origin:left;transition:transform .4s}
 .load .c{color:var(--blue)}.load .c b span{background:var(--blue);box-shadow:0 0 4px var(--blue)}
 .load .r{color:#c77dff}.load .r b span{background:var(--purple);box-shadow:0 0 4px var(--purple)}
 .load .g{color:var(--yellow)}.load .g b span{background:var(--yellow);box-shadow:0 0 4px var(--yellow)}
+.grip{position:absolute;right:0;bottom:0;width:16px;height:16px;cursor:nwse-resize;z-index:2;
+ background:linear-gradient(135deg,transparent 50%,var(--c) 50%,var(--blue));opacity:.55;transition:opacity .2s}
+.grip:hover,.wrap:hover .grip{opacity:1}
+/* layers (plan b73e97ad p6, preview layers-preview.png v2): badge, arc menu, status box */
+#stage{position:absolute;left:0;top:0}
+.badge{position:absolute;width:76px;height:76px;border-radius:50%;background:radial-gradient(circle at 50% 40%,#0a1a20,#000 70%);--c:var(--blue);
+ border:3px solid var(--c);box-shadow:0 0 14px var(--c),inset 0 0 12px #000;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer}
+.badge::before{content:"";position:absolute;inset:-3px;border-radius:50%;box-shadow:0 0 22px var(--c);opacity:0;transition:opacity .2s;pointer-events:none;will-change:opacity}
+.badge:hover::before{opacity:1}
+.badge.going{--c:var(--green)}.badge.off{--c:var(--pink)}.badge.needs{--c:var(--orange)}
+.badge::after{content:"";position:absolute;inset:-9px;border-radius:50%;border:1px dashed var(--c);opacity:.6;pointer-events:none}
+/* p7: the avatar inside the ring: your image (cropped to the circle) or the built-in robot */
+.face{position:absolute;inset:0;border-radius:50%;overflow:hidden;pointer-events:none}
+.face img{width:100%;height:100%;object-fit:cover;display:block}
+.face img.contain{object-fit:contain}
+.face svg{width:100%;height:100%;display:block}
+/* p8 fix 1: each moving part of the robot is a full-size layer (robot.js); the moves are the same as before, in % of the
+   120-unit drawing (5 units = 4.17%), so the GPU moves them without redrawing */
+.rl{position:absolute;inset:0}
+.rl>svg{position:absolute;inset:0}
+.rb-scan,.rb-spin,.rb-bob,.rb-zz,.rb-zz2,.rb-blink,.rb-hop,.rb-key,.rb-key2{will-change:transform,opacity}
+@keyframes rb-scan{0%,100%{transform:translateX(-4.17%)}50%{transform:translateX(4.17%)}}
+@keyframes rb-spin{to{transform:rotate(360deg)}}
+@keyframes rb-bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-3.33%)}}
+@keyframes rb-zz{0%{transform:translate(0,0);opacity:0}30%{opacity:1}100%{transform:translate(11.67%,-21.67%);opacity:0}}
+@keyframes rb-blink{0%,90%,100%{opacity:1}95%{opacity:.2}}
+@keyframes rb-hop{0%,100%{transform:translateY(0)}30%{transform:translateY(-5.83%)}60%{transform:translateY(0)}}
+@keyframes rb-key{0%,100%{transform:translateY(0)}50%{transform:translateY(1.67%)}}
+.rb-scan{animation:rb-scan 1.2s ease-in-out infinite}.rb-spin{animation:rb-spin 2s linear infinite;transform-origin:80% 25%}
+.rb-bob{animation:rb-bob 2s ease-in-out infinite}.rb-zz{animation:rb-zz 2s linear infinite}.rb-zz2{animation:rb-zz 2s linear -1s infinite}
+.rb-blink{animation:rb-blink 1.6s infinite}.rb-hop{animation:rb-hop .9s ease-in-out infinite}
+.rb-key{animation:rb-key .3s infinite}.rb-key2{animation:rb-key .3s -.15s infinite}
+/* the owner's pick "Move 10 s, then rest": app.js adds .rest 10 s after a status change or a hover; the robot holds still */
+.face.rest *{animation-play-state:paused}
+.badge .inbox{position:absolute;bottom:-4px;right:-6px;background:var(--orange);color:#000;font:bold 11px Tahoma;border-radius:9px;padding:1px 6px;box-shadow:0 0 8px var(--orange)}
+.btn{position:absolute;width:52px;height:52px;border-radius:50%;background:#000;border:2px solid var(--blue);box-shadow:0 0 10px var(--blue);color:var(--blue);
+ display:flex;align-items:center;justify-content:center;cursor:pointer;opacity:0;pointer-events:none;
+ transition:transform .22s ease-out,opacity .22s ease-out;will-change:transform,opacity}
+.btn svg{width:26px;height:26px}
+.btn.on,#b1:hover{border-color:var(--green);color:var(--green);box-shadow:0 0 16px var(--green),0 0 4px var(--green) inset;background:#021a08}
+.btn.empty{border:2px dashed #2b4a55;box-shadow:none;cursor:default}
+.btn.empty::before{content:"+";color:#3b6a75;font:20px Tahoma}
+.tag{position:absolute;left:62px;top:12px;white-space:nowrap;font:bold 13px Tahoma;color:#000;background:var(--green);padding:4px 12px 4px 14px;
+ clip-path:polygon(8px 0,100% 0,100% 100%,8px 100%,0 50%);letter-spacing:1px;opacity:0;transition:opacity .15s;pointer-events:none}
+#b1:hover .tag{opacity:1}
+.boxopen #b1 .tag{display:none}
+.link{position:absolute;height:2px;background:linear-gradient(90deg,var(--green),transparent);box-shadow:0 0 6px var(--green);display:none}
+.boxopen .link{display:block}
+#wrap{display:none}.boxopen #wrap{display:block}

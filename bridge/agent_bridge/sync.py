@@ -98,7 +98,7 @@ def run(cfg: Config, days: float, store=None, dry_run: bool = False, deleted=lam
             state.written[p] = h
     state.save()
     totals = {"sessions": sum(1 for p in docs if p.startswith("sessions/")), "written": 0 if dry_run else len(todo),
-              "toWrite": len(todo)}
+              "toWrite": len(todo), "machineWritten": not dry_run and f"machines/{cfg.machine}" in todo}
     totals["tokens"] = sum(d["tokens"]["total"] for p, d in docs.items() if p.startswith("sessions/"))
     totals["costUsd"] = round(sum(d["tokens"]["costUsd"] for p, d in docs.items() if p.startswith("sessions/")), 2)
     return totals

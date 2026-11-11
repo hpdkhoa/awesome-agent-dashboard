@@ -1,0 +1,40 @@
+name: avatar-mac
+
+# Plan b73e97ad step p12: the desktop avatar for the owner's Mac, built on a GitHub macOS runner.
+# Unsigned (ad-hoc only): the owner opens it once by hand. One universal .dmg (Apple Silicon + Intel).
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "avatar/**"
+      - ".github/workflows/avatar-mac.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  dmg:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: avatar -> target
+      - id: build
+        uses: tauri-apps/tauri-action@v0
+        with:
+          projectPath: avatar
+          tauriScript: npx --yes @tauri-apps/cli@2
+          args: --target universal-apple-darwin --bundles dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-avatar-mac
+          path: avatar/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          if-no-files-found: error

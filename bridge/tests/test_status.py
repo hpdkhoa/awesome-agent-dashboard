@@ -1,5 +1,6 @@
 import http.client
 import json
+import threading
 from datetime import datetime, timezone
 
 import pytest
@@ -73,8 +74,9 @@ def test_counts_plan_bridges_and_hosts():
     a = make()[0].answer()
     assert a["status"] == "in progress" and a["runs"] == 2
     assert a["sessions"] == 1 and a["inbox"] == 1
-    assert a["bridges"] == [{"name": "PC", "online": True, "seenAgoS": 0, "self": True},
-                            {"name": "linux", "online": False, "seenAgoS": 900}]
+    own = {"status": "done", "runs": 0, "hosts": [{"name": "linux", "host": "10.0.0.2", "ssh": True, "ollama": False}]}
+    assert a["bridges"] == [{"name": "PC", "online": True, "seenAgoS": 0, "self": True, "state": own},
+                            {"name": "linux", "online": False, "seenAgoS": 900, "state": None}]
     assert a["hosts"] == [{"name": "linux", "host": "10.0.0.2", "ssh": True, "ollama": False}]
     p = a["plan"]
     assert (p["title"], p["phase"], p["stepsDone"], p["stepsAll"]) == ("Avatar", "build", 1, 4)
@@ -153,3 +155,137 @@ def test_http_answers_locally_read_only(srv):
     assert call(srv, host="evil.example.com")[0] == 403  # DNS rebinding
     assert call(srv, path="/other")[0] == 404
     assert call(srv, method="POST")[0] == 405
+
+
+def test_background_answer_never_waits_for_firestore():
+    """The owner's pick (2026-11-11, p9): "Yes, background refresh". After the first round, a stale answer gives the
+    last numbers at once and wakes the thread; the thread reads, the next answer has the new numbers."""
+    import time as _t
+
+    st, now = make()
+    st.start()
+    assert st.answer()["inbox"] == 1  # the first answer waits for one round
+    n = st.store.calls
+    gate = threading.Event()
+    real = st.store.query
+
+    def slow(*a, **k):
+        gate.wait(5)
+        return real(*a, **k)
+
+    st.store.query = slow
+    st.store.docs["inbox/q2"] = {"status": "open"}
+    now[0] += DATA_SECONDS
+    t0 = _t.perf_counter()
+    a = st.answer()
+    assert _t.perf_counter() - t0 < 0.5 and a["inbox"] == 1  # old numbers, no wait
+    gate.set()
+    for _ in range(50):
+        if st.data_at == now[0]:
+            break
+        _t.sleep(0.05)
+    assert st.store.calls > n and st.answer()["inbox"] == 2
+
+
+def test_background_reads_nothing_when_nobody_asks():
+    from agent_bridge.status import ASKED_SECONDS
+
+    st, now = make()
+    st.answer()
+    n = st.store.calls
+    now[0] += ASKED_SECONDS + 1  # stale, but nobody asked since
+    st.tick(now[0])
+    assert st.store.calls == n
+    st.asked_at = now[0]  # asked again: the next turn reads
+    st.tick(now[0])
+    assert st.store.calls > n
+
+
+# p10 (the owner's picks, 2026-11-11: "C: bridges publish, avatar listens", Firestore "Optimized")
+
+class Feeds:
+    """listen.AccountFeeds as the listens would hold it."""
+
+    def __init__(self, data=None):
+        self.data = data
+        self.commands = type("C", (), {"current": lambda _s: [{"machine": "PC", "status": "running"}]})()
+
+    def read(self, now):
+        return None if self.data is None else dict(self.data)
+
+
+def test_counts_come_from_the_listens_without_reads():
+    d = {"going": 3, "sessions": 2, "inbox": 4, "plan": None,
+         "machines": [{"name": "linux", "seenAt": iso(400), "avatar": {"status": "done", "runs": 0, "hosts": []}}]}
+    st, now = make()
+    st.feeds = Feeds(d)
+    a = st.answer()
+    assert st.store.calls == 0  # no Firestore query: the listens hold the counts
+    assert (a["runs"], a["sessions"], a["inbox"]) == (3, 2, 4)
+    linux = [b for b in a["bridges"] if b["name"] == "linux"][0]
+    assert linux["online"] and linux["state"]["status"] == "done"  # 400 s: inside the 420 s keepalive bar
+    assert a["bridges"][0]["state"]["runs"] == 1  # this machine's own command, from the commands listen
+
+
+def test_listens_still_opening_ask_firestore_once():
+    st, now = make()
+    st.feeds = Feeds(None)
+    assert st.answer()["inbox"] == 1 and st.store.calls > 0
+
+
+def test_publisher_writes_on_change_and_keepalive_only():
+    from agent_bridge.status import KEEPALIVE_SECONDS, Publisher
+
+    s = Store({"machines/PC": {"name": "PC"}})
+    now = [NOW]
+    pub = Publisher(s, "PC", clock=lambda: now[0])
+    st = {"status": "done", "runs": 0, "hosts": []}
+    assert pub.publish(st) and s.docs["machines/PC"]["avatar"] == st
+    now[0] += 60
+    assert not pub.publish(st)  # same state, a minute later: no write
+    assert pub.publish({**st, "status": "in progress", "runs": 1})  # changed: write
+    now[0] += KEEPALIVE_SECONDS
+    assert pub.publish({**st, "status": "in progress", "runs": 1})  # same, but 5 min: the keepalive
+    assert pub.publish({**st, "status": "in progress", "runs": 1}, force=True)  # sync replaced the record
+    assert pub.writes == 4
+    assert not Publisher(s, "gone").publish(st)  # a deleted machine record stays deleted
+
+
+def test_account_feeds_read_counts_and_plan():
+    from agent_bridge import listen
+
+    class F:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def current(self):
+            return self.rows
+
+        def close(self):
+            pass
+
+    af = listen.AccountFeeds.__new__(listen.AccountFeeds)
+    af.wall = lambda: NOW
+    af.commands, af.inbox = F([{"status": "running"}]), F([{"status": "open"}, {"status": "open"}])
+    af.live = F([{"beatAt": iso(30)}, {"beatAt": iso(600)}])  # one went quiet after the listen opened
+    af.machines = F([{"name": "PC"}])
+    af.plans = F([{"id": "old", "status": "closed", "updatedAt": iso(5)},
+                  {"id": "av", "title": "Avatar", "phase": "build", "updatedAt": iso(60), "current": 5}])
+    af.plan_key = ("av", 5)
+    af.version = F([{"parts": {"steps": [{"id": "p1"}, {"id": "p2"}]}}])
+    af.steps = F([{"stepId": "p1", "state": "done"}])
+    d = af.read(NOW)
+    assert (d["going"], d["sessions"], d["inbox"]) == (1, 1, 2)
+    assert (d["plan"]["id"], d["plan"]["stepsDone"], d["plan"]["stepsAll"]) == ("av", 1, 2)
+    af.inbox = F(None)  # a listen reopening
+    assert af.read(NOW) is None
+
+
+def test_publish_state_carries_the_account_counts():
+    """p11: an avatar with no bridge of its own reads everything from the machines records."""
+    st, now = make()
+    assert "account" not in st.publish_state()  # no listens yet: own state only
+    st.feeds = Feeds({"going": 1, "sessions": 2, "inbox": 3, "plan": {"id": "av"}, "machines": []})
+    p = st.publish_state()
+    assert p["account"] == {"going": 1, "sessions": 2, "inbox": 3, "plan": {"id": "av"}} and p["runs"] == 1
+    assert "at" not in p and "seenAt" not in p  # no clock in it: it changes only when a value does

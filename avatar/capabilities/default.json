@@ -1,5 +1,5 @@
 {
   "identifier": "default",
   "windows": ["main"],
-  "permissions": ["core:default", "core:window:allow-start-dragging", "core:window:allow-set-size", "window-state:default"]
+  "permissions": ["core:default", "core:window:allow-start-dragging", "core:window:allow-set-size", "core:window:allow-set-position", "window-state:default"]
 }

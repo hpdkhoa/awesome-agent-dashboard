@@ -110,3 +110,90 @@ class DeletedFeed(Feed):
         if rows is None:
             return None
         return {p for r in rows for p in (r.get("paths") or {})}
+
+# The avatar's account counts (plan b73e97ad p10; the owner's picks, 2026-11-11: "C: bridges publish, avatar listens",
+# Firestore "Optimized": "counts come from listeners"). Before, /status asked 7 queries a round (20 reads, measured in
+# p9). A listen costs one read per changed document, and its first answer one read per matching document.
+
+GOING = ["new", "running", "waiting", "stopping"]  # chain.GOING
+LIVE_SECONDS = 180  # inbox.LIVE_SECONDS
+
+
+class QueryFeed(Feed):
+    """A listen on any query: make(client) builds it, again at every reopen."""
+
+    def __init__(self, client, make, clock=time.monotonic):
+        super().__init__(client, clock)
+        self.make = make
+
+    def _query(self):
+        return self.make(self.client)
+
+
+class AccountFeeds:
+    """The listens behind the avatar's counts: commands going, sessions beating, inbox questions open, machines, the
+    newest plans, and the newest open plan's current version and step states. read() gives what status.Status._read
+    gave from its queries, or None while a listen is still opening (the caller then asks the old way once)."""
+
+    def __init__(self, client, wall=time.time):
+        from google.cloud.firestore_v1.base_query import FieldFilter
+
+        self.client, self.wall = client, wall
+        self.F = F = FieldFilter
+        self.commands = QueryFeed(client, lambda c: c.collection("commands").where(filter=F("status", "in", GOING)))
+        # liveSessions keeps every session that ever beat (144 on 2026-11-11): listen only to the ones that beat in
+        # the last LIVE_SECONDS when the listen opens; age is counted here, the cutoff moves at every reopen
+        self.live = QueryFeed(client, lambda c: c.collection("liveSessions").where(
+            filter=F("beatAt", ">=", _iso(self.wall() - LIVE_SECONDS))))
+        self.inbox = QueryFeed(client, lambda c: c.collection("inbox").where(filter=F("status", "==", "open")))
+        self.machines = QueryFeed(client, lambda c: c.collection("machines"))
+        self.plans = QueryFeed(client, lambda c: c.collection("plans").order_by(
+            "updatedAt", direction="DESCENDING").limit(5))
+        self.plan_key: tuple | None = None
+        self.version: QueryFeed | None = None
+        self.steps: QueryFeed | None = None
+
+    def _plan(self, plan: dict) -> tuple[list | None, list | None]:
+        key = (plan["id"], plan.get("current", 0))
+        if key != self.plan_key:
+            for f in (self.version, self.steps):
+                if f is not None:
+                    f.close()
+            pid, cur = key
+            self.version = QueryFeed(self.client, lambda c: c.collection("planVersions").document(f"{pid}_v{cur}"))
+            self.steps = QueryFeed(self.client, lambda c: c.collection("planSteps").where(
+                filter=self.F("planId", "==", pid)))
+            self.plan_key = key
+        return self.version.current(), self.steps.current()
+
+    def read(self, now: float) -> dict | None:
+        rows = [f.current() for f in (self.commands, self.live, self.inbox, self.machines, self.plans)]
+        if any(r is None for r in rows):
+            return None
+        going, live, waiting, machines, plans = rows
+        cutoff = _iso(now - LIVE_SECONDS)
+        plans = sorted(plans, key=lambda p: p.get("updatedAt") or "", reverse=True)
+        plan = next((p for p in plans if p.get("status", "open") == "open"), None)
+        plan_out = None
+        if plan:
+            v, st = self._plan(plan)
+            if v is None or st is None:
+                return None
+            steps = [s.get("id") for s in (((v[0] if v else {}).get("parts") or {}).get("steps") or [])]
+            states = {d.get("stepId"): d.get("state") for d in st}
+            plan_out = {"id": plan["id"], "title": plan.get("title", ""), "phase": plan.get("phase", ""),
+                        "stepsDone": sum(1 for i in steps if states.get(i) == "done"), "stepsAll": len(steps),
+                        "steps": [{"id": i, "state": states.get(i) or "next"} for i in steps]}
+        return {"going": len(going), "sessions": sum(1 for s in live if (s.get("beatAt") or "") >= cutoff),
+                "inbox": len(waiting), "machines": machines, "plan": plan_out}
+
+    def close(self) -> None:
+        for f in (self.commands, self.live, self.inbox, self.machines, self.plans, self.version, self.steps):
+            if f is not None:
+                f.close()
+
+
+def _iso(t: float) -> str:
+    from datetime import datetime, timezone
+
+    return datetime.fromtimestamp(t, timezone.utc).isoformat(timespec="seconds")
