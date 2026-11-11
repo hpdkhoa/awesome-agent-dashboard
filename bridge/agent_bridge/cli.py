@@ -143,7 +143,8 @@ def main(argv: list[str] | None = None) -> None:
                     # the sync above replaced that record (which drops the published fields)
                     publisher.publish(status.publish_state(), force=r.get("machineWritten", False))
                 if store is not None:
-                    for line in deliver(store, cfg.machine, claude):
+                    inbox = status.feeds.inbox.current() if a.cmd == "watch" and status.feeds is not None else None
+                    for line in deliver(store, cfg.machine, claude, inbox):
                         print(f"{stamp()} inbox {line}", flush=True)
             if runs is not None:
                 for line in runs.step(feed.current() if feed is not None else None):

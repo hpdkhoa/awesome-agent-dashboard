@@ -289,3 +289,64 @@ def test_publish_state_carries_the_account_counts():
     p = st.publish_state()
     assert p["account"] == {"going": 1, "sessions": 2, "inbox": 3, "plan": {"id": "av"}} and p["runs"] == 1
     assert "at" not in p and "seenAt" not in p  # no clock in it: it changes only when a value does
+
+
+def test_the_counter_keeps_reads_writes_and_bytes_per_source(tmp_path):
+    # p14 F4/F5 (owner pick 2026-11-12: "Count reads by collection and cut the ones that repeat")
+    from agent_bridge.usage import Counter
+    c = Counter(tmp_path / "u.json")
+    c.add("reads", 3, "listen:liveSessions", 120)
+    c.add("reads", 1, "listen:liveSessions", 40)
+    c.add("writes", 1, "rest:machines", 900)
+    c.add("reads", 2)
+    d = c.today()
+    assert d["reads"] == 6 and d["writes"] == 1
+    assert d["by"]["listen:liveSessions"] == {"reads": 4, "bytes": 160}
+    assert d["by"]["rest:machines"] == {"writes": 1, "bytes": 900}
+
+
+def test_rest_calls_name_their_collection():
+    from agent_bridge.firestore import _collection
+    assert _collection("https://x/documents/machines/PC?updateMask.fieldPaths=a", {"fields": {}}) == "machines"
+    assert _collection("https://x/documents:runQuery", {"structuredQuery": {"from": [{"collectionId": "commands"}]}}) == "commands"
+    assert _collection("https://x/documents:commit", {"writes": [{"update": {"name": "projects/p/databases/(default)/documents/sessions/a"}},
+                                                               {"delete": "projects/p/databases/(default)/documents/runs/b"}]}) == "runs+sessions"
+
+
+def test_rest_calls_keep_one_connection_and_reopen_a_dropped_one(monkeypatch):
+    # p14 F5: one kept-open HTTPS connection per thread instead of a new TLS handshake per call
+    import http.client
+    from agent_bridge import firestore as fsm
+
+    made, sent = [], []
+
+    class Conn:
+        def __init__(self, host, timeout=60):
+            made.append(host)
+            self.fail = len(made) == 1 and len(sent) == 1
+
+        def request(self, method, path, body=None, headers=None):
+            sent.append((method, path))
+            if getattr(self, "drop", False):
+                raise http.client.RemoteDisconnected("closed")
+
+        def getresponse(self):
+            class R:
+                status = 200
+                def read(self): return b'{"fields": {}}'
+            return R()
+
+        def close(self): pass
+
+    monkeypatch.setattr(fsm.http.client, "HTTPSConnection", Conn)
+
+    class S:
+        cfg = type("C", (), {"project_id": "p"})
+        def token(self): return "t"
+
+    store = fsm.Firestore(S())
+    store.get("meta/a"); store.get("meta/b")
+    assert len(made) == 1 and sent == [("GET", "/v1/projects/p/databases/(default)/documents/meta/a"),
+                                       ("GET", "/v1/projects/p/databases/(default)/documents/meta/b")]
+    store._local.conn.drop = True  # the server closed the idle connection
+    assert store.get("meta/c") == {} and len(made) == 2

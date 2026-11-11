@@ -607,8 +607,8 @@ class Runs:
 
     def wait_reason(self, session_id: str, force: bool = False) -> str | None:
         """"turn", "app", or None when the message can go now."""
-        for k in self.procs:
-            if (self.store.get(f"commands/{k}") or {}).get("sessionId") == session_id:
+        for k, p in list(self.procs.items()):
+            if p.poll() is None and (self.store.get(f"commands/{k}") or {}).get("sessionId") == session_id:
                 return "turn"  # a run of this bridge is working in it
         return log_wait_reason(self.logs, session_id, force, self.procs_seen)
 
@@ -985,7 +985,9 @@ class Runs:
             _kill_tree(p)
 
     def _finish(self, cid: str, p: subprocess.Popen) -> str:
-        del self.procs[cid]
+        # the run leaves self.procs only after its end is written: a write Firestore refuses (429 quota, network)
+        # raises, the run stays, and the next step writes it again (the owner's pick, 2026-11-11: "Close it + fix +
+        # restart"; run 18442aa6 stayed "running" for hours when its write met a 429)
         out = (self.out_dir / f"{cid}.out").read_text(encoding="utf-8", errors="replace")
         err_path = self.out_dir / f"{cid}.err"
         err = err_path.read_text(encoding="utf-8", errors="replace") if err_path.is_file() else ""
@@ -998,6 +1000,7 @@ class Runs:
             # paused, not failed: Continue (or the auto continue at the reset) does the leftover work; an answer's
             # inbox item stays as it is until then
             self.store.update(f"commands/{cid}", fields)
+            self.procs.pop(cid, None)
             self._pause(cid, r, "Paused: usage limit")
             c = self.store.get(f"commands/{cid}") or {}
             if self.push is not None:
@@ -1019,6 +1022,7 @@ class Runs:
             fields["status"] = "failed"
             fields["error"] = redact(str(r.get("result") or (err or out or "")[-800:]), 800)
         self.store.update(f"commands/{cid}", fields)
+        self.procs.pop(cid, None)
         c = self.store.get(f"commands/{cid}") or {}
         if fields["status"] == "done":
             # no followUp text: the page reads the run's whole result from the PC (texts.py, the owner's choice,

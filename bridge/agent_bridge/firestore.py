@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import http.client
 import json
-import urllib.error
-import urllib.request
+import threading
+import urllib.parse
 
 from .auth import Session
 
@@ -55,17 +56,33 @@ def count_call(url: str, body, method, result) -> None:
     one write, a commit one write or delete per entry."""
     if counter is None:
         return
+    src = "rest:" + _collection(url, body)
+    size = lambda x: len(json.dumps(x, default=str)) if x is not None else 0
     if url.endswith(":runQuery"):
-        counter.add("reads", max(1, sum(1 for r in (result or []) if isinstance(r, dict) and "document" in r)))
+        counter.add("reads", max(1, sum(1 for r in (result or []) if isinstance(r, dict) and "document" in r)), src, size(result))
     elif url.endswith(":commit"):
         writes = (body or {}).get("writes") or []
         deletes = sum(1 for w in writes if "delete" in w)
-        counter.add("deletes", deletes)
-        counter.add("writes", len(writes) - deletes)
+        counter.add("deletes", deletes, src)
+        counter.add("writes", len(writes) - deletes, src, size(body))
     elif method == "PATCH":
-        counter.add("writes", 1)
+        counter.add("writes", 1, src, size(body))
     elif body is None:
-        counter.add("reads", 1)
+        counter.add("reads", 1, src, size(result))
+
+
+def _collection(url: str, body) -> str:
+    """The collection a REST call touches, for the per-source count (p14)."""
+    if url.endswith(":runQuery"):
+        try:
+            return body["structuredQuery"]["from"][0]["collectionId"]
+        except (KeyError, IndexError, TypeError):
+            return "query"
+    if url.endswith(":commit"):
+        names = {w.get("update", {}).get("name", w.get("delete", "")).split("/documents/")[-1].split("/")[0]
+                 for w in (body or {}).get("writes") or []}
+        return "+".join(sorted(n for n in names if n)) or "commit"
+    return url.split("/documents/")[-1].split("?")[0].split("/")[0] or "doc"
 
 
 class Firestore:
@@ -73,23 +90,40 @@ class Firestore:
         self.s = session
         self.root = f"projects/{session.cfg.project_id}/databases/(default)/documents"
         self.base = f"https://firestore.googleapis.com/v1/{self.root}"
+        self._local = threading.local()  # each thread's kept-open HTTPS connection (_send)
 
     def _call(self, url: str, body: dict | None = None, method: str | None = None) -> dict:
-        req = urllib.request.Request(
-            url,
-            method=method,
-            data=None if body is None else json.dumps(body).encode(),
-            headers={"Authorization": f"Bearer {self.s.token()}", "Content-Type": "application/json"},
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=60) as r:
-                result = json.load(r)
-        except urllib.error.HTTPError as e:
+        data = None if body is None else json.dumps(body).encode()
+        headers = {"Authorization": f"Bearer {self.s.token()}", "Content-Type": "application/json"}
+        status, raw = self._send(url, method or ("GET" if data is None else "POST"), data, headers)
+        if status >= 400:
             if body is None and method is None:
                 count_call(url, None, None, None)  # a missing document is still one read
-            raise SystemExit(f"Firestore refused ({e.code}): {e.read().decode()[:300]}") from None
+            raise SystemExit(f"Firestore refused ({status}): {raw.decode(errors='replace')[:300]}") from None
+        result = json.loads(raw)
         count_call(url, body, method, result)
         return result
+
+    def _send(self, url: str, method: str, data: bytes | None, headers: dict) -> tuple[int, bytes]:
+        """One HTTPS call on this thread's kept-open connection (p14 F5, the owner's pick 2026-11-12: "Add F5 to
+        p14", the bridge's internet bytes). Before, each call opened a new TLS connection, whose handshake (the
+        server's certificates) outweighed the call itself. A connection the server closed is opened again once."""
+        u = urllib.parse.urlsplit(url)
+        path = u.path + (f"?{u.query}" if u.query else "")
+        for attempt in (0, 1):
+            conn = getattr(self._local, "conn", None)
+            if conn is None:
+                conn = self._local.conn = http.client.HTTPSConnection(u.netloc, timeout=60)
+            try:
+                conn.request(method, path, body=data, headers=headers)
+                r = conn.getresponse()
+                return r.status, r.read()
+            except (http.client.HTTPException, OSError):
+                conn.close()
+                self._local.conn = None
+                if attempt:
+                    raise
+        raise AssertionError("unreachable")
 
     def check_owner(self) -> None:
         """Reads meta/owner. Only the owner may; anyone else gets 403 here."""

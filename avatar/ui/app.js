@@ -333,4 +333,5 @@ loadAvatars();
 poll();
 setInterval(poll, 5000);
 // p8 fix 3: CPU, RAM and GPU are read only while the box is open (nobody sees them otherwise)
-setInterval(() => { if (layer === "box") load(); }, 2000);
+// p14 F2 (owner pick 2026-11-12): CPU/RAM/GPU every 5 s, not 2 s (box open measured 3.5-6.2% of one core in p13)
+setInterval(() => { if (layer === "box") load(); }, 5000);

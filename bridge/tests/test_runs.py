@@ -491,3 +491,28 @@ def test_every_run_carries_the_owners_reply_style_once():
     assert "step s3" in message_command("claude", "hi", "sid", step="s3")[-1] or "step s3" in " ".join(message_command("claude", "hi", "sid", step="s3"))
     qa = message_command("claude", "hi", "sid", kind="qa")
     assert "--disallowedTools" in qa and "Ask about the plan" in " ".join(qa) or "--disallowedTools" in qa
+
+
+def test_a_refused_end_write_keeps_the_run_and_writes_it_on_the_next_step(tmp_path, monkeypatch):
+    # run 18442aa6 (2026-11-11) stayed "running" for hours: its end write met Firestore's 429 and the run was forgotten
+    store, runs, work = setup(tmp_path, monkeypatch)
+    cmd(store, "c1", action="start", folder=str(work), prompt="hi")
+    real, refused = store.update, []
+
+    def update(path, fields):
+        if path == "commands/c1" and "endedAt" in fields and not refused:
+            refused.append(path)
+            raise SystemExit("Firestore refused (429): Quota exceeded.")
+        return real(path, fields)
+
+    monkeypatch.setattr(store, "update", update)
+    end = time.time() + 20
+    while not refused and time.time() < end:
+        try:
+            runs.step()
+        except SystemExit:
+            pass
+        time.sleep(0.2)
+    assert refused and "c1" in runs.procs and store.get("commands/c1")["status"] == "running"
+    runs.step()
+    assert store.get("commands/c1")["status"] == "done" and "c1" not in runs.procs

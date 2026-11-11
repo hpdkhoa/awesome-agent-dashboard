@@ -286,3 +286,17 @@ def test_ask_back_delivered_by_the_bridge_when_the_session_stopped_waiting():
     store.update(f"inbox/{qid}", {"thread": store.get(f"inbox/{qid}")["thread"] + [{"who": "owner", "kind": "ask", "text": "which table?", "at": "t2"}]})
     lines = deliver(store, "PC", "claude")
     assert len(lines) == 1 and len(store.where("commands", "action", "message")) == 2  # a new ask back goes again
+
+
+def test_deliver_takes_the_listened_rows_and_asks_firestore_nothing():
+    # p14 F4: rows from the bridge's inbox listen replace the 3 queries a round
+    store = FakeStore()
+    qid = make(store).post("question", "q", "q")
+    owner_answers(store, qid, "A")
+    beat(store, "s1", 10)
+    rows = [{**store.get(f"inbox/{qid}"), "id": qid}]
+    asked = []
+    store.where = lambda *a: asked.append(a) or []
+    log = deliver(store, "PC", "claude", rows)
+    assert asked == [] and len(log) == 1 and store.get(f"inbox/{qid}")["status"] == "delivering"
+    assert deliver(store, "PC", "claude", []) == [] and asked == []

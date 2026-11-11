@@ -53,13 +53,19 @@ class Counter:
     def _fresh() -> dict:
         return {"day": local_day(), "reads": 0, "writes": 0, "deletes": 0, "since": now_iso()}
 
-    def add(self, kind: str, n: int = 1) -> None:
+    def add(self, kind: str, n: int = 1, source: str = "", size: int = 0) -> None:
+        """source and size (p14 F4/F5, the owner's pick 2026-11-12: "Count reads by collection"): the listen or REST
+        collection the count came from, and the documents' JSON size in bytes, kept per day under "by"."""
         if n <= 0 or kind not in ("reads", "writes", "deletes"):
             return
         with self.lock:
             if self.data.get("day") != local_day():
                 self.data = self._fresh()
             self.data[kind] = int(self.data.get(kind, 0)) + n
+            if source:
+                e = self.data.setdefault("by", {}).setdefault(source, {})
+                e[kind] = int(e.get(kind, 0)) + n
+                e["bytes"] = int(e.get("bytes", 0)) + max(0, size)
             self.data["at"] = now_iso()
             try:
                 self.path.parent.mkdir(parents=True, exist_ok=True)

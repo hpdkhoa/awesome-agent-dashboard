@@ -9,6 +9,7 @@ the caller asks once the old way.
 
 from __future__ import annotations
 
+import json
 import threading
 import time
 
@@ -42,6 +43,8 @@ def firestore_client(session):
 class Feed:
     """One listen, reopened every 50 minutes and after a drop. Subclasses say what to listen to."""
 
+    name = "feed"
+
     def __init__(self, client, clock=time.monotonic):
         self.client, self.clock = client, clock
         self.lock = threading.Lock()
@@ -53,8 +56,14 @@ class Feed:
     def _on_snapshot(self, docs, changes, read_time) -> None:
         from . import firestore as fs
 
-        if fs.counter is not None:
-            fs.counter.add("reads", max(1, len(changes or [])))  # each changed document delivered is one read
+        if fs.counter is not None:  # each changed document delivered is one read
+            size = 0
+            for ch in changes or []:
+                try:
+                    size += len(json.dumps(ch.document.to_dict() or {}, default=str))
+                except Exception:
+                    pass
+            fs.counter.add("reads", max(1, len(changes or [])), "listen:" + self.name, size)
         rows = {d.id: {**(d.to_dict() or {}), "id": d.id} for d in docs}
         with self.lock:
             self.docs = rows
@@ -93,6 +102,8 @@ class Feed:
 class CommandFeed(Feed):
     """The commands still to act on."""
 
+    name = "commands(new,waiting)"
+
     def _query(self):
         from google.cloud.firestore_v1.base_query import FieldFilter
 
@@ -101,6 +112,8 @@ class CommandFeed(Feed):
 
 class DeletedFeed(Feed):
     """meta/deleted: the paths the owner deleted on the Storage tab, which sync must not write again."""
+
+    name = "meta/deleted"
 
     def _query(self):
         return self.client.collection("meta").document("deleted")
@@ -117,14 +130,15 @@ class DeletedFeed(Feed):
 
 GOING = ["new", "running", "waiting", "stopping"]  # chain.GOING
 LIVE_SECONDS = 180  # inbox.LIVE_SECONDS
+INBOX = ["open", "answered", "delivering"]  # deliver.py's statuses; the avatar counts "open"
 
 
 class QueryFeed(Feed):
     """A listen on any query: make(client) builds it, again at every reopen."""
 
-    def __init__(self, client, make, clock=time.monotonic):
+    def __init__(self, client, make, clock=time.monotonic, name="query"):
         super().__init__(client, clock)
-        self.make = make
+        self.make, self.name = make, name
 
     def _query(self):
         return self.make(self.client)
@@ -140,15 +154,18 @@ class AccountFeeds:
 
         self.client, self.wall = client, wall
         self.F = F = FieldFilter
-        self.commands = QueryFeed(client, lambda c: c.collection("commands").where(filter=F("status", "in", GOING)))
+        self.commands = QueryFeed(client, lambda c: c.collection("commands").where(filter=F("status", "in", GOING)), name="commands(going)")
         # liveSessions keeps every session that ever beat (144 on 2026-11-11): listen only to the ones that beat in
         # the last LIVE_SECONDS when the listen opens; age is counted here, the cutoff moves at every reopen
         self.live = QueryFeed(client, lambda c: c.collection("liveSessions").where(
-            filter=F("beatAt", ">=", _iso(self.wall() - LIVE_SECONDS))))
-        self.inbox = QueryFeed(client, lambda c: c.collection("inbox").where(filter=F("status", "==", "open")))
-        self.machines = QueryFeed(client, lambda c: c.collection("machines"))
+            filter=F("beatAt", ">=", _iso(self.wall() - LIVE_SECONDS))), name="liveSessions")
+        # the inbox items still to ask, answer or deliver: the avatar counts the open ones, deliver.py acts on all
+        # three (p14 F4: one listen instead of 3 queries a minute)
+        self.inbox = QueryFeed(client, lambda c: c.collection("inbox").where(filter=F("status", "in", INBOX)),
+                               name="inbox(open,answered,delivering)")
+        self.machines = QueryFeed(client, lambda c: c.collection("machines"), name="machines")
         self.plans = QueryFeed(client, lambda c: c.collection("plans").order_by(
-            "updatedAt", direction="DESCENDING").limit(5))
+            "updatedAt", direction="DESCENDING").limit(5), name="plans(5)")
         self.plan_key: tuple | None = None
         self.version: QueryFeed | None = None
         self.steps: QueryFeed | None = None
@@ -160,9 +177,9 @@ class AccountFeeds:
                 if f is not None:
                     f.close()
             pid, cur = key
-            self.version = QueryFeed(self.client, lambda c: c.collection("planVersions").document(f"{pid}_v{cur}"))
+            self.version = QueryFeed(self.client, lambda c: c.collection("planVersions").document(f"{pid}_v{cur}"), name="planVersions")
             self.steps = QueryFeed(self.client, lambda c: c.collection("planSteps").where(
-                filter=self.F("planId", "==", pid)))
+                filter=self.F("planId", "==", pid)), name="planSteps")
             self.plan_key = key
         return self.version.current(), self.steps.current()
 
@@ -185,7 +202,7 @@ class AccountFeeds:
                         "stepsDone": sum(1 for i in steps if states.get(i) == "done"), "stepsAll": len(steps),
                         "steps": [{"id": i, "state": states.get(i) or "next"} for i in steps]}
         return {"going": len(going), "sessions": sum(1 for s in live if (s.get("beatAt") or "") >= cutoff),
-                "inbox": len(waiting), "machines": machines, "plan": plan_out}
+                "inbox": sum(1 for i in waiting if i.get("status") == "open"), "machines": machines, "plan": plan_out}
 
     def close(self) -> None:
         for f in (self.commands, self.live, self.inbox, self.machines, self.plans, self.version, self.steps):

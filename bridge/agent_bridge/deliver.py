@@ -33,16 +33,26 @@ def find_claude(env_value: str = "") -> str | None:
     return shutil.which("claude")
 
 
-def deliver(store, machine: str, claude: str | None) -> list[str]:
-    """Turns each answer still to deliver into a message command. Returns one line per item acted on."""
+def deliver(store, machine: str, claude: str | None, rows: list[dict] | None = None) -> list[str]:
+    """Turns each answer still to deliver into a message command. Returns one line per item acted on.
+
+    rows (p14 F4, the owner's pick 2026-11-12: "bridge reads (count by collection, cut repeats)"): the inbox items in
+    the statuses below, from the bridge's listen (listen.AccountFeeds.inbox). Asking Firestore for them every round
+    cost 3 reads a minute that found nothing (90 of 158 reads in 30 min, measured). None = ask Firestore as before."""
     log = []
-    for item in store.where("inbox", "status", "delivering"):
+
+    def by(status: str) -> list[dict]:
+        if rows is None:
+            return store.where("inbox", "status", status)
+        return [r for r in rows if r.get("status") == status]
+
+    for item in by("delivering"):
         # an answer whose message the owner cancelled on the Runs tab
         c = store.get(f"commands/{item.get('commandId')}") if item.get("commandId") else None
         if item.get("machine") == machine and c and c.get("status") == "cancelled":
             store.update(f"inbox/{item['id']}", {"status": "closed", "error": "Cancelled on the page.", "waitReason": None})
             log.append(f"{item['id']}: cancelled")
-    for item in store.where("inbox", "status", "answered"):
+    for item in by("answered"):
         if item.get("kind") == "approval":
             continue  # approvals are only ever answered live, inside the waiting run
         if item.get("machine") != machine or item.get("sessionId") in (None, "", "unknown"):
@@ -75,7 +85,7 @@ def deliver(store, machine: str, claude: str | None) -> list[str]:
         }})
         store.update(f"inbox/{item['id']}", {"status": "delivering", "commandId": cid, "lastTryAt": now_iso(), "error": None})
         log.append(f"{item['id']}: handed to run {cid}")
-    for item in store.where("inbox", "status", "open"):
+    for item in by("open"):
         if item.get("kind") != "question" or item.get("machine") != machine or item.get("sessionId") in (None, "", "unknown"):
             continue
         ask = open_ask(item.get("thread") or [])
