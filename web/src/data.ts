@@ -4,6 +4,8 @@ import type { Kind } from "./planCheck";
 import { useEffect, useState } from "react";
 import { collection, doc, limit, onSnapshot, orderBy, query, setDoc, updateDoc, where, type QueryConstraint } from "firebase/firestore";
 import { db } from "./firebase";
+import { countReads, useActive } from "./pageReads";
+export { pageReads, countReads } from "./pageReads";
 
 // The shapes the bridge writes (bridge/agent_bridge/aggregate.py).
 export type Tokens = {
@@ -187,20 +189,15 @@ export type Run = {
   error?: string;
 };
 
-// This page tab's own document reads since it loaded (each changed document a listener delivers is one read), for the
-// Firestore usage check (UsageCheck.tsx). The hooks below count what they receive; a few small hooks do not, so it is a floor.
-let reads = 0;
-export const pageReads = () => reads;
-export const countReads = (n: number) => {
-  reads += n;
-};
-
+// Every listener counts the documents it receives by name (pageReads.ts sends them to the bridge's counter) and runs
+// only while the tab is active (the owner's words, 2026-11-12: "Page listeners only while their tab is open").
 function useCollection<T>(name: string, ...constraints: QueryConstraint[]): T[] | null {
   const [rows, setRows] = useState<T[] | null>(null);
-  useEffect(
-    () => onSnapshot(query(collection(db, name), ...constraints), (s) => (countReads(s.docChanges().length), setRows(s.docs.map((d) => d.data() as T)))),
-    [name],
-  );
+  const active = useActive();
+  useEffect(() => {
+    if (!active) return;
+    return onSnapshot(query(collection(db, name), ...constraints), (s) => (countReads(s.docChanges().length, name), setRows(s.docs.map((d) => d.data() as T))));
+  }, [name, active]);
   return rows;
 }
 
@@ -210,13 +207,15 @@ function useCollection<T>(name: string, ...constraints: QueryConstraint[]): T[] 
 export const RECENT_DAYS = 5;
 export function useSessions(older: boolean): Session[] | null {
   const [rows, setRows] = useState<Session[] | null>(null);
+  const active = useActive();
   useEffect(() => {
+    if (!active) return;
     const since = new Date(Date.now() - RECENT_DAYS * 86400000).toISOString();
     const q = older
       ? query(collection(db, "sessions"), orderBy("lastAt", "desc"), limit(300))
       : query(collection(db, "sessions"), where("lastAt", ">=", since), orderBy("lastAt", "desc"));
-    return onSnapshot(q, (s) => (countReads(s.docChanges().length), setRows(s.docs.map((d) => d.data() as Session))));
-  }, [older]);
+    return onSnapshot(q, (s) => (countReads(s.docChanges().length, "sessions"), setRows(s.docs.map((d) => d.data() as Session))));
+  }, [older, active]);
   return rows;
 }
 // every synced day, oldest to newest on the chart (the owner's words, 2026-11-08: "all spend type with full history")
@@ -228,13 +227,14 @@ export const usePlans = () => useCollection<Plan>("plans", orderBy("updatedAt", 
 // One plan's versions, read only while its page is open. Sorted here, so the query needs no composite index.
 export function usePlanVersions(planId: string | undefined): PlanVersion[] | null {
   const [rows, setRows] = useState<PlanVersion[] | null>(null);
+  const active = useActive();
   useEffect(() => {
-    setRows(null);
-    if (!planId) return;
+    if (!planId) return setRows(null);
+    if (!active) return;
     return onSnapshot(query(collection(db, "planVersions"), where("planId", "==", planId)), (s) =>
-      setRows(s.docs.map((d) => d.data() as PlanVersion).sort((a, b) => a.n - b.n)),
+      (countReads(s.docChanges().length, "planVersions"), setRows(s.docs.map((d) => d.data() as PlanVersion).sort((a, b) => a.n - b.n))),
     );
-  }, [planId]);
+  }, [planId, active]);
   return rows;
 }
 export const useInbox = () => useCollection<InboxItem>("inbox", orderBy("createdAt", "desc"), limit(200));
@@ -385,11 +385,12 @@ export const setRunMode = (mode: RunMode) =>
 
 export function usePlanSteps(planId: string | undefined): PlanStep[] | null {
   const [rows, setRows] = useState<PlanStep[] | null>(null);
+  const active = useActive();
   useEffect(() => {
-    if (!planId) return;
+    if (!planId || !active) return;
     return onSnapshot(query(collection(db, "planSteps"), where("planId", "==", planId)), (s) =>
-      setRows(s.docs.map((d) => d.data() as PlanStep)));
-  }, [planId]);
+      (countReads(s.docChanges().length, "planSteps"), setRows(s.docs.map((d) => d.data() as PlanStep))));
+  }, [planId, active]);
   return rows;
 }
 
@@ -397,20 +398,22 @@ export function usePlanSteps(planId: string | undefined): PlanStep[] | null {
 export type PlanGenerated = { planId: string; versions: Record<string, { file: string; kind: string; at: string }[]> };
 export function usePlanGenerated(planId: string | undefined): PlanGenerated | null {
   const [g, setG] = useState<PlanGenerated | null>(null);
+  const active = useActive();
   useEffect(() => {
-    if (!planId) return;
-    return onSnapshot(doc(db, "planGenerated", planId), (s) => setG((s.data() as PlanGenerated) ?? { planId, versions: {} }));
-  }, [planId]);
+    if (!planId || !active) return;
+    return onSnapshot(doc(db, "planGenerated", planId), (s) => (countReads(1, "planGenerated"), setG((s.data() as PlanGenerated) ?? { planId, versions: {} })));
+  }, [planId, active]);
   return g;
 }
 
 // The owner's ticks on the harness (harness.ts): one small record per plan, never a plan version.
 export function useHarness(planId: string | undefined): HarnessTicks | null {
   const [t, setT] = useState<HarnessTicks | null>(null);
+  const active = useActive();
   useEffect(() => {
-    if (!planId) return;
-    return onSnapshot(doc(db, "planHarness", planId), (s) => setT((s.data() as HarnessTicks) ?? { planId, items: {} }));
-  }, [planId]);
+    if (!planId || !active) return;
+    return onSnapshot(doc(db, "planHarness", planId), (s) => (countReads(1, "planHarness"), setT((s.data() as HarnessTicks) ?? { planId, items: {} })));
+  }, [planId, active]);
   return t;
 }
 export const tickHarness = (planId: string, h: HarnessItem, ok: boolean, v: number) =>
@@ -425,11 +428,12 @@ export type StepCheck = { id: string; planId: string; stepId: string; command: s
   tick?: { ok: boolean; hash: string; at: string }; state?: "idle" | "queued" | "running"; last?: CheckRun; runs?: CheckRun[] };
 export function useStepChecks(planId: string | undefined): StepCheck[] {
   const [c, setC] = useState<StepCheck[]>([]);
+  const active = useActive();
   useEffect(() => {
-    if (!planId) return;
+    if (!planId || !active) return;
     return onSnapshot(query(collection(db, "planChecks"), where("planId", "==", planId)), (s) =>
-      setC(s.docs.map((d) => d.data() as StepCheck)));
-  }, [planId]);
+      (countReads(s.docChanges().length, "planChecks"), setC(s.docs.map((d) => d.data() as StepCheck))));
+  }, [planId, active]);
   return c;
 }
 export const checkTicked = (c?: StepCheck | null) =>
@@ -458,11 +462,12 @@ export type StepEvidence = { id: string; planId: string; stepId: string; sets?: 
   check?: { at: string; runId: string; set?: string; overall: "pass" | "fail" | "unclear"; pictures: EvidenceMark[]; note: string } };
 export function useStepEvidence(planId: string | undefined): StepEvidence[] {
   const [e, setE] = useState<StepEvidence[]>([]);
+  const active = useActive();
   useEffect(() => {
-    if (!planId) return;
+    if (!planId || !active) return;
     return onSnapshot(query(collection(db, "planEvidence"), where("planId", "==", planId)), (s) =>
-      setE(s.docs.map((d) => d.data() as StepEvidence)));
-  }, [planId]);
+      (countReads(s.docChanges().length, "planEvidence"), setE(s.docs.map((d) => d.data() as StepEvidence))));
+  }, [planId, active]);
   return e;
 }
 // Generate evidence ("pictures") and LLM check ("check"): a fresh one-off run on the plan's machine.
@@ -512,10 +517,11 @@ export type PlanChain = { planId: string; state: "on" | "stopped" | "done"; step
   left?: number; reason?: string | null; startedAt?: string; endedAt?: string | null };
 export function usePlanChain(planId: string | undefined): PlanChain | null {
   const [c, setC] = useState<PlanChain | null>(null);
+  const active = useActive();
   useEffect(() => {
-    if (!planId) return;
-    return onSnapshot(doc(db, "planChains", planId), (s) => setC((s.data() as PlanChain) ?? null));
-  }, [planId]);
+    if (!planId || !active) return;
+    return onSnapshot(doc(db, "planChains", planId), (s) => (countReads(1, "planChains"), setC((s.data() as PlanChain) ?? null)));
+  }, [planId, active]);
   return c;
 }
 // The harness note is made by the bridge as each step starts, from the ticks then (chain.py harness_note).

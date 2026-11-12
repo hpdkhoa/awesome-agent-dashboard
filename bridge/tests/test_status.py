@@ -54,7 +54,7 @@ def world():
         "commands/a": {"status": "running"}, "commands/b": {"status": "done"}, "commands/c": {"status": "waiting"},
         "liveSessions/s1": {"beatAt": iso(30)}, "liveSessions/s2": {"beatAt": iso(600)},
         "inbox/q1": {"status": "open"}, "inbox/q2": {"status": "delivered"},
-        "machines/PC": {"name": "PC", "seenAt": iso(10)}, "machines/linux": {"name": "linux", "seenAt": iso(900)},
+        "machines/PC": {"name": "PC", "seenAt": iso(10)}, "machines/linux": {"name": "linux", "seenAt": iso(1500)},
         "plans/old": {"id": "old", "title": "Old", "status": "closed", "updatedAt": iso(5), "current": 1},
         "plans/av": {"id": "av", "title": "Avatar", "status": "open", "phase": "build", "updatedAt": iso(60), "current": 5},
         "planVersions/av_v5": {"parts": {"steps": [{"id": "p1"}, {"id": "p2"}, {"id": "p3"}, {"id": "p4"}]}},
@@ -76,7 +76,7 @@ def test_counts_plan_bridges_and_hosts():
     assert a["sessions"] == 1 and a["inbox"] == 1
     own = {"status": "done", "runs": 0, "hosts": [{"name": "linux", "host": "10.0.0.2", "ssh": True, "ollama": False}]}
     assert a["bridges"] == [{"name": "PC", "online": True, "seenAgoS": 0, "self": True, "state": own},
-                            {"name": "linux", "online": False, "seenAgoS": 900, "state": None}]
+                            {"name": "linux", "online": False, "seenAgoS": 1500, "state": None}]
     assert a["hosts"] == [{"name": "linux", "host": "10.0.0.2", "ssh": True, "ollama": False}]
     p = a["plan"]
     assert (p["title"], p["phase"], p["stepsDone"], p["stepsAll"]) == ("Avatar", "build", 1, 4)
@@ -267,7 +267,8 @@ def test_account_feeds_read_counts_and_plan():
     af = listen.AccountFeeds.__new__(listen.AccountFeeds)
     af.wall = lambda: NOW
     af.commands, af.inbox = F([{"status": "running"}]), F([{"status": "open"}, {"status": "open"}])
-    af.live = F([{"beatAt": iso(30)}, {"beatAt": iso(600)}])  # one went quiet after the listen opened
+    af.live = None  # no listen on beats (2026-11-12): open sessions come from the process scan
+    af.live_count = lambda: 1
     af.machines = F([{"name": "PC"}])
     af.plans = F([{"id": "old", "status": "closed", "updatedAt": iso(5)},
                   {"id": "av", "title": "Avatar", "phase": "build", "updatedAt": iso(60), "current": 5}])

@@ -45,8 +45,9 @@ ASKED_SECONDS = 120
 # p10 (the owner's picks, 2026-11-11: "C: bridges publish, avatar listens"; Firestore "Optimized": written only on a
 # change, plus a 5 min still-alive write): each bridge writes its own state into machines/<name> on a change and at least
 # every KEEPALIVE_SECONDS; a bridge counts as online while that is under MACHINE_LIVE_SECONDS old (keepalive + 2 rounds).
-KEEPALIVE_SECONDS = 300
-MACHINE_LIVE_SECONDS = 420  # the background thread refreshes only while /status was asked this recently
+KEEPALIVE_SECONDS = 900  # the owner's words, 2026-11-12: "machines doc: write it only when it changes" (608 writes a day)
+MACHINE_LIVE_SECONDS = 1020  # keepalive + 2 rounds; the background thread refreshes only while /status was asked this recently
+PUBLISH_GAP_SECONDS = 60  # a changed state waits for the next minute, so a busy minute is one write, not ten
 GOING = ["new", "running", "waiting", "stopping"]  # chain.GOING
 HOST_PORTS = (("ssh", 22), ("ollama", 11434))
 
@@ -292,6 +293,8 @@ class Publisher:
         key = json.dumps(state, sort_keys=True)
         if not force and key == self.last and now - self.at < KEEPALIVE_SECONDS:
             return False
+        if not force and key != self.last and now - self.at < PUBLISH_GAP_SECONDS:
+            return False  # changed, but written less than a minute ago: next round
         if self.store.update(f"machines/{self.machine}", {"seenAt": _iso(now), "avatar": state}):
             self.last, self.at = key, now
             self.writes += 1

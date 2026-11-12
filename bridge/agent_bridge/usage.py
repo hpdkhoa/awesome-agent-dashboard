@@ -126,6 +126,16 @@ class UsageCheck:
         what = body.get("what")
         if what == "claude":
             return claude_usage(self.creds_path)
+        if what == "page":
+            # a dashboard tab's own reads since its last flush, by listener (web/src/pageReads.ts), the owner's
+            # words, 2026-11-12: "A per-tab read capture written to the PC counter through the bridge"
+            by = body.get("by") if isinstance(body.get("by"), dict) else {}
+            n = 0
+            for name, count in list(by.items())[:40]:
+                if isinstance(count, (int, float)) and 0 < count < 1_000_000 and self.counter:
+                    self.counter.add("reads", int(count), source=f"page:{str(name)[:40]}")
+                    n += int(count)
+            return {"ok": True, "added": n, "tab": str(body.get("tab") or "")[:16]}
         if what == "firestore":
             today = self.counter.today() if self.counter else {}
             return {"today": today, "freeTier": FREE_TIER, "checkedAt": now_iso(), "counted": self.counter is not None}

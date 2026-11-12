@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { collection, deleteDoc, doc, limit, onSnapshot, orderBy, query, setDoc, type QueryConstraint } from "firebase/firestore";
 import { db } from "./firebase";
+import { countReads, useActive } from "./pageReads";
 
 // Money flow in five assets (the owner's list, 2026-11-01: "usd eur vnd gold bar and gold ring"). Rates come only from
 // what this page synced (Vietcombank, HSBC, three gold sources) or the owner typed (gold).
@@ -52,10 +53,11 @@ export const MIN_GAP_MS = 5 * 60 * 1000; // Vietcombank: one request every 5 min
 // Listens only while `on` (its tab is open), so the other tabs never pay reads for money data.
 function useRows<T>(name: string, on: boolean, ...constraints: QueryConstraint[]): T[] | null {
   const [rows, setRows] = useState<T[] | null>(null);
+  const active = useActive();
   useEffect(() => {
-    if (!on) return;
-    return onSnapshot(query(collection(db, name), ...constraints), (s) => setRows(s.docs.map((d) => d.data() as T)));
-  }, [name, on]);
+    if (!on || !active) return;
+    return onSnapshot(query(collection(db, name), ...constraints), (s) => (countReads(s.docChanges().length, name), setRows(s.docs.map((d) => d.data() as T))));
+  }, [name, on, active]);
   return rows;
 }
 

@@ -78,3 +78,12 @@ def test_usage_call_needs_the_owner(tmp_path):
         assert call(base, "/usage", {"what": "x"})[0] == 400
     finally:
         srv.shutdown()
+
+
+def test_page_reads_land_in_the_counter_by_listener(tmp_path):
+    c = Counter(tmp_path / "c.json")
+    u = UsageCheck(c, tmp_path / "none.json")
+    r = u.answer({"what": "page", "tab": "ab12", "by": {"usage": 76, "commands": 100, "bad": "x", "neg": -5}})
+    assert r == {"ok": True, "added": 176, "tab": "ab12"}
+    t = c.today()
+    assert t["reads"] == 176 and t["by"]["page:usage"]["reads"] == 76 and "page:bad" not in t["by"]

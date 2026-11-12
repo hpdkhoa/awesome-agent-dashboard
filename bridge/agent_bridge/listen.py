@@ -149,16 +149,16 @@ class AccountFeeds:
     newest plans, and the newest open plan's current version and step states. read() gives what status.Status._read
     gave from its queries, or None while a listen is still opening (the caller then asks the old way once)."""
 
-    def __init__(self, client, wall=time.time):
+    def __init__(self, client, wall=time.time, live_count=None):
         from google.cloud.firestore_v1.base_query import FieldFilter
 
         self.client, self.wall = client, wall
         self.F = F = FieldFilter
         self.commands = QueryFeed(client, lambda c: c.collection("commands").where(filter=F("status", "in", GOING)), name="commands(going)")
-        # liveSessions keeps every session that ever beat (144 on 2026-11-11): listen only to the ones that beat in
-        # the last LIVE_SECONDS when the listen opens; age is counted here, the cutoff moves at every reopen
-        self.live = QueryFeed(client, lambda c: c.collection("liveSessions").where(
-            filter=F("beatAt", ">=", _iso(self.wall() - LIVE_SECONDS))), name="liveSessions")
+        # no listen on liveSessions (the owner's words, 2026-11-12: "stop listening to beats on the bridge": every beat
+        # read back cost 4,946 reads a day); the sessions open on this machine come from the process scan, 0 reads
+        self.live = None
+        self.live_count = live_count or _open_sessions
         # the inbox items still to ask, answer or deliver: the avatar counts the open ones, deliver.py acts on all
         # three (p14 F4: one listen instead of 3 queries a minute)
         self.inbox = QueryFeed(client, lambda c: c.collection("inbox").where(filter=F("status", "in", INBOX)),
@@ -184,10 +184,13 @@ class AccountFeeds:
         return self.version.current(), self.steps.current()
 
     def read(self, now: float) -> dict | None:
-        rows = [f.current() for f in (self.commands, self.live, self.inbox, self.machines, self.plans)]
+        rows = [f.current() for f in (self.commands, self.inbox, self.machines, self.plans)]
         if any(r is None for r in rows):
             return None
-        going, live, waiting, machines, plans = rows
+        going, waiting, machines, plans = rows
+        live = self.live.current() if self.live is not None else None
+        if live is None:
+            live = [{"beatAt": _iso(now)} for _ in range(self.live_count())]
         cutoff = _iso(now - LIVE_SECONDS)
         plans = sorted(plans, key=lambda p: p.get("updatedAt") or "", reverse=True)
         plan = next((p for p in plans if p.get("status", "open") == "open"), None)
@@ -208,6 +211,14 @@ class AccountFeeds:
         for f in (self.commands, self.live, self.inbox, self.machines, self.plans, self.version, self.steps):
             if f is not None:
                 f.close()
+
+
+def _open_sessions() -> int:
+    """Sessions open in the app or a terminal on this machine, from the process scan (runs.claude_processes)."""
+    from .runs import claude_processes
+
+    seen = claude_processes()
+    return 0 if seen is None else sum(1 for sid, _ in seen if sid)
 
 
 def _iso(t: float) -> str:
