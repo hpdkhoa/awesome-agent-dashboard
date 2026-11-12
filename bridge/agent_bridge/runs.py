@@ -3,8 +3,12 @@
 The page writes commands/<id> with action "start" (a registered folder and a prompt), "message" (a message to an
 existing session), "plan" (a plan from a session's real record, planfrom.py) or "stop" (a run to end). The bridge on the named machine runs the owner's own `claude` CLI:
 
-    start:    claude -p <prompt> --output-format json --session-id <new id> --permission-prompt-tool <inbox approve>
-    message:  claude -p <message> --output-format json --resume <session> --permission-prompt-tool <inbox approve>
+    start:    claude -p <prompt> <STREAM> --session-id <new id> --permission-prompt-tool <inbox approve>
+    message:  claude -p <message> <STREAM> --resume <session> --permission-prompt-tool <inbox approve>
+
+STREAM is `--output-format stream-json --verbose --include-partial-messages` (step i3, the owner's choice,
+2026-11-12: "Token stream"): the .out file grows while the run works, so the page shows the running turn
+(texts.live); its last line is claude's result, the same object `--output-format json` writes (parse_result).
 
 Both add `--permission-mode auto` when the owner's one setting, meta/runs permissionMode, says "auto" (the owner's
 choice, 2026-11-02: "do 1 but it is one setting use for all kinds not set every run"). It covers every kind of run:
@@ -67,6 +71,7 @@ from .planfrom import NO_EDITS, mark_quotes, note_command, plan_prompt, system_a
 from .redact import redact
 
 APPROVAL_TOOL = "mcp__agent-inbox__inbox_approve"
+STREAM = ["--output-format", "stream-json", "--verbose", "--include-partial-messages"]
 NOTE_SECONDS = 20 * 60  # one page's notes
 NO_CLI = "No signed-in claude CLI on this machine. Install Claude Code and sign in, or set CLAUDE_BIN."
 SESSION_ARG = re.compile(r"^--(?:resume|session-id)(?:=(.+))?$")
@@ -261,7 +266,7 @@ def start_command(claude: str, prompt: str, session_id: str, mode: str = "manual
                   keep: bool = True, kind: str = "", step: str = "") -> list[str]:
     """keep=False: a one-off job whose session is never saved (--no-session-persistence), so it leaves no log and no
     session on the dashboard (the owner's words, 2026-11-10: "A "don't keep the session" tick on Start")."""
-    return [claude, "-p", prompt, "--output-format", "json", "--session-id", session_id,
+    return [claude, "-p", prompt, *STREAM, "--session-id", session_id,
             "--permission-prompt-tool", APPROVAL_TOOL, *mode_args(mode), *model_args(model, effort),
             *([] if keep else ["--no-session-persistence"]), *system_args(kind, step)]
 
@@ -292,7 +297,7 @@ def message_command(claude: str, message: str, session_id: str, mode: str = "man
                     step: str = "", model: str = "", effort: str = "") -> list[str]:
     """kind: a plan message's kind (qa, goal, step, rule, lesson); step: a Run step's step id. Either goes as an
     appended system prompt; a Run step has no kind."""
-    return [claude, "-p", message, "--output-format", "json", "--resume", session_id,
+    return [claude, "-p", message, *STREAM, "--resume", session_id,
             "--permission-prompt-tool", APPROVAL_TOOL, *mode_args(mode), *system_args(kind, step),
             *model_args(model, effort)]
 
@@ -392,10 +397,25 @@ def live_claude(pid, started: str, slack: float = 120.0):
 
 
 def parse_result(out: str | None) -> dict:
-    """claude's JSON result. An "is_error" result carries its message in "result", such as "Not logged in"."""
+    """claude's JSON result. An "is_error" result carries its message in "result", such as "Not logged in".
+    A stream .out (STREAM, step i3) holds one event per line: its result is the last line of type "result"; a run
+    still working has none yet ({})."""
     try:
         r = json.loads(out or "{}")
     except ValueError:
+        r = None
+        for line in reversed((out or "").splitlines()):
+            if '"type":"result"' in line.replace(" ", ""):
+                try:
+                    r = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(r, dict) and r.get("type") == "result":
+                    break
+                r = None
+        if r is None:
+            return {}
+    if isinstance(r, dict) and r.get("type") not in (None, "result"):  # a stream .out with one event line so far
         return {}
     return r if isinstance(r, dict) else {}
 

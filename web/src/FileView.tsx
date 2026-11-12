@@ -66,6 +66,43 @@ export async function bridgePost<T>(path: string, body: unknown): Promise<T> {
 export type PcReplyRef = { session: string; item: string; k: number };
 export const pcText = (body: { session?: string; turn?: number; run?: string; reply?: PcReplyRef }) => bridgePost<PcReply>("/text", body);
 
+// The running turn, streamed by claude into the run's .out on the PC (step i3, the owner's choice, 2026-11-12: "Token
+// stream"): asked every 2 s while the run is running, shown, never stored (no Firestore write).
+export type PcLive = { text: string; chars: number; cut: boolean; tools: number; started: boolean; done: boolean };
+export const LIVE_EVERY_MS = 2000;
+export const pcLive = (run: string) => bridgePost<PcLive>("/text", { live: run });
+
+export function LiveText({ run, cwd }: { run: string; cwd: string }) {
+  const [got, setGot] = useState<PcLive | string | null>(null);
+  useEffect(() => {
+    let on = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const ask = () =>
+      pcLive(run)
+        .then((r) => on && setGot(r), (e) => on && setGot(String(e.message ?? e)))
+        .finally(() => {
+          if (on) timer = setTimeout(ask, LIVE_EVERY_MS);
+        });
+    ask();
+    return () => {
+      on = false;
+      clearTimeout(timer);
+    };
+  }, [run]);
+  if (typeof got === "string") return <p className="muted small">{got}</p>;
+  if (!got) return <p className="muted small">asking the PC</p>;
+  if (!got.started) return <p className="muted small">claude is starting on the PC</p>;
+  return (
+    <div className="live-text">
+      <p className="small muted">
+        live from the PC · {got.chars.toLocaleString()} chars · {got.tools} tool {got.tools === 1 ? "call" : "calls"}
+        {got.cut ? " · the last 8,000 chars" : ""}
+      </p>
+      {got.text ? <Md text={got.text} cwd={cwd} /> : <p className="muted small">thinking</p>}
+    </div>
+  );
+}
+
 // A session's reply (any turn, the last one first) or a run's result, whole, from the PC.
 export function PcText({ session, run, reply, cwd }: { session?: string; run?: string; reply?: PcReplyRef; cwd: string }) {
   const [turn, setTurn] = useState<number | undefined>(undefined);

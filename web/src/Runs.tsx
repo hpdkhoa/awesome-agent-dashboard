@@ -7,7 +7,7 @@ import {
 } from "./data";
 import { num, usd } from "./Dashboard";
 import { Md } from "./Markdown";
-import { PcText } from "./FileView";
+import { LiveText, PcText } from "./FileView";
 import { MoreMenu } from "./MoreMenu";
 import { Section } from "./Section";
 
@@ -381,6 +381,12 @@ export function RunList({ runs, title = "Runs from the dashboard" }: { runs: Run
           )}
           </div>
           {r.error && <p className="bad small">{r.error}</p>}
+          {r.status === "running" && r.action !== "plan" && (
+            <>
+              <p className="label">Live</p>
+              <LiveText run={r.id} cwd={r.cwd ?? r.folder ?? ""} />
+            </>
+          )}
           {r.status === "running" && (
             <div className="actions">
               <button onClick={() => stopRun(r.machine, r.id)}>Stop</button>
