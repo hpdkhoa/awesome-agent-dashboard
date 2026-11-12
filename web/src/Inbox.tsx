@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { PcText } from "./FileView";
-import { answerItem, askBack, batchOf, cancelAnswer, forceAnswer, saveDraft, type InboxItem, type Plan, type Session } from "./data";
+import { answerItem, askBack, batchOf, cancelAnswer, forceAnswer, saveDraft, sendBatch, type InboxItem, type Plan, type Session } from "./data";
+import { dotState, isSaved, nextTodo, step, swipeDir } from "./phone";
 import { Example } from "./Example";
 import { Md } from "./Markdown";
 import { MoreMenu } from "./MoreMenu";
@@ -57,22 +58,31 @@ export function InboxList({ items, picked, onPick }: { items: InboxItem[]; picke
 
 // One question of a batch (the owner's words, 2026-11-07): options drawn or with their difference, a text box for your
 // own answer or a question instead of a pick (like "Other"), your saved answers kept as a thread, and ask back.
-function QuestionCard({ q, batch, k }: { q: InboxItem; batch: InboxItem[]; k: number }) {
+// phone (step i7): a tap on an option saves it at once and onSaved moves to the next question; the batch is sent only
+// by the Send button (the owner's pick "Tap = save, go to next; Send at the end").
+function QuestionCard({ q, batch, k, onSaved }: { q: InboxItem; batch: InboxItem[]; k: number; onSaved?: (id: string) => void }) {
   const [choice, setChoice] = useState(q.draft?.choice ?? "");
   const [text, setText] = useState(q.draft?.text ?? "");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const open = q.status === "open";
   const shown = open ? choice : q.answer?.choice ?? "";
+  const phone = !!onSaved;
   async function run(f: () => Promise<unknown>) {
     setBusy(true);
+    let ok = true;
     try {
       await f();
     } catch (e) {
+      ok = false;
       setError(String((e as { code?: string }).code ?? e));
     }
     setBusy(false);
+    return ok;
   }
+  const save = (c: string) =>
+    phone ? run(() => saveDraft(q, batch, c, text.trim(), false)).then((ok) => ok && onSaved!(q.id))
+      : run(() => saveDraft(q, batch, c, text.trim()));
   const left = batch.filter((x) => x.status === "open" && !x.draft && x.id !== q.id).length;
   return (
     <div className="qcard">
@@ -90,6 +100,11 @@ function QuestionCard({ q, batch, k }: { q: InboxItem; batch: InboxItem[]; k: nu
                     if (q.multi) {
                       const next = on ? picked.filter((l) => l !== o.label) : [...picked.filter(Boolean), o.label];
                       setChoice(q.options.map((x) => x.label).filter((l) => next.includes(l)).join(", "));
+                    } else if (phone && open) {
+                      setChoice(o.label);
+                      setError("");
+                      save(o.label);
+                      return;
                     } else setChoice(on ? "" : o.label);
                     setError("");
                   }}>
@@ -114,12 +129,12 @@ function QuestionCard({ q, batch, k }: { q: InboxItem; batch: InboxItem[]; k: nu
           <div className="actions">
             <button className="primary" disabled={busy}
               onClick={() => (!choice && !text.trim() ? setError("Pick an option or write something first.")
-                : run(() => saveDraft(q, batch, choice, text.trim())))}>
-              {q.draft ? "Change my answer" : "Save my answer"}
+                : save(choice))}>
+              {phone ? "Save, next" : q.draft ? "Change my answer" : "Save my answer"}
             </button>
             <span className="small muted">
               {q.draft ? `saved: ${[q.draft.choice, q.draft.text].filter(Boolean).join(" · ")}` : "not saved yet"}
-              {left > 0 ? ` · sent when ${left === 1 ? "1 more question is" : `${left} more questions are`} saved` : ""}
+              {!phone && left > 0 ? ` · sent when ${left === 1 ? "1 more question is" : `${left} more questions are`} saved` : ""}
             </span>
           </div>
           {q.via !== "hook" && (
@@ -158,8 +173,65 @@ function QuestionCard({ q, batch, k }: { q: InboxItem; batch: InboxItem[]; k: nu
   );
 }
 
-export function InboxView({ item, session, plan, onOpenPlan, items = [] }: {
+// Phone (step i7, "One card per screen, swipe + dots"): one question per screen; swipe left or right, or Prev / Next;
+// a dot per question (green saved, blue shown, grey to answer); Send appears once every question is saved.
+function PhoneBatch({ batch }: { batch: InboxItem[] }) {
+  const first = batch.findIndex((q) => !isSaved(q));
+  const [k, setK] = useState(first < 0 ? 0 : first);
+  const [saved, setSaved] = useState<Set<string>>(new Set());
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [start, setStart] = useState<{ x: number; y: number } | null>(null);
+  const open = batch.filter((q) => q.status === "open");
+  const ready = open.length > 0 && open.every((q) => q.draft);
+  const go = (by: number) => (setK((x) => step(x, batch.length, by)), window.scrollTo(0, 0));
+  function onSaved(id: string) {
+    const s = new Set(saved).add(id);
+    setSaved(s);
+    const j = nextTodo(batch, k, s);
+    if (j >= 0) (setK(j), window.scrollTo(0, 0));
+  }
+  async function send() {
+    setBusy(true);
+    try {
+      await sendBatch(batch);
+    } catch (e) {
+      setError(String((e as { code?: string; message?: string }).message ?? e));
+    }
+    setBusy(false);
+  }
+  const dots = dotState(batch, k);
+  return (
+    <div className="pbatch"
+      onTouchStart={(e) => setStart({ x: e.touches[0].clientX, y: e.touches[0].clientY })}
+      onTouchEnd={(e) => {
+        if (!start) return;
+        const d = swipeDir(e.changedTouches[0].clientX - start.x, e.changedTouches[0].clientY - start.y);
+        setStart(null);
+        if (d) go(-d);
+      }}>
+      <QuestionCard key={batch[k].id} q={batch[k]} batch={batch} k={k} onSaved={onSaved} />
+      <div className="pbar">
+        <button disabled={k === 0} onClick={() => go(-1)} aria-label="Previous question">‹</button>
+        <span className="pdots" aria-label={`question ${k + 1} of ${batch.length}`}>
+          {dots.map((d, n) => <i key={n} className={`pdot ${d}`} onClick={() => go(n - k)} />)}
+        </span>
+        {ready ? (
+          <button className="primary" disabled={busy} onClick={send}>
+            {open.length === 1 ? "Send answer" : `Send ${open.length} answers`}
+          </button>
+        ) : (
+          <button disabled={k === batch.length - 1} onClick={() => go(1)} aria-label="Next question">›</button>
+        )}
+      </div>
+      {error && <p className="bad small">{error}</p>}
+    </div>
+  );
+}
+
+export function InboxView({ item, session, plan, onOpenPlan, items = [], phone = false, onBack }: {
   item: InboxItem; session?: Session; plan?: Plan; onOpenPlan?: (id: string) => void; items?: InboxItem[];
+  phone?: boolean; onBack?: () => void;
 }) {
   const [choice, setChoice] = useState<string>("");
   const [text, setText] = useState("");
@@ -181,10 +253,25 @@ export function InboxView({ item, session, plan, onOpenPlan, items = [] }: {
   }
 
   const open = item.status === "open";
+  const questions = item.kind === "question" && (() => {
+    const batch = batchOf(item, items.length ? items : [item]);
+    return (
+      <Section id="inbox.batch" title={batch.length > 1 ? `${batch.length} questions, answered together` : "The question"}>
+        {phone ? <PhoneBatch batch={batch} /> : batch.map((q, k) => <QuestionCard key={q.id} q={q} batch={batch} k={k} />)}
+      </Section>
+    );
+  })();
   const body = item.kind === "approval" ? "```json\n" + item.text + "\n```" : item.text;
   return (
     <article {...(item.planId ? { "data-quote-plan": item.planId } : item.sessionId && item.sessionId !== "unknown" ? { "data-quote-session": item.sessionId } : {})}>
+      {onBack && (
+        <div className="pback">
+          <button className="link" onClick={onBack}>‹ Inbox</button>
+        </div>
+      )}
       <h1>{item.title}</h1>
+      {/* phone: the questions come first, right under the title (the owner's pick "Full screen, Back to list") */}
+      {phone && questions}
       <p className="meta">
         {KIND[item.kind]} · {item.workType} · {item.machine} · {ago(item.createdAt)} · {STATUS[item.status]}
         <br />
@@ -224,14 +311,7 @@ export function InboxView({ item, session, plan, onOpenPlan, items = [] }: {
         </Section>
       )}
 
-      {item.kind === "question" && (() => {
-        const batch = batchOf(item, items.length ? items : [item]);
-        return (
-          <Section id="inbox.batch" title={batch.length > 1 ? `${batch.length} questions, answered together` : "The question"}>
-            {batch.map((q, k) => <QuestionCard key={q.id} q={q} batch={batch} k={k} />)}
-          </Section>
-        );
-      })()}
+      {!phone && questions}
 
       {item.options.length > 0 && item.kind !== "approval" && item.kind !== "question" && (
         <Section id="inbox.options" title="Options" extra={item.options.length}>

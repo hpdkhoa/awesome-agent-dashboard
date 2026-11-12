@@ -30,6 +30,7 @@ import { Md } from "./Markdown";
 import { Section } from "./Section";
 import { DigestView, LocalSearch } from "./LocalSearch";
 import { InboxList, InboxView, isWaiting } from "./Inbox";
+import { usePhone } from "./phone";
 import { useEntries, useFx, useGold } from "./moneyData";
 import { EntryForm, MoneyView } from "./Money";
 import { RatesReport, RatesSide } from "./Rates";
@@ -103,6 +104,11 @@ export function Dashboard() {
   };
   const [store, setStore] = useState("inbox");
   const [pickedItem, setPickedItem] = useState<string | null>(opened.get("item"));
+  // step i7, "Full screen, Back to list": on a phone the inbox is a list screen and an item screen; a link with ?item=
+  // (a push) opens the item screen straight away
+  const phone = usePhone();
+  const [phoneOpen, setPhoneOpen] = useState(!!opened.get("item"));
+  const pickItem = (id: string) => (setPickedItem(id), setPhoneOpen(true), window.scrollTo(0, 0));
   const [push, turnOnPush] = usePush();
   const [health, restartBridge] = useHealth();
   // Money data loads only while the Money or Rates tab is open.
@@ -117,7 +123,7 @@ export function Dashboard() {
   const item = items.find((i) => i.id === pickedItem) ?? items.find(isWaiting) ?? items[0];
   const shownPlans = (plans ?? []).filter((p) => wt === "all" || p.workType === wt);
   const plan = shownPlans.find((p) => p.id === pickedPlan) ?? shownPlans[0];
-  const openItem = (id: string) => (setPickedItem(id), setTab("inbox"));
+  const openItem = (id: string) => (pickItem(id), setTab("inbox"));
   const todayUse = usage?.find((u) => u.day === today());
   const month = (usage ?? []).reduce((a, u) => ({ tokens: a.tokens + u.total, cost: a.cost + u.costUsd }), { tokens: 0, cost: 0 });
   const lastSync = (machines ?? []).map((m) => m.syncedAt).sort().at(-1);
@@ -136,7 +142,8 @@ export function Dashboard() {
   if (!sessions || !usage || !workTypes || !inbox) return <main className="card">Loading</main>;
 
   return (
-    <div className="app" style={{ gridTemplateColumns: gridColumns(layout) }}>
+    <div className={phone && tab === "inbox" ? (phoneOpen && item ? "app phone-item" : "app phone-list") : "app"}
+      style={{ gridTemplateColumns: gridColumns(layout) }}>
       <header className="top">
         <button className="chip panel-btn" title={layout.leftHidden ? "Show the left panel" : "Hide the left panel"}
           onClick={() => setLayout((l) => ({ ...l, leftHidden: !l.leftHidden }))}>{layout.leftHidden ? "›" : "‹"}</button>
@@ -217,7 +224,7 @@ export function Dashboard() {
             <PlanList plans={shownPlans} items={inbox} picked={plan?.id} onPick={setPickedPlan} />
           </>
         ) : tab === "inbox" ? (
-          <InboxList items={items} picked={item?.id} onPick={setPickedItem} />
+          <InboxList items={items} picked={item?.id} onPick={pickItem} />
         ) : (
         <>
         <div className="pad">
@@ -273,7 +280,7 @@ export function Dashboard() {
           item ? (
             <InboxView key={item.id} item={item} session={sessions.find((s) => s.id === item.sessionId)}
               plan={(plans ?? []).find((p) => p.id === item.planId)} onOpenPlan={(id) => (setPickedPlan(id), setTab("plans"))}
-              items={inbox} />
+              items={inbox} phone={phone} onBack={phone ? () => (setPhoneOpen(false), window.scrollTo(0, 0)) : undefined} />
           ) : (
             <p className="muted">The inbox is empty.</p>
           )

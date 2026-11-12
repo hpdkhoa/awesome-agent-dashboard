@@ -94,3 +94,35 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
 .local-search { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .local-search > input { flex: 1 1 160px; min-width: 0; }
 .local-search > .hits, .local-search > .sec, .local-search > p { flex: 1 1 100%; }
+
+/* Step i7, phone-first inbox (the owner's picks 2026-11-12: "Full screen, Back to list", "One card per screen, swipe +
+   dots", "Tap = save, go to next; Send at the end"). Phone only (560 px and narrower), iOS defaults from the owner's
+   phone style rule: system font, 17 px, line height 1.3, raised dark layer #1C1C1E, 44 px touch targets (Apple HIG).
+   Text boxes are 17 px: iOS zooms the page in on any box under 16 px. */
+@media (max-width: 560px) {
+  .app.phone-list > .main, .app.phone-list > .usage { display: none; }
+  .app.phone-list > .side { max-height: none; }
+  .app.phone-list .list .row { min-height: 56px; }
+  .app.phone-item > .top, .app.phone-item > .side, .app.phone-item > .usage, .app.phone-item > .gutter { display: none; }
+  /* visible: the window scrolls, so the sticky Back and the bottom bar stick to the screen */
+  .app.phone-item > .main { overflow: visible; padding: 0 12px 12px; font: 17px/1.3 -apple-system, system-ui, sans-serif; }
+  .app.phone-item h1 { font-size: 22px; line-height: 1.25; margin: 4px 0 8px; }
+  .app.phone-item textarea, .app.phone-item input, .app.phone-item select { font-size: 17px; }
+  .app.phone-item button { min-height: 44px; }
+  .app.phone-item .option { min-height: 44px; padding: 12px 14px; }
+  .pback { position: sticky; top: 0; z-index: 5; background: var(--bg); padding: 6px 0; margin: 0 -12px; padding-left: 4px; }
+  .pback button.link { font-size: 17px; min-height: 44px; padding: 0 8px; }
+  .pbatch { touch-action: pan-y; }
+  .pbar { position: sticky; bottom: 0; z-index: 5; display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; padding: 8px 0 calc(8px + env(safe-area-inset-bottom)); background: var(--bg); border-top: 1px solid var(--line); }
+  .pbar > button { min-width: 64px; font-size: 20px; }
+  .pbar > button.primary { font-size: 17px; flex: 1 1 auto; }
+  .pdots { display: inline-flex; gap: 10px; align-items: center; }
+  .pdot { width: 12px; height: 12px; border-radius: 50%; background: var(--line); display: inline-block; cursor: pointer; }
+  .pdot.saved { background: var(--live); }
+  .pdot.now { background: var(--accent); transform: scale(1.3); }
+}
+@media (max-width: 560px) and (prefers-color-scheme: dark) {
+  .app.phone-item > .main, .pback, .pbar { background: #1C1C1E; color: #FFFFFF; }
+  .app.phone-item .muted { color: rgba(235, 235, 245, 0.6); }
+}

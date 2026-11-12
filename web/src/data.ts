@@ -246,16 +246,25 @@ export const answerItem = (id: string, choice: string, text: string) =>
 // the last question is answered and the choices will only use my latest choice without drift and I can review them
 // back as the thread in inbox"). Saving keeps your latest answer as the draft and adds it to the thread; when every
 // question of the batch has a draft, all are sent at once, each with its latest draft.
-export async function saveDraft(item: InboxItem, batch: InboxItem[], choice: string, text: string) {
+// send = false (the phone, step i7, the owner's pick "Send at the end"): the answer is saved and the batch waits for
+// sendBatch, so a wrong last tap never sends.
+export async function saveDraft(item: InboxItem, batch: InboxItem[], choice: string, text: string, send = true) {
   const at = new Date().toISOString();
   const draft = { choice, text, at };
   await updateDoc(doc(db, "inbox", item.id), {
     draft, thread: [...(item.thread ?? []), { who: "owner", kind: "answer", choice, text, at }],
   });
+  if (!send) return;
   const drafts = new Map(batch.map((q) => [q.id, q.id === item.id ? draft : q.draft]));
   if (batch.every((q) => q.status !== "open" || drafts.get(q.id)))
     for (const q of batch.filter((x) => x.status === "open"))
       await answerItem(q.id, drafts.get(q.id)!.choice, drafts.get(q.id)!.text);
+}
+// The phone's Send: every open question of the batch goes with its latest saved answer; refused while one has none.
+export async function sendBatch(batch: InboxItem[]) {
+  const open = batch.filter((q) => q.status === "open");
+  if (open.some((q) => !q.draft)) throw new Error("Save an answer for every question first.");
+  for (const q of open) await answerItem(q.id, q.draft!.choice, q.draft!.text);
 }
 // Ask back before answering: the session replies in the thread; it never answers for you.
 export const askBack = (item: InboxItem, text: string) =>

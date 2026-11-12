@@ -7,7 +7,7 @@ import type { InboxItem } from "../web/src/data";
 
 const state = vi.hoisted(() => ({ db: null as unknown }));
 vi.mock("../web/src/firebase", () => ({ get db() { return state.db; } }));
-const { askBack, batchOf, saveDraft } = await import("../web/src/data");
+const { askBack, batchOf, saveDraft, sendBatch } = await import("../web/src/data");
 
 let env: RulesTestEnvironment;
 beforeAll(async () => {
@@ -38,5 +38,18 @@ describe("a batch", () => {
     expect([b.status, b.answer?.choice, b.answer?.text]).toEqual(["answered", "", "my own answer"]);
     expect(a.thread?.map((t) => t.choice)).toEqual(["A", "B"]);
     expect(b.thread?.map((t) => t.kind)).toEqual(["ask", "answer"]);
+  });
+
+  // step i7, the owner's pick "Tap = save, go to next; Send at the end": on the phone the last save never sends
+  it("phone: saving every question sends nothing until Send, then sends each latest answer", async () => {
+    for (const x of [q("q1", 0), q("q2", 1)]) await setDoc(doc(state.db as never, "inbox", x.id), x);
+    await saveDraft(await get("q1"), [await get("q1"), await get("q2")], "A", "", false);
+    await expect(sendBatch([await get("q1"), await get("q2")])).rejects.toThrow("every question");
+    await saveDraft(await get("q2"), [await get("q1"), await get("q2")], "B", "", false);
+    await saveDraft(await get("q2"), [await get("q1"), await get("q2")], "A", "changed", false);
+    expect([(await get("q1")).status, (await get("q2")).status]).toEqual(["open", "open"]);
+    await sendBatch([await get("q1"), await get("q2")]);
+    const [a, b] = [await get("q1"), await get("q2")];
+    expect([a.status, a.answer?.choice, b.status, b.answer?.choice, b.answer?.text]).toEqual(["answered", "A", "answered", "A", "changed"]);
   });
 });
