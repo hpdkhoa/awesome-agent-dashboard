@@ -123,6 +123,10 @@ def main(argv: list[str] | None = None) -> None:
             client = firestore_client(store.s)
             feed, gone = CommandFeed(client), DeletedFeed(client)
             status.feeds = AccountFeeds(client)  # p10: the avatar's counts from listens, not a 20-read round
+            if runs is not None:  # p16: the owner's run settings (meta/runs) from a listen, not a read each turn
+                from .listen import QueryFeed
+
+                runs.prefs_feed = QueryFeed(client, lambda c: c.collection("meta").document("runs"), name="meta/runs")
         except ImportError:
             print("google-cloud-firestore is not installed: asking for commands every 5 s instead of listening", flush=True)
     stamp = lambda: time.strftime("%Y-%m-%d %H:%M:%S")

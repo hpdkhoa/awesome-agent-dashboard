@@ -377,6 +377,12 @@ class Runs:
         # folder as the archiver tools in inbox.py (data_dir()/runs/archiver)
         self.out_dir.mkdir(parents=True, exist_ok=True)
         self.procs: dict[str, subprocess.Popen] = {}
+        # p16 (the owner's pick, 2026-11-12: "Add step: read once, then listen"): while a message waits for its
+        # session's turn, the 5 s step asked Firestore each time for the running run's session and for meta/runs
+        # (406 reads in 21 min, measured). Each running run's session is now read once and kept here; meta/runs comes
+        # from a listen (prefs_feed, set by cli.py), read once only until the listen's first answer.
+        self.sid_of: dict[str, str] = {}
+        self.prefs_feed = None  # listen.QueryFeed on meta/runs; None = read the document
         # "new" commands already acted on: a listener snapshot can lag behind our own write, never act twice
         self.acted: set[str] = set()
         self.reading: dict[str, dict] = {}  # plan commands still reading pages: {"proc": the page run, "stop": bool}
@@ -412,15 +418,22 @@ class Runs:
         if c.get("inboxId"):
             self.store.update(f"inbox/{c['inboxId']}", fields)
 
+    def prefs(self) -> dict:
+        """meta/runs, the owner's run settings: from the listen once it answered, else read once now (p16)."""
+        rows = self.prefs_feed.current() if self.prefs_feed is not None else None
+        if rows is not None:
+            return dict(rows[0]) if rows else {}
+        return self.store.get("meta/runs") or {}
+
     def mode(self) -> str:
         """The owner's one setting for every run, read when a run starts: "auto" or "manual"."""
-        return "auto" if (self.store.get("meta/runs") or {}).get("permissionMode") == "auto" else "manual"
+        return "auto" if self.prefs().get("permissionMode") == "auto" else "manual"
 
     def run_with(self, c: dict) -> tuple[str, str]:
         """(model, effort) for a run, always exact: the run's own choice, else the owner's setting in meta/runs, else
         claude-opus-5-5 and medium (the owner's picks, 2026-11-10: "Setting plus a choice on each message"; "I want exact
         option"). A name that is not one of MODELS, or an effort not in EFFORTS, falls to the next in that order."""
-        prefs = self.store.get("meta/runs") or {}
+        prefs = self.prefs()
         exact = lambda m: ALIASES.get(str(m or ""), str(m or ""))
         model = next((m for m in (exact(c.get("model")), exact(prefs.get("model"))) if m in MODELS), DEFAULT_MODEL)
         effort = next((e for e in (c.get("effort"), prefs.get("effort")) if e in EFFORTS), DEFAULT_EFFORT)
@@ -608,9 +621,18 @@ class Runs:
     def wait_reason(self, session_id: str, force: bool = False) -> str | None:
         """"turn", "app", or None when the message can go now."""
         for k, p in list(self.procs.items()):
-            if p.poll() is None and (self.store.get(f"commands/{k}") or {}).get("sessionId") == session_id:
+            if p.poll() is None and self._session_of(k) == session_id:
                 return "turn"  # a run of this bridge is working in it
         return log_wait_reason(self.logs, session_id, force, self.procs_seen)
+
+    def _session_of(self, cid: str) -> str:
+        """The session a running run works in: read once from its command, then kept until the run ends (p16)."""
+        if cid not in self.sid_of:
+            sid = (self.store.get(f"commands/{cid}") or {}).get("sessionId") or ""
+            if not sid:
+                return ""  # not written yet: asked again next time
+            self.sid_of[cid] = sid
+        return self.sid_of[cid]
 
     def _upgrade_first(self, c: dict) -> tuple[bool, str | None]:
         """A message on a plan in an older format (its format number below PLAN_FORMAT) waits while a plan from that plan's session brings it
@@ -711,7 +733,7 @@ class Runs:
         (auto, always, never) over the owner's size rule in meta/runs freshOver (handoff.py; the owner's pick,
         2026-11-10: "Both")."""
         choice = c.get("fresh") if c.get("fresh") in CHOICES else "auto"
-        prefs = self.store.get("meta/runs") or {}
+        prefs = self.prefs()
         over = prefs.get("freshOver")
         over = DEFAULT_FRESH_OVER if over is None else int(over)
         path = self._log_of(sid)
@@ -1001,6 +1023,7 @@ class Runs:
             # inbox item stays as it is until then
             self.store.update(f"commands/{cid}", fields)
             self.procs.pop(cid, None)
+            self.sid_of.pop(cid, None)
             self._pause(cid, r, "Paused: usage limit")
             c = self.store.get(f"commands/{cid}") or {}
             if self.push is not None:
@@ -1023,6 +1046,7 @@ class Runs:
             fields["error"] = redact(str(r.get("result") or (err or out or "")[-800:]), 800)
         self.store.update(f"commands/{cid}", fields)
         self.procs.pop(cid, None)
+        self.sid_of.pop(cid, None)
         c = self.store.get(f"commands/{cid}") or {}
         if fields["status"] == "done":
             # no followUp text: the page reads the run's whole result from the PC (texts.py, the owner's choice,

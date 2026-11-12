@@ -516,3 +516,34 @@ def test_a_refused_end_write_keeps_the_run_and_writes_it_on_the_next_step(tmp_pa
     assert refused and "c1" in runs.procs and store.get("commands/c1")["status"] == "running"
     runs.step()
     assert store.get("commands/c1")["status"] == "done" and "c1" not in runs.procs
+
+
+def test_waiting_message_reads_the_running_session_once_and_settings_from_the_listen(tmp_path, monkeypatch):
+    # p16 (owner pick 2026-11-12: "Add step: read once, then listen"): a message waiting for a turn cost 2 reads a step
+    store, runs, work = setup(tmp_path, monkeypatch)
+
+    class Busy:
+        pid = 1
+        returncode = None
+        def poll(self): return None
+
+    store.put_many({"commands/r1": {"id": "r1", "machine": "PC", "status": "running", "sessionId": "busy"}})
+    runs.procs["r1"] = Busy()
+    prefs = [{"id": "runs", "model": "claude-opus-5-5", "effort": "high", "freshOver": 999999999}]
+
+    class Feed:
+        def current(self): return prefs
+    runs.prefs_feed = Feed()
+    reads = []
+    get = store.get
+    store.get = lambda path: reads.append(path) or get(path)
+    cmd(store, "m1", action="message", sessionId="busy", cwd=str(work), prompt="later")
+    for _ in range(10):
+        runs.step([store.get("commands/m1")])
+    assert store.get("commands/m1")["status"] == "waiting"
+    assert reads.count("commands/r1") == 1 and reads.count("meta/runs") == 0
+    assert runs.run_with({})[1] == "high"
+    prefs[0]["effort"] = "low"  # the owner changes the setting on the page: the listen brings it
+    assert runs.run_with({})[1] == "low"
+    runs.prefs_feed = None  # no listen: read the document as before
+    assert runs.prefs() == {} and reads.count("meta/runs") == 1
