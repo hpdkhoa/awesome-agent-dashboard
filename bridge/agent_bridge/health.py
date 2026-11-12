@@ -6,7 +6,8 @@ stopped bridge shows red with 0 extra Firestore writes); "Task watchdog" (the Wi
 the bridge when it is not running, bridge/install-task.ps1); "Load new code" (Update shows the commit the bridge runs
 and the repo's commit, and restarts to load it, no git pull). Restart and Update: "Confirm tap, owner only" (round 2):
 the page asks once, the bridge checks the owner's sign-in, writes who and when to restarts.log and bridge.log, and
-exits; the task starts it again (at once through a detached Start-ScheduledTask, else within 1 min by the watchdog).
+exits; the task watchdog starts it again within 1 min (the owner's choice, 2026-11-12: "Keep the watchdog only":
+a detached start never ran in 4 measured restarts).
 
 Nothing here is stored in Firestore.
 """
@@ -15,7 +16,6 @@ from __future__ import annotations
 
 import os
 import re
-import subprocess
 import threading
 import time
 from datetime import datetime, timezone
@@ -75,14 +75,13 @@ def log_errors(log: Path, now: float, hours: float = ERROR_HOURS, keep: int = 5)
 
 
 class Health:
-    def __init__(self, repo: Path, data: Path, machine: str, runs=None, clock=time.time, exit_fn=None, kick=None):
+    def __init__(self, repo: Path, data: Path, machine: str, runs=None, clock=time.time, exit_fn=None):
         self.repo, self.data, self.machine, self.runs, self.clock = repo, data, machine, runs, clock
         self.started = clock()
         self.commit = commit_of(repo)  # the code this process loaded
         self.last_sync = ""
         self.restart_asked: dict | None = None
         self.exit_fn = exit_fn or (lambda: os._exit(0))
-        self.kick = kick if kick is not None else start_task_later
 
     def synced(self) -> None:
         self.last_sync = _iso(self.clock())
@@ -115,10 +114,7 @@ class Health:
         return {"ok": True, "at": at, "why": why}
 
     def _go(self) -> None:
-        try:
-            self.kick()
-        finally:
-            self.exit_fn()
+        self.exit_fn()
 
 
 def last_restart(path: Path) -> str:
@@ -127,22 +123,3 @@ def last_restart(path: Path) -> str:
     except OSError:
         return ""
     return lines[-1] if lines else ""
-
-
-def start_task_later(task: str = TASK, wait: int = 4) -> None:
-    """A detached PowerShell waits until this process is gone, then starts the task, so the bridge is back in seconds.
-    If Windows ends it with the task, the watchdog trigger (every 1 min) starts the bridge instead."""
-    if os.name != "nt":
-        return
-    log = str(Path(os.environ.get("APPDATA", ".")) / "awesome-agent-dashboard" / "restarts.log")
-    ps = (f"Start-Sleep -Seconds {wait}; $s = (Get-ScheduledTask -TaskName '{task}').State; "
-          f"Start-ScheduledTask -TaskName '{task}'; "
-          f"Add-Content -Path '{log}' -Value ((Get-Date).ToString('s') + ' kick: task was ' + $s + ', started')")
-    flags = 0x00000008 | 0x00000200 | 0x01000000  # DETACHED_PROCESS, NEW_PROCESS_GROUP, BREAKAWAY_FROM_JOB
-    for f in (flags, flags & ~0x01000000):  # breakaway is refused when the job does not allow it
-        try:
-            subprocess.Popen(["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps], creationflags=f,
-                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            return
-        except OSError:
-            continue

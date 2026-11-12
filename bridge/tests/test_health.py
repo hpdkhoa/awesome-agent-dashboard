@@ -53,8 +53,8 @@ def test_health_and_restart_over_the_signed_port(tmp_path):
     repo = repo_at(tmp_path, "9ced7b6aaaa")
     data = tmp_path / "data"
     data.mkdir()
-    gone, kicked = [], []
-    h = Health(repo, data, "PC", exit_fn=lambda: gone.append(1), kick=lambda: kicked.append(1))
+    gone = []
+    h = Health(repo, data, "PC", exit_fn=lambda: gone.append(1))
     srv = serve(Files([], verify), ["https://agent.example.com"], 0, health=h)
     base = f"http://127.0.0.1:{srv.server_address[1]}"
     assert post(base, "/health", {}, token="stranger")[0] == 401  # owner only
@@ -71,5 +71,5 @@ def test_health_and_restart_over_the_signed_port(tmp_path):
     line = (data / "restarts.log").read_text(encoding="utf-8")
     assert "update asked by the owner on the page; running 9ced7b6, repo 63b88d4" in line
     time.sleep(2)
-    assert kicked == [1] and gone == [1]  # the task is kicked, then the process exits
+    assert gone == [1]  # the process exits; the task watchdog starts it again
     srv.shutdown()
