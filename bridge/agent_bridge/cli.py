@@ -118,6 +118,11 @@ def main(argv: list[str] | None = None) -> None:
 
         runs = Runs(store, cfg.machine, cfg.roots, claude, data_dir() / "runs", logs=cfg.logs,
                     push=pusher(store, cfg.owner_email))
+        from .budget import Budget
+        from .usage import claude_usage, default_creds_path
+
+        # step i5: a plan from a session pauses before a page that does not fit in the 5-hour window
+        runs.budget = Budget(data_dir() / "budget.json", lambda: claude_usage(default_creds_path()), data_dir() / "runs" / "plans")
         for line in runs.forget_lost():
             print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} run {line}", flush=True)
         try:  # plan questions answered before snapshots existed (snapshot.py), once per start

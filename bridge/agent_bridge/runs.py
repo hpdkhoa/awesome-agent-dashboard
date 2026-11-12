@@ -512,6 +512,7 @@ class Runs:
         # step i4: a work folder added on the page joins self.roots in place (the same list the sync and the inbox
         # read); on_roots tells the others that keep their own copy (the file viewer); env_path is where WORK_ROOTS lives
         self.on_roots: list = []
+        self.budget = None  # budget.Budget (step i5): set by cli.py; None = no guard (tests, dry runs)
         self.env_path: Path | None = None
 
     def forget_lost(self) -> list[str]:
@@ -622,12 +623,12 @@ class Runs:
                             pass
             return self.auto
 
-    def _pause(self, cid: str, res: dict, stage: str | None = None) -> None:
+    def _pause(self, cid: str, res: dict, stage: str | None = None, at: datetime | None = None) -> None:
         """A run cut by the usage limit: paused, with the reset time. It becomes the one "last" auto continue; an
         earlier "last" one stops being auto, the owner's own picks stay (the owner's note, 2026-11-09: "auto only the
         last or the message I choose to auto restart when limit lifted")."""
         text = str(res.get("result") or "")
-        at = reset_time(text, datetime.now(timezone.utc))
+        at = at or reset_time(text, datetime.now(timezone.utc))
         auto = self._auto_runs()
         with self.auto_lock:
             for k in [k for k, a in auto.items() if a["by"] == "last"]:
@@ -636,7 +637,7 @@ class Runs:
             if at is not None:
                 auto[cid] = {"due": at.timestamp() + LIMIT_MARGIN, "by": "last"}
         fields = {"status": "paused", "endedAt": now_iso(), "error": redact(text, 300),
-                  "pausedUntil": text.partition("resets ")[2].strip() or "the usage limit resets",
+                  "pausedUntil": text.partition("resets ")[2].strip() or (at.astimezone().strftime("%H:%M") if at else "the usage limit resets"),
                   "pausedUntilAt": at.isoformat() if at else None,
                   "autoContinue": at is not None, "autoBy": "last" if at else None}
         if stage:
@@ -1116,7 +1117,10 @@ class Runs:
                     code, res, reused = 0, parse_result(old), reused + 1
                     self.store.update(path, {"reused": reused})
                 else:
-                    self.store.update(path, {"stage": f"Notes on page {i} of {len(pages)}"})
+                    g = self._guard(cid, "page", f"page {i} of {len(pages)}")
+                    if g is None:
+                        return
+                    self.store.update(path, {"stage": f"Notes on page {i} of {len(pages)}", "budget": g})
                     with open(folder / pg["file"], encoding="utf-8") as inp, \
                             open(folder / f"notes-{i:02d}.out", "w", encoding="utf-8") as out:
                         r["proc"] = self.popen(note_command(self.claude, i, len(pages)), cwd=str(folder), env=env,
@@ -1127,6 +1131,9 @@ class Runs:
                             _kill_tree(r["proc"])
                             raise RuntimeError(f"The notes on page {i} took over {NOTE_SECONDS // 60} minutes.")
                     res = parse_result((folder / f"notes-{i:02d}.out").read_text(encoding="utf-8", errors="replace"))
+                    if self.budget is not None:  # the window's rise over this page's cost tunes the next estimate
+                        w = self.budget.window()
+                        self.budget.learn(g.get("used"), w["percent"] if w else None, res.get("total_cost_usd"))
                 if r["stop"]:
                     break
                 if res.get("api_error") == "usage_limit_reached":  # paused, not failed: safe to continue after the reset
@@ -1141,15 +1148,36 @@ class Runs:
             if r["stop"]:
                 self.store.update(path, {"status": "stopped", "endedAt": now_iso()})
                 return
+            g = self._guard(cid, "write", "the plan write")
+            if g is None:
+                return
             sid = str(uuid.uuid4())
             prompt = plan_prompt(c.get("sourceSessionId", ""), folder, len(pages), cid, str(c.get("goal") or "")[:2000])
             cmd = start_command(self.claude, prompt, sid, self.mode(), *self.run_with(c)) + ["--add-dir", str(folder), "--disallowedTools", NO_EDITS]
             p = self._spawn(cid, cmd, c.get("cwd", ""))
-            self.store.update(path, {"sessionId": sid, "pid": p.pid, "stage": "Writing the plan", "prompt": prompt})
+            self.store.update(path, {"sessionId": sid, "pid": p.pid, "stage": "Writing the plan", "prompt": prompt, "budget": g})
         except Exception as e:  # a failed page run or an unreadable log ends this plan, never the bridge
             self.store.update(path, {"status": "failed", "endedAt": now_iso(), "error": redact(str(e), 800)})
         finally:
             self.reading.pop(cid, None)
+
+    def _guard(self, cid: str, what: str, name: str) -> dict | None:
+        """Step i5 (the owner's choice, 2026-11-12: "Page by page"): the next run's cost against the 5-hour window left
+        (budget.py). The guard's numbers when the run may go; None when the plan paused before it."""
+        if self.budget is None:
+            return {}
+        g = self.budget.check(what)
+        if g.get("ok"):
+            return g
+        try:
+            at = datetime.fromisoformat(g["resetsAt"]) if g.get("resetsAt") else None
+        except ValueError:
+            at = None
+        text = (f"Budget guard: {name} needs about {g['need']}% of the 5-hour window, {g['left']}% is left. "
+                f"Paused before it; it goes on at the reset.")
+        self._pause(cid, {"result": text}, f"Paused before {name}: budget guard", at)
+        self.store.update(f"commands/{cid}", {"budget": g})
+        return None
 
     def _stop(self, c: dict) -> str:
         """Stops a run. A stop sent by Delete (the owner's choice, 2026-11-03: "Delete also stops the session's work")
@@ -1227,6 +1255,8 @@ class Runs:
         self.procs.pop(cid, None)
         self.sid_of.pop(cid, None)
         c = self.store.get(f"commands/{cid}") or {}
+        if fields["status"] == "done" and c.get("action") == "plan" and self.budget is not None:
+            self.budget.wrote(fields.get("costUsd"))  # step i5: the plan write's measured cost for the next guard
         if fields["status"] == "done":
             # no followUp text: the page reads the run's whole result from the PC (texts.py, the owner's choice,
             # 2026-11-08: "From the PC too")
