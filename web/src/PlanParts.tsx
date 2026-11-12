@@ -21,6 +21,8 @@ import { RunList, RunWithPicker } from "./Runs";
 import type { RunWith } from "./data";
 import { Section } from "./Section";
 import { Clamp } from "./Clamp";
+import { EvidenceSection } from "./EvidenceView";
+import { useStepEvidence } from "./data";
 
 // A plan with six parts (plan from a session; the owner's words, 2026-11-03, in cc/dashboard/SESSION_PLAN.md).
 // Plan versions change only with the plan's data; each step shows its own versions, the last reply like a message.
@@ -223,7 +225,7 @@ function RunStep({ plan, step, runs, harness }: { plan: Plan; step: Parts["steps
   );
 }
 
-// 8. Decisions (the owner's words, 2026-11-10: "I see the missing in images and artifacts after I approved, no where to
+// 9. Decisions (the owner's words, 2026-11-10: "I see the missing in images and artifacts after I approved, no where to
 // found them so make approved section so something similar so I can see what decisions have been made"): every answered
 // question of the plan by round, the option picked with its drawing, image or draft, the owner's note, the version it
 // made, and the other options folded.
@@ -236,7 +238,7 @@ function DecisionsSection({ plan, versions, asked, onOpenItem }: {
   const rounds = [...new Set(qs.map((q) => q.round ?? 0))];
   const madeIn = (q: InboxItem) => versions.find((v) => v.madeBy?.some((d) => d.id === q.id || (d.title === q.title && d.choice === q.answer?.choice)))?.n;
   return (
-    <Section id="plan.part.decisions" title="8. Decisions" extra={`${answered.length} decided · ${qs.length - answered.length} waiting`}>
+    <Section id="plan.part.decisions" title="9. Decisions" extra={`${answered.length} decided · ${qs.length - answered.length} waiting`}>
       {qs.length === 0 && <p className="muted small">No question asked on this plan yet.</p>}
       {rounds.map((r) => (
         <div key={r}>
@@ -384,6 +386,7 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
 }) {
   const steps = usePlanSteps(plan.id) ?? [];
   const checks = useStepChecks(plan.id);
+  const evidence = useStepEvidence(plan.id);
   const ticks = useHarness(plan.id);
   const generated = usePlanGenerated(plan.id);
   const [checked, setChecked] = useState<string | null>(null); // when Check plan was pressed
@@ -503,6 +506,8 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
       </Section>
 
       <ResultsSection plan={plan} v={v} versions={versions} runs={runs} steps={steps} generated={generated} stale={staleMark(stale, "results")} />
+
+      <EvidenceSection plan={plan} v={v} steps={steps} evidence={evidence} />
 
       <DecisionsSection plan={plan} versions={versions} asked={asked} onOpenItem={onOpenItem} />
 

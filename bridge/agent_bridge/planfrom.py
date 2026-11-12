@@ -105,7 +105,8 @@ STEP_SCOPE = (
     "This run is step {step} of your plan, and only that step. Do only what step {step} says, with the harness items the "
     "owner approved (listed in the message, if any). Anything outside step {step} or outside the plan (another step, a "
     "new file or change the step does not name, a fix you noticed) is never done in this run: ask the owner first with "
-    "inbox_ask, then stop. Report the step with step_update."
+    "inbox_ask, then stop. Report the step with step_update; a done report attaches the pictures that show the "
+    "feature working (evidence=[paths])."
 )
 
 

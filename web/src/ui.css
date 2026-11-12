@@ -138,3 +138,15 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
 .check-chip.fail { background: var(--bad); color: var(--bg); }
 .check-out { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 560px) { .stepcheck-row > input.mono { font-size: 16px; } }
+
+/* 8. Evidence: a picture gallery per step, each picture with its LLM mark (EvidenceView.tsx) */
+.check-chip.unclear { background: var(--wait-fg); color: var(--bg); }
+.evidence-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0; }
+.evidence-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); gap: 10px; margin: 8px 0; }
+.evidence-pic { margin: 0; min-width: 0; border: 2px solid var(--line, #444); border-radius: 6px; padding: 4px; overflow: hidden; }
+.evidence-pic.pass { border-color: var(--live); }
+.evidence-pic.fail { border-color: var(--bad); }
+.evidence-pic.unclear { border-color: var(--wait-fg); }
+.evidence-pic img { width: 100%; height: auto; display: block; cursor: zoom-in; }
+.evidence-pic figcaption { padding: 4px 2px 0; overflow-wrap: anywhere; }
+@media (max-width: 560px) { .evidence-grid { grid-template-columns: minmax(0, 1fr); } }

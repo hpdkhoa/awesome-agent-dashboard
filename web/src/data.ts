@@ -448,6 +448,32 @@ export const runCheck = async (plan: Plan, c: StepCheck) => {
   await updateDoc(doc(db, "planChecks", c.id), { state: "queued" });
 };
 
+// 8. Evidence (the owner's words, 2026-11-12: "an evidence section after result section, which capture the evidence of
+// done for each step"; "I want to have the image evidences, not text"; picks "Attach, else picture run", "Fresh one-off
+// run", "Mark only"): one record per step (bridge evidence.py). sets: picture sets, newest first; check: the last LLM marks.
+export type EvidenceSet = { at: string; by: "report" | "run"; trigger: "done" | "button"; runId?: string; stepVersion?: number; pictures: string[] };
+export type EvidenceMark = { path: string; verdict: "pass" | "fail" | "unclear"; why: string };
+export type StepEvidence = { id: string; planId: string; stepId: string; sets?: EvidenceSet[]; state?: "idle" | "queued" | "running";
+  what?: "pictures" | "check" | null; error?: string | null;
+  check?: { at: string; runId: string; set?: string; overall: "pass" | "fail" | "unclear"; pictures: EvidenceMark[]; note: string } };
+export function useStepEvidence(planId: string | undefined): StepEvidence[] {
+  const [e, setE] = useState<StepEvidence[]>([]);
+  useEffect(() => {
+    if (!planId) return;
+    return onSnapshot(query(collection(db, "planEvidence"), where("planId", "==", planId)), (s) =>
+      setE(s.docs.map((d) => d.data() as StepEvidence)));
+  }, [planId]);
+  return e;
+}
+// Generate evidence ("pictures") and LLM check ("check"): a fresh one-off run on the plan's machine.
+export const askEvidence = async (plan: Plan, stepId: string, what: "pictures" | "check", w?: RunWith) => {
+  const id = newId();
+  await setDoc(doc(db, "commands", id), { id, action: "evidence", what, machine: plan.machine, planId: plan.id, stepId,
+    folder: plan.cwd, trigger: "button", status: "new", createdAt: new Date().toISOString(), ...withRun(w) });
+  await setDoc(doc(db, "planEvidence", `${plan.id}_${stepId}`), { id: `${plan.id}_${stepId}`, planId: plan.id, stepId,
+    state: "queued", what, error: null }, { merge: true });
+};
+
 // Plan from a session: the bridge reads its real record and a new session writes the plan (bridge planfrom.py).
 // goal: the goal box (the owner's words, 2026-11-04: "a text box to input what is the goal for the new plan"); blank = as before.
 export const planFromSession = (s: Session, goal = "") => {

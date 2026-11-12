@@ -68,6 +68,7 @@ from .logs import window_cost
 from .inbox import KINDS, PLAN_FORMAT, format_of, now_iso
 from .chain import Chains
 from .stepcheck import StepChecks
+from .evidence import Evidence
 from .planfrom import NO_EDITS, mark_quotes, note_command, plan_prompt, scoped, system_args
 from .redact import redact
 
@@ -513,6 +514,8 @@ class Runs:
         # step i8: the ticked check command of a step, run by the bridge (stepcheck.py); roots is the same list as
         # self.roots, so a folder added on the page counts at once
         self.checks = StepChecks(store, machine, self.roots, self.chains, push)
+        # 8. Evidence: the picture runs and the LLM check runs of a step (evidence.py)
+        self.evidence = Evidence(self)
         # step i4: a work folder added on the page joins self.roots in place (the same list the sync and the inbox
         # read); on_roots tells the others that keep their own copy (the file viewer); env_path is where WORK_ROOTS lives
         self.on_roots: list = []
@@ -601,6 +604,7 @@ class Runs:
                     else self._delete_plan_files(c) if action == "delete_plan_files"
                     else self.chains.start(c) if action == "chain"
                     else self.checks.start(c) if action == "step_check"
+                    else self.evidence.start(c) if action == "evidence"
                     else self._add_root(c) if action == "add_root"
                     else self._continue(c) if action == "continue" else self._auto_continue(c) if action == "auto_continue"
                     else self._unknown(c))
@@ -1237,6 +1241,10 @@ class Runs:
             self.procs.pop(cid, None)
             self.sid_of.pop(cid, None)
             self._pause(cid, r, "Paused: usage limit")
+            if (self.store.get(f"commands/{cid}") or {}).get("action") == "evidence":
+                ev = self.store.get(f"commands/{cid}") or {}
+                self.store.update(f"planEvidence/{ev.get('planId')}_{ev.get('stepId')}", {"state": "idle", "what": None,
+                                  "error": "Paused by the usage limit: press the button again after the reset.", "updatedAt": now_iso()})
             c = self.store.get(f"commands/{cid}") or {}
             if self.push is not None:
                 self.push.notify(f"Run paused until {c.get('pausedUntil', 'the reset')}",
@@ -1277,5 +1285,8 @@ class Runs:
             what = "message" if c.get("action") == "message" else "run"
             self.push.notify(f"{what.capitalize()} {fields['status']}: {c.get('workType') or c.get('folder') or ''}".rstrip(": "),
                              body or "No text.", f"/?run={cid}", cid)
+        if c.get("action") == "evidence":
+            self.evidence.finished(c, fields["status"], str(r.get("result") or ""),
+                                   "Stopped on the page." if stopped else fields.get("error") or "")
         after = self.chains.after(c) if c.get("chain") else None
         return f"{cid}: {fields['status']}" + (f"; {after}" if after else "")
