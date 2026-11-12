@@ -134,7 +134,10 @@ def start_task_later(task: str = TASK, wait: int = 4) -> None:
     If Windows ends it with the task, the watchdog trigger (every 1 min) starts the bridge instead."""
     if os.name != "nt":
         return
-    ps = f"Start-Sleep -Seconds {wait}; Start-ScheduledTask -TaskName '{task}'"
+    log = str(Path(os.environ.get("APPDATA", ".")) / "awesome-agent-dashboard" / "restarts.log")
+    ps = (f"Start-Sleep -Seconds {wait}; $s = (Get-ScheduledTask -TaskName '{task}').State; "
+          f"Start-ScheduledTask -TaskName '{task}'; "
+          f"Add-Content -Path '{log}' -Value ((Get-Date).ToString('s') + ' kick: task was ' + $s + ', started')")
     flags = 0x00000008 | 0x00000200 | 0x01000000  # DETACHED_PROCESS, NEW_PROCESS_GROUP, BREAKAWAY_FROM_JOB
     for f in (flags, flags & ~0x01000000):  # breakaway is refused when the job does not allow it
         try:
