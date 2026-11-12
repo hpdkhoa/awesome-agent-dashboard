@@ -82,13 +82,13 @@ type Group = "workType" | "model" | "kind";
 type Measure = "usd" | "tokens";
 const KINDS: [keyof Usage, string][] = [["input", "input"], ["output", "output"], ["cacheWrite5m", "cache write 5m"], ["cacheWrite1h", "cache write 1h"], ["cacheRead", "cache read"]];
 const GROUPS: [Group, string][] = [["workType", "Work type"], ["model", "Model"], ["kind", "Token kind"]];
-const RANGES: [number, string][] = [[0, "all"], [90, "90 days"], [30, "30 days"], [14, "14 days"]];
+export const RANGES: [number, string][] = [[1, "today"], [14, "14 days"], [30, "30 days"], [90, "90 days"], [0, "all"]];
 
 // Spend by day over the whole history, stacked by work type, model or token kind, in dollars (estimate) or tokens.
-export function SpendChart({ usage }: { usage: Usage[] }) {
+// range: days shown and loaded (1 = today, the default; 0 = every synced day); the owner picks it here, the Dashboard loads it
+export function SpendChart({ usage, range, onRange }: { usage: Usage[]; range: number; onRange: (d: number) => void }) {
   const [group, setGroup] = useState<Group>("workType");
   const [measure, setMeasure] = useState<Measure>("usd");
-  const [range, setRange] = useState(0);
   const all = [...usage].sort((a, b) => a.day.localeCompare(b.day));
   const days = range ? all.slice(-range) : all;
   const m: Measure = group === "kind" ? "tokens" : measure; // cost is not split by token kind
@@ -124,7 +124,7 @@ export function SpendChart({ usage }: { usage: Usage[] }) {
         <button className={m === "tokens" ? "chip on" : "chip"} onClick={() => setMeasure("tokens")}>tokens</button>
         <span className="sep" />
         {RANGES.map(([r, label]) => (
-          <button key={r} className={range === r ? "chip on" : "chip"} onClick={() => setRange(r)} disabled={r > 0 && all.length <= r && range !== r}>{label}</button>
+          <button key={r} className={range === r ? "chip on" : "chip"} onClick={() => onRange(r)} title={r === 1 ? "one document read" : r ? `up to ${r} reads` : "every synced day"}>{label}</button>
         ))}
       </div>
       {rows.length === 0 ? (
@@ -164,7 +164,7 @@ export function SpendChart({ usage }: { usage: Usage[] }) {
                 { label: "Highest day", value: f(st.max), means: `${st.maxDay}, the day that spent most` },
                 { label: "Lowest day", value: f(st.min), means: `${st.minDay}, the day that spent least` },
                 { label: "Last day", value: f(st.last), means: `${st.lastDay}, the newest day with data` },
-                { label: "Days", value: `${st.days}`, means: range ? `the last ${range} days with data` : "every day the bridge has synced" },
+                { label: "Days", value: `${st.days}`, means: range === 1 ? "today only" : range ? `the last ${range} days with data` : "every day the bridge has synced" },
               ]}
             />
           )}

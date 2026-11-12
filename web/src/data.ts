@@ -191,13 +191,14 @@ export type Run = {
 
 // Every listener counts the documents it receives by name (pageReads.ts sends them to the bridge's counter) and runs
 // only while the tab is active (the owner's words, 2026-11-12: "Page listeners only while their tab is open").
-function useCollection<T>(name: string, ...constraints: QueryConstraint[]): T[] | null {
+function useCollection<T>(key: string, ...constraints: QueryConstraint[]): T[] | null {
   const [rows, setRows] = useState<T[] | null>(null);
   const active = useActive();
+  const name = key.split("@")[0]; // "usage@14": the collection, then a tag that makes the query re-open when it changes
   useEffect(() => {
     if (!active) return;
     return onSnapshot(query(collection(db, name), ...constraints), (s) => (countReads(s.docChanges().length, name), setRows(s.docs.map((d) => d.data() as T))));
-  }, [name, active]);
+  }, [key, active]);
   return rows;
 }
 
@@ -244,7 +245,12 @@ export function useSessions(older: boolean): Session[] | null {
   return rows;
 }
 // every synced day, oldest to newest on the chart (the owner's words, 2026-11-08: "all spend type with full history")
-export const useUsage = () => useCollection<Usage>("usage", orderBy("day", "desc"));
+// days: 1 = today only (one read), N = the last N days, 0 = every synced day (the owner's words, 2026-11-13:
+// "spend default is today"; 2026-11-08: "all spend type with full history" stays as the "all" choice)
+export const useUsage = (days = 1) => {
+  const since = days > 0 ? new Date(Date.now() - (days - 1) * 86400000).toLocaleDateString("en-CA") : "";
+  return useCollection<Usage>(`usage@${days}`, ...(since ? [where("day", ">=", since)] : []), orderBy("day", "desc"));
+};
 export const useWorkTypes = () => useCollection<WorkType>("workTypes");
 export const useMachines = () => useCollection<Machine>("machines");
 export const usePlans = () => useCollection<Plan>("plans", orderBy("updatedAt", "desc"), limit(PAGE));

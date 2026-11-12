@@ -73,7 +73,8 @@ export function Dashboard() {
   const moreInbox = usePager<InboxItem>("inbox", "createdAt");
   const morePlans = usePager<Plan>("plans", "updatedAt");
   const sessions = liveSessions ? dedupe([...liveSessions, ...moreSessions.rows]) : null;
-  const usage = useUsage();
+  const [spendDays, setSpendDays] = useState(1); // the spend range: today by default (the owner's words, 2026-11-13)
+  const usage = useUsage(spendDays);
   const workTypes = useWorkTypes();
   const machines = useMachines();
   const liveInbox = useInbox();
@@ -180,7 +181,7 @@ export function Dashboard() {
           today {num(todayUse?.total ?? 0)} tok · {usd(todayUse?.costUsd ?? 0)} est.
         </span>
         <span className="stat">
-          {usage.length} days {num(month.tokens)} tok · {usd(month.cost)} est.
+          {spendDays === 1 ? "today" : `${usage.length} days`} {num(month.tokens)} tok · {usd(month.cost)} est.
         </span>
         <span className="stat muted">{lastSync ? "synced " + ago(lastSync) : "no sync yet"}</span>
         <HealthPill st={health} />
@@ -326,13 +327,13 @@ export function Dashboard() {
         <Section id="usage.health" title="Bridge health" extra="pinged every 20 s through the tunnel">
           <HealthPanel st={health} restart={restartBridge} />
         </Section>
-        <Section id="usage.days" title="Spend by day" extra={`${usage.length} days, whole history`}>
-          <SpendChart usage={usage} />
+        <Section id="usage.days" title="Spend by day" extra={spendDays === 1 ? "today" : spendDays ? `last ${spendDays} days` : `${usage.length} days, whole history`}>
+          <SpendChart usage={usage} range={spendDays} onRange={setSpendDays} />
         </Section>
         <Section id="usage.check" title="Usage check" extra="Claude plan · Firestore">
           <UsageCheck />
         </Section>
-        <Section id="usage.workTypes" title="By work type" extra={`all ${usage.length} days`}>
+        <Section id="usage.workTypes" title="By work type" extra={spendDays === 1 ? "today" : `${usage.length} days`}>
         <table>
           <tbody>
             {byWorkType.map(([w, t]) => (
