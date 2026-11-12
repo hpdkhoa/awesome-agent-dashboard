@@ -1,5 +1,5 @@
 import type { Phase } from "./phases";
-import { itemHash, type HarnessItem, type HarnessTicks } from "./harness";
+import { checkHash, itemHash, type HarnessItem, type HarnessTicks } from "./harness";
 import type { Kind } from "./planCheck";
 import { useEffect, useState } from "react";
 import { collection, doc, limit, onSnapshot, orderBy, query, setDoc, updateDoc, where, type QueryConstraint } from "firebase/firestore";
@@ -416,6 +416,37 @@ export function useHarness(planId: string | undefined): HarnessTicks | null {
 export const tickHarness = (planId: string, h: HarnessItem, ok: boolean, v: number) =>
   setDoc(doc(db, "planHarness", planId),
     { planId, items: { [h.id]: { ok, at: new Date().toISOString(), hash: itemHash(h), v } } }, { merge: true });
+
+// Step check runner (step i8; the owner's picks 2026-11-12: "Session proposes, you edit + tick", "On done + a Run check
+// button", "Step turns failed, chain stops", "PowerShell, plan folder, 10 min"): one record per step (bridge stepcheck.py).
+export type CheckRun = { at: string; endedAt: string; exit: number | null; seconds: number; trigger: "done" | "button";
+  command: string; tail: string; timedOut: boolean; runId: string };
+export type StepCheck = { id: string; planId: string; stepId: string; command: string; proposedBy?: "session" | "owner";
+  tick?: { ok: boolean; hash: string; at: string }; state?: "idle" | "queued" | "running"; last?: CheckRun; runs?: CheckRun[] };
+export function useStepChecks(planId: string | undefined): StepCheck[] {
+  const [c, setC] = useState<StepCheck[]>([]);
+  useEffect(() => {
+    if (!planId) return;
+    return onSnapshot(query(collection(db, "planChecks"), where("planId", "==", planId)), (s) =>
+      setC(s.docs.map((d) => d.data() as StepCheck)));
+  }, [planId]);
+  return c;
+}
+export const checkTicked = (c?: StepCheck | null) =>
+  !!c?.command?.trim() && !!c.tick?.ok && c.tick.hash === checkHash(c.command.trim());
+// Your edit: a new command is unticked until you tick it (its hash no longer matches the tick).
+export const saveCheckCommand = (planId: string, stepId: string, command: string) =>
+  setDoc(doc(db, "planChecks", `${planId}_${stepId}`), { id: `${planId}_${stepId}`, planId, stepId, command: command.trim(),
+    proposedBy: "owner", updatedAt: new Date().toISOString() }, { merge: true });
+export const tickCheck = (c: StepCheck, ok: boolean) =>
+  updateDoc(doc(db, "planChecks", c.id), { tick: { ok, hash: checkHash(c.command.trim()), at: new Date().toISOString() } });
+// Run check: the bridge runs the ticked command now (it refuses an unticked one, or a folder outside WORK_ROOTS).
+export const runCheck = async (plan: Plan, c: StepCheck) => {
+  const id = newId();
+  await setDoc(doc(db, "commands", id), { id, action: "step_check", machine: plan.machine, planId: plan.id, stepId: c.stepId,
+    trigger: "button", status: "new", createdAt: new Date().toISOString() });
+  await updateDoc(doc(db, "planChecks", c.id), { state: "queued" });
+};
 
 // Plan from a session: the bridge reads its real record and a new session writes the plan (bridge planfrom.py).
 // goal: the goal box (the owner's words, 2026-11-04: "a text box to input what is the goal for the new plan"); blank = as before.

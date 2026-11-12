@@ -17,6 +17,9 @@ export function itemHash(h: HarnessItem): string {
   return x.toString(16).padStart(8, "0");
 }
 
+// Step i8: a step's check command is ticked the same way; the tick holds this hash (bridge stepcheck.py check_hash).
+export const checkHash = (command: string) => itemHash({ id: "", kind: "check", item: command });
+
 export const approved = (h: HarnessItem, ticks?: HarnessTicks | null) => {
   const t = ticks?.items?.[h.id];
   return !!t?.ok && t.hash === itemHash(h);

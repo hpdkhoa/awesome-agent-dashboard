@@ -67,6 +67,7 @@ from .digest import find_log, write_pages
 from .logs import window_cost
 from .inbox import KINDS, PLAN_FORMAT, format_of, now_iso
 from .chain import Chains
+from .stepcheck import StepChecks
 from .planfrom import NO_EDITS, mark_quotes, note_command, plan_prompt, system_args
 from .redact import redact
 
@@ -509,6 +510,9 @@ class Runs:
         self.auto: dict[str, dict] | None = None
         self.auto_lock = threading.Lock()  # a plan pauses from its reading thread
         self.chains = Chains(store, machine, push)  # chain.py: Run all steps, one step after another
+        # step i8: the ticked check command of a step, run by the bridge (stepcheck.py); roots is the same list as
+        # self.roots, so a folder added on the page counts at once
+        self.checks = StepChecks(store, machine, self.roots, self.chains, push)
         # step i4: a work folder added on the page joins self.roots in place (the same list the sync and the inbox
         # read); on_roots tells the others that keep their own copy (the file viewer); env_path is where WORK_ROOTS lives
         self.on_roots: list = []
@@ -596,6 +600,7 @@ class Runs:
                     else self._plan(c) if action == "plan" else self._approve_generated(c) if action == "approve_generated"
                     else self._delete_plan_files(c) if action == "delete_plan_files"
                     else self.chains.start(c) if action == "chain"
+                    else self.checks.start(c) if action == "step_check"
                     else self._add_root(c) if action == "add_root"
                     else self._continue(c) if action == "continue" else self._auto_continue(c) if action == "auto_continue"
                     else self._unknown(c))

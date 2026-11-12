@@ -347,7 +347,7 @@ class Inbox:
             self.push.notify(f"Plan v{n}: {plan.get('title', '')}", note or "New version.", f"/?plan={plan_id}", f"plan-{plan_id}")
         return n
 
-    def step_update(self, plan_id: str, step_id: str, state: str, reply: str) -> int:
+    def step_update(self, plan_id: str, step_id: str, state: str, reply: str, check_command: str = "") -> int:
         """A step version: the step's state and the session's reply on it. Never a plan version (the owner's words:
         "not moving step"). Questions asked while a step is "now" join that step. Returns the step version number."""
         if state not in STEP_STATES:
@@ -366,6 +366,12 @@ class Inbox:
                          "planVersion": int(plan.get("current", 0))})
         self.store.put_many({path: {"id": f"{plan_id}_{step_id}", "planId": plan_id, "stepId": step_id, "state": state,
                                     "versions": versions, "updatedAt": now_iso()}})
+        # step i8: the session proposes the step's check command; a done report asks the bridge to run it if ticked
+        from .stepcheck import propose, queue
+        if check_command.strip():
+            propose(self.store, plan_id, step_id, check_command.strip())
+        if state == "done":
+            queue(self.store, {**plan, "id": plan_id}, step_id, "done", self.machine)
         active = step_id if state == "now" else (None if plan.get("activeStep") == step_id else plan.get("activeStep"))
         self.store.update(f"plans/{plan_id}", {"activeStep": active, "updatedAt": now_iso()})
         if self.push is not None and state in ("done", "failed"):
@@ -763,14 +769,17 @@ def server():
         return out
 
     @mcp.tool()
-    async def step_update(step_id: str, state: str, reply: str, plan_id: str = "") -> str:
+    async def step_update(step_id: str, state: str, reply: str, plan_id: str = "", check_command: str = "") -> str:
         """Report on one step of the plan: state next, now, done or failed, and your reply (what was done, the
-        numbers, what is open). A step version; never a plan version. Questions asked while a step is now join it."""
+        numbers, what is open). A step version; never a plan version. Questions asked while a step is now join it.
+        check_command: propose one PowerShell command that checks this step (run in the plan's folder, 10 min max,
+        exit 0 = pass). The bridge runs it only after the owner ticks it on the page, on each done report and on the
+        page's Run check; a non-zero exit after done turns the step failed."""
         plan_id = plan_id or ((await asyncio.to_thread(inbox.open_plan)) or {}).get("id", "")
         if not plan_id:
             return "No plan in this session."
         try:
-            n = await asyncio.to_thread(inbox.step_update, plan_id, step_id, state, reply)
+            n = await asyncio.to_thread(inbox.step_update, plan_id, step_id, state, reply, check_command)
         except ValueError as e:
             return str(e)
         return f"Saved step version {n} of {step_id} ({state})."

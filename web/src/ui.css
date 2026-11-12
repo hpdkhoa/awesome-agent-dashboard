@@ -126,3 +126,15 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
   .app.phone-item > .main, .pback, .pbar { background: #1C1C1E; color: #FFFFFF; }
   .app.phone-item .muted { color: rgba(235, 235, 245, 0.6); }
 }
+
+/* Step i8: a step's check command, its tick and its last run (exit code chip, output) */
+.stepcheck { margin: 6px 0; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; }
+.stepcheck-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.stepcheck-row > input.mono { flex: 1 1 220px; min-width: 0; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--card); color: inherit; }
+.stepcheck-row > .small.muted { flex: 1 1 100%; }
+.stepcheck-tick { display: inline-flex; gap: 4px; align-items: center; }
+.check-chip { display: inline-block; padding: 0 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+.check-chip.pass { background: var(--live); color: var(--bg); }
+.check-chip.fail { background: var(--bad); color: var(--bg); }
+.check-out { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 560px) { .stepcheck-row > input.mono { font-size: 16px; } }

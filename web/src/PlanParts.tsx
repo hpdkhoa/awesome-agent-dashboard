@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   PLAN_KINDS, runAllSteps, runStep, sendPlanMessage, stopChain, useHarness, usePlanChain, usePlanSteps,
+  checkTicked, runCheck, saveCheckCommand, tickCheck, useStepChecks, type StepCheck,
   type InboxItem, type Parts, type Plan, type PlanGenerated, type PlanKind, type PlanStep, type PlanVersion, type Run,
 } from "./data";
 import { isWaiting } from "./Inbox";
@@ -382,6 +383,7 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
   plan: Plan; versions: PlanVersion[]; items: InboxItem[]; runs: Run[]; onOpenItem: (id: string) => void;
 }) {
   const steps = usePlanSteps(plan.id) ?? [];
+  const checks = useStepChecks(plan.id);
   const ticks = useHarness(plan.id);
   const generated = usePlanGenerated(plan.id);
   const [checked, setChecked] = useState<string | null>(null); // when Check plan was pressed
@@ -471,6 +473,7 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
               </span>}>
               <div className="step-row" data-step={st.id}>
               <Md text={linkEntries(`${st.does}\n\n**Check:** ${st.check}`, plan)} cwd={plan.cwd} />
+              <StepCheckBox plan={plan} stepId={st.id} c={checks.find((x) => x.stepId === st.id)} done={sv?.state === "done" || sv?.state === "failed"} />
               <OnMessages runs={runs} plan={plan} where={{ stepId: st.id }} />
               {last && (
                 <Section id={`plan.step.last.${plan.id}.${st.id}`} title={`Last reply · step version ${last.n}`} extra={when(last.at)}>
@@ -530,6 +533,62 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
             ))}
           </ul>
         </Section>
+      )}
+    </div>
+  );
+}
+
+// Step check runner (step i8; the owner's picks 2026-11-12: "Session proposes, you edit + tick", "On done + a Run check
+// button", "Step turns failed, chain stops", "PowerShell, plan folder, 10 min"). The bridge runs only a ticked command;
+// an edit unticks it. Its last run shows the exit code, the time and the last lines of output.
+function StepCheckBox({ plan, stepId, c, done }: { plan: Plan; stepId: string; c?: StepCheck; done: boolean }) {
+  const [text, setText] = useState(c?.command ?? "");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  useEffect(() => setText(c?.command ?? ""), [c?.command]);
+  const ok = checkTicked(c);
+  const changed = text.trim() !== (c?.command ?? "").trim();
+  const going = c?.state === "queued" || c?.state === "running";
+  const r = c?.last;
+  async function act(f: () => Promise<unknown>) {
+    setBusy(true);
+    setErr("");
+    try {
+      await f();
+    } catch (e) {
+      setErr(String((e as { code?: string; message?: string }).message ?? e));
+    }
+    setBusy(false);
+  }
+  return (
+    <div className="stepcheck" data-check={stepId}>
+      <div className="stepcheck-row">
+        <span className="small muted">Check command{c?.proposedBy ? ` (${c.proposedBy === "session" ? "proposed by the session" : "edited by you"})` : ""}</span>
+        <input className="mono" value={text} placeholder="none yet: the session proposes one, or type it" onChange={(e) => setText(e.target.value)} />
+        {changed && <button disabled={busy || !text.trim()} onClick={() => act(() => saveCheckCommand(plan.id, stepId, text))}>Save</button>}
+        {c?.command && !changed && (
+          <label className="small stepcheck-tick">
+            <input type="checkbox" checked={ok} disabled={busy} onChange={(e) => act(() => tickCheck(c, e.target.checked))} />
+            {ok ? "ticked: the bridge runs it" : "tick to let the bridge run it"}
+          </label>
+        )}
+        {c && ok && !changed && (
+          <button className="primary" disabled={busy || going} onClick={() => act(() => runCheck(plan, c))}>
+            {c.state === "running" ? "Running" : c.state === "queued" ? "Queued" : "Run check"}
+          </button>
+        )}
+      </div>
+      {err && <p className="bad small">{err}</p>}
+      {done && c?.command && !ok && !r && <p className="small muted">not ticked: not run on the done report</p>}
+      {r && (
+        <div className="stepcheck-last">
+          <span className={r.exit === 0 ? "check-chip pass" : "check-chip fail"}>
+            {r.timedOut ? "stopped at 10 min" : `exit ${r.exit}`}
+          </span>{" "}
+          <span className="small muted">{r.seconds} s · on {r.trigger === "done" ? "the done report" : "Run check"} · {new Date(r.endedAt).toLocaleString()}</span>
+          {r.command !== c?.command && <span className="small muted"> · ran: <code>{r.command}</code></span>}
+          <Clamp><pre className="mono check-out">{r.tail || "(no output)"}</pre></Clamp>
+        </div>
       )}
     </div>
   );

@@ -101,11 +101,16 @@ class Chains:
             status = c.get("status")
             if status in GOING or status == "paused":
                 return None
-            rep = (self.store.get(f"planSteps/{pid}_{step_id}") or {}).get("state")
+            # step i8: a done report asked for the step's check; wait for it (stepcheck.py calls back at its end)
+            if status == "done" and (self.store.get(f"planChecks/{pid}_{step_id}") or {}).get("state") in ("queued", "running"):
+                return None
+            sv = self.store.get(f"planSteps/{pid}_{step_id}") or {}
+            rep = sv.get("state")
+            by_check = ((sv.get("versions") or [{}])[-1] or {}).get("by") == "check"
             if status in ("failed", "stopped"):
                 return self._stop(ch, f"step {step_id}: the run {status}" + (f": {c['error'][:120]}" if c.get("error") else ""))
             if status == "done" and rep == "failed":
-                return self._stop(ch, f"step {step_id}: the session reported it failed")
+                return self._stop(ch, f"step {step_id}: " + ("its check failed" if by_check else "the session reported it failed"))
             if status == "done" and rep != "done":
                 return self._stop(ch, f"step {step_id}: the run ended with no done report (state {rep or 'none'})")
             # done, or lost to a bridge restart: go on with the steps not done
