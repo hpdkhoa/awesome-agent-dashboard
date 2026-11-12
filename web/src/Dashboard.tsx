@@ -28,6 +28,7 @@ const PUSH_LABEL: Record<PushState, string> = {
 };
 import { Md } from "./Markdown";
 import { Section } from "./Section";
+import { LocalSearch } from "./LocalSearch";
 import { InboxList, InboxView, isWaiting } from "./Inbox";
 import { useEntries, useFx, useGold } from "./moneyData";
 import { EntryForm, MoneyView } from "./Money";
@@ -218,6 +219,10 @@ export function Dashboard() {
         ) : tab === "inbox" ? (
           <InboxList items={items} picked={item?.id} onPick={setPickedItem} />
         ) : (
+        <>
+        <div className="pad">
+          <LocalSearch onPick={setPicked} known={new Set(sessions.map((s) => s.id))} />
+        </div>
         <ul className="list">
           {shown.map((s) => (
             <li key={s.id} className={s.id === current?.id ? "row on" : "row"} onClick={() => setPicked(s.id)}>
@@ -236,6 +241,7 @@ export function Dashboard() {
             {older ? `Hide sessions older than ${RECENT_DAYS} days` : `Show sessions older than ${RECENT_DAYS} days`}
           </li>
         </ul>
+        </>
         )}
       </aside>
       <div className="gutter gl" hidden={layout.leftHidden} onPointerDown={drag("left")} title="Drag to resize the left panel" />

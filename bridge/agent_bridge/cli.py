@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import threading
 import time
 
 from .auth import Session, sign_in
@@ -144,11 +145,27 @@ def main(argv: list[str] | None = None) -> None:
             from .health import Health
 
             health = Health(REPO, data_dir(), cfg.machine, runs)
+            # step i6: local search and the daily digest on this PC's Ollama; the index refreshes every 10 min and
+            # yesterday's digest is written once, in a thread so a slow model never holds the bridge
+            from .localsearch import LocalSearch
+
+            local = LocalSearch(cfg.logs, data_dir() / "search")
+
+            def _local_loop():
+                while True:
+                    try:
+                        for line in local.daily():
+                            print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {line}", flush=True)
+                    except Exception as e:  # Ollama off or busy: try again next round
+                        print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} local search: {e}", flush=True)
+                    time.sleep(600)
+
+            threading.Thread(target=_local_loop, daemon=True).start()
             files = Files([*cfg.roots, ("plans", str(plans))], firebase_verifier(cfg.project_id, cfg.owner_email))
             if runs is not None:  # step i4: a folder added on the page is served at once
                 runs.on_roots.append(lambda roots: [files.add_root(r) for _, r in roots])
             serve(files,
-                  list(cfg.site_origins), cfg.files_port, Texts(cfg.logs, data_dir() / "runs"), health=health)
+                  list(cfg.site_origins), cfg.files_port, Texts(cfg.logs, data_dir() / "runs", local), health=health)
             store.put_many({"meta/files": {"url": cfg.files_url}})
             print(f"file viewer on 127.0.0.1:{cfg.files_port} for {cfg.files_url}", flush=True)
         from .status import Publisher, Status, serve as serve_status

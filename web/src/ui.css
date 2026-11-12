@@ -89,3 +89,8 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
   .sec-wrap > .sec-head .sec-title { white-space: normal; overflow-wrap: anywhere; }
   .sec-wrap > .step-tools, .sec-wrap > .step-actions { padding: 0 10px 8px 34px; margin-left: 0; }
 }
+
+/* step i6: the local search box on the Sessions tab */
+.local-search { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.local-search > input { flex: 1 1 160px; min-width: 0; }
+.local-search > .hits, .local-search > .sec, .local-search > p { flex: 1 1 100%; }
