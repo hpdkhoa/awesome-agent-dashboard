@@ -28,7 +28,7 @@ const PUSH_LABEL: Record<PushState, string> = {
 };
 import { Md } from "./Markdown";
 import { Section } from "./Section";
-import { LocalSearch } from "./LocalSearch";
+import { DigestView, LocalSearch } from "./LocalSearch";
 import { InboxList, InboxView, isWaiting } from "./Inbox";
 import { useEntries, useFx, useGold } from "./moneyData";
 import { EntryForm, MoneyView } from "./Money";
@@ -277,10 +277,13 @@ export function Dashboard() {
           ) : (
             <p className="muted">The inbox is empty.</p>
           )
-        ) : current ? (
-          <SessionView s={current} runs={runs ?? []} />
         ) : (
-          <p className="muted">Pick a session.</p>
+          <>
+            {/* step i6: the daily digest sits above the session, where it has the room (on a phone the list panel is
+                half the screen) */}
+            <DigestView />
+            {current ? <SessionView s={current} runs={runs ?? []} /> : <p className="muted">Pick a session.</p>}
+          </>
         )}
       </main>
       <div className="gutter gr" hidden={layout.rightHidden} onPointerDown={drag("right")} title="Drag to resize the right panel" />

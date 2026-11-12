@@ -6,7 +6,7 @@ import { Section } from "./Section";
 // Step i6 (the plan: "Ollama index of session logs; search box; daily digest"; the owner's choice, 2026-11-12: "Ollama
 // on this PC"): the bridge searches every prompt of every session log with a local embedding model and keeps a digest
 // per day written by a local model (bridge/agent_bridge/localsearch.py). Asked through the tunnel; nothing is stored.
-type Hit = { session: string; score: number; turn: number; at: string; prompt: string; project: string; turns: number };
+type Hit = { session: string; score: number; meaning: number; words: number; exact: boolean; turn: number; at: string; prompt: string; project: string; turns: number };
 type Digest = { day: string; text: string; days: string[]; missing?: boolean };
 
 const yesterday = () => {
@@ -43,7 +43,7 @@ export function LocalSearch({ onPick, known }: { onPick: (id: string) => void; k
               <div className="grow">
                 <div className="title">{h.prompt.split("\n")[0].slice(0, 120)}</div>
                 <div className="muted small">
-                  {h.project} · turn {h.turn} of {h.turns} · {h.at ? new Date(h.at).toLocaleDateString() : ""} · match {h.score.toFixed(2)}
+                  {h.project} · turn {h.turn} of {h.turns} · {h.at ? new Date(h.at).toLocaleDateString() : ""} · {h.exact ? "word for word" : `meaning ${h.meaning.toFixed(2)}`}
                   {!known.has(h.session) && <> · {h.session.slice(0, 8)}</>}
                 </div>
               </div>
@@ -51,12 +51,11 @@ export function LocalSearch({ onPick, known }: { onPick: (id: string) => void; k
           ))}
         </ul>
       )}
-      <DigestView />
     </div>
   );
 }
 
-function DigestView() {
+export function DigestView() {
   const [day, setDay] = useState(yesterday());
   const [got, setGot] = useState<Digest | string | null>(null);
   const load = (d: string) =>
