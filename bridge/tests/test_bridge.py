@@ -177,3 +177,18 @@ def test_a_session_document_mid_work_waits_for_a_step_or_rest(tmp_path):
     assert "sessions/s" in changed_only(st, {"sessions/s": doc(20000, "2026-11-13T10:06:00Z")}, now=1100.0)  # 6 min of lastAt
     assert "sessions/s" in changed_only(st, {"sessions/s": doc(20000, "2026-11-13T10:01:00Z")}, now=1400.0)  # 5 min since the write: exact at rest
     assert "usage/2026-11-13" in changed_only(st, {"usage/2026-11-13": {"day": "2026-11-13", "total": 5}}, now=1100.0)  # other documents: as before
+
+
+def test_a_refused_start_waits_and_tries_again():
+    from agent_bridge.cli import patient
+
+    calls, naps = [], []
+    def fn():
+        calls.append(1)
+        if len(calls) < 3:
+            raise SystemExit("Firestore refused (429): quota")
+        return "ok"
+    assert patient("owner check", fn, sleep=naps.append, wait=5) == "ok" and len(calls) == 3 and naps == [5, 5]
+    import pytest
+    with pytest.raises(SystemExit, match="403"):
+        patient("owner check", lambda: (_ for _ in ()).throw(SystemExit("Firestore refused (403): not the owner")), sleep=naps.append)

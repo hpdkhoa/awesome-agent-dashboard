@@ -49,6 +49,21 @@ def one_bridge(folder) -> bool:
     return True
 
 
+def patient(what: str, fn, sleep=time.sleep, wait: float = 60.0):
+    """A Firestore call at start that is refused (429 quota exceeded, 503) waits and tries again instead of ending the
+    bridge (the owner's words, 2026-11-13: "fix the start so a 429 waits and retries instead of exiting"). Any other
+    refusal (403: not the owner) still ends it."""
+    while True:
+        try:
+            return fn()
+        except SystemExit as e:
+            text = str(e)
+            if "Firestore refused (429)" not in text and "Firestore refused (503)" not in text:
+                raise
+            print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {what}: {text.splitlines()[0]} trying again in {wait:.0f} s", flush=True)
+            sleep(wait)
+
+
 def main(argv: list[str] | None = None) -> None:
     if sys.stdout is None:
         # Started without a console (pythonw, a scheduled task): write to a log file next to the bridge's state.
@@ -111,7 +126,7 @@ def main(argv: list[str] | None = None) -> None:
     store = None
     if not getattr(a, "dry_run", False):
         store = Firestore(Session(cfg))
-        store.check_owner()
+        patient("owner check", store.check_owner)
     claude = find_claude(cfg.claude_bin)
     runs = gone = publisher = health = None
     if store is not None and a.cmd == "watch":
@@ -124,7 +139,7 @@ def main(argv: list[str] | None = None) -> None:
 
         # step i5: a plan from a session pauses before a page that does not fit in the 5-hour window
         runs.budget = Budget(data_dir() / "budget.json", lambda: claude_usage(default_creds_path()), data_dir() / "runs" / "plans")
-        for line in runs.forget_lost():
+        for line in patient("runs left running", runs.forget_lost):
             print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} run {line}", flush=True)
         try:  # plan questions answered before snapshots existed (snapshot.py), once per start
             from .snapshot import backfill
