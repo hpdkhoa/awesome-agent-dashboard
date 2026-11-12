@@ -123,7 +123,7 @@ def run(cfg: Config, days: float, store=None, dry_run: bool = False, deleted=lam
     todo = changed_only(state, docs)
     if todo and store is not None:
         gone = deleted_paths(store, deleted())
-        for p in [p for p in todo if p in gone]:
+        for p in gone:
             state.written.pop(p, None)  # forgotten: when the owner clears its tombstone it is written again at once
             state.held.pop(p, None)
         todo = {p: v for p, v in todo.items() if p not in gone}
