@@ -230,7 +230,8 @@ export function PlanView({ plan, items, session, runs = [], onOpenItem }: {
         Plan · v{plan.current} · {isClosed(plan) ? "closed" : "open"} · {plan.workType} · updated {when(plan.updatedAt)}
         <br />
         from session: {session?.title ?? plan.sessionId}
-        {plan.closeNote && (
+        {/* the close note is shown only while the plan is closed: a reopened plan keeps it stored, unshown (i1) */}
+        {isClosed(plan) && plan.closeNote && (
           <>
             <br />
             closed: {plan.closeNote}

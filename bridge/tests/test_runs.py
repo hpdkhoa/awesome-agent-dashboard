@@ -547,3 +547,53 @@ def test_waiting_message_reads_the_running_session_once_and_settings_from_the_li
     assert runs.run_with({})[1] == "low"
     runs.prefs_feed = None  # no listen: read the document as before
     assert runs.prefs() == {} and reads.count("meta/runs") == 1
+
+
+def _line(ts, mid, model="claude-opus-5-5", out=1000, read=0, sid="s1"):
+    return json.dumps({"type": "assistant", "timestamp": ts, "sessionId": sid,
+                       "message": {"id": mid, "model": model, "usage": {"input_tokens": 0, "output_tokens": out,
+                                   "cache_read_input_tokens": read, "cache_creation": {"ephemeral_5m_input_tokens": 0,
+                                                                                       "ephemeral_1h_input_tokens": 0}}}})
+
+
+def test_run_cost_counts_only_the_runs_own_messages(tmp_path):
+    # step i1: claude's total_cost_usd on a resume is the session's running total; the run costs only its own lines
+    from agent_bridge.runs import run_cost
+
+    logs = tmp_path / "logs"
+    (logs / "p" / "s1" / "subagents").mkdir(parents=True)
+    (logs / "p" / "s1.jsonl").write_text("\n".join([
+        _line("2026-11-12T01:00:00Z", "old", out=1_000_000),  # before the run: a repeated old message
+        _line("2026-11-12T02:00:10Z", "m1", out=500), _line("2026-11-12T02:00:11Z", "m1", out=1000),  # streamed twice
+        _line("2026-11-12T03:00:00Z", "late", out=1_000_000),  # after the run
+    ]) + "\n", encoding="utf-8")
+    (logs / "p" / "s1" / "subagents" / "a.jsonl").write_text(_line("2026-11-12T02:00:20Z", "sub", out=1000) + "\n",
+                                                             encoding="utf-8")
+    c = {"action": "message", "sessionId": "s1", "startedAt": "2026-11-12T02:00:00+00:00"}
+    got = run_cost(logs, {"session_id": "s1", "total_cost_usd": 1182.04}, c, "2026-11-12T02:01:00+00:00")
+    assert got == {"costUsd": 0.04, "costFrom": "log"}  # 2,000 output tokens at $20 per million
+
+
+def test_run_cost_without_a_log(tmp_path):
+    from agent_bridge.runs import run_cost
+
+    fresh = run_cost(tmp_path, {"total_cost_usd": 0.5}, {"action": "start", "startedAt": "2026-11-12T02:00:00+00:00"},
+                     "2026-11-12T02:01:00+00:00")
+    assert fresh == {"costUsd": 0.5, "costFrom": "claude"}  # a one-off Start keeps no log: claude's figure is its own
+    msg = run_cost(tmp_path, {"total_cost_usd": 1182.04}, {"action": "message", "sessionId": "x",
+                   "startedAt": "2026-11-12T02:00:00+00:00"}, "2026-11-12T02:01:00+00:00")
+    assert msg == {}  # a resumed run with no log: no cost rather than the session's running total
+
+
+def test_run_cost_window_ends_when_claude_wrote_its_result(tmp_path):
+    # an end written hours late (a 429 on the write) must not take in the session's later runs
+    from agent_bridge.runs import run_cost
+
+    logs = tmp_path / "logs"
+    (logs / "p").mkdir(parents=True)
+    (logs / "p" / "s1.jsonl").write_text("\n".join([
+        _line("2026-11-12T02:00:10Z", "m1", out=1000), _line("2026-11-12T05:00:00Z", "next", out=1_000_000)]) + "\n",
+        encoding="utf-8")
+    c = {"action": "message", "sessionId": "s1", "startedAt": "2026-11-12T02:00:00+00:00"}
+    got = run_cost(logs, {"session_id": "s1"}, c, "2026-11-12T11:00:00+00:00", "2026-11-12T02:00:30+00:00")
+    assert got == {"costUsd": 0.02, "costFrom": "log"}

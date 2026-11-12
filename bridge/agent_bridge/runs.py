@@ -60,6 +60,7 @@ from .aggregate import work_type_of
 from .archiver import Archiver
 from .handoff import CHOICES, DEFAULT_FRESH_OVER, handoff_prompt, last_context, should_fresh
 from .digest import find_log, write_pages
+from .logs import window_cost
 from .inbox import KINDS, PLAN_FORMAT, format_of, now_iso
 from .chain import Chains
 from .planfrom import NO_EDITS, mark_quotes, note_command, plan_prompt, system_args
@@ -324,6 +325,30 @@ def parse_result(out: str | None) -> dict:
     except ValueError:
         return {}
     return r if isinstance(r, dict) else {}
+
+
+def run_cost(logs: Path | None, r: dict, c: dict, ended: str, finished: str = "") -> dict:
+    """The run's own cost: its messages in the session log between startedAt and its end (logs.window_cost).
+    claude's total_cost_usd is the session's running total on a resume (step i1, 2026-11-12: run f2069f82 said
+    $1,182.04 for a 2.5-min message; its own messages cost $2.94, the same as the rise of that total since the run
+    before it). claude's figure is kept only for a fresh run with no log (a one-off Start keeps no session); a
+    message with no log gets no cost rather than a wrong one.
+    finished: when claude wrote its result (the .out file's time). The window ends at the earlier of `ended` and
+    finished + 5 s: an end written late (run 18442aa6 kept "running" 9 h behind a 429 write) would take in the
+    session's later runs. claude's duration_ms is no end: a 22-min run (b0774266) reported 3 s."""
+    start = c.get("startedAt") or ""
+    if finished:
+        try:
+            cap = datetime.fromisoformat(finished.replace("Z", "+00:00")) + timedelta(seconds=5)
+            ended = min(cap, datetime.fromisoformat(ended.replace("Z", "+00:00"))).isoformat()
+        except (ValueError, TypeError):
+            pass
+    w = window_cost(logs, r.get("session_id") or c.get("sessionId") or "", start, ended)
+    if w is not None:
+        return {"costUsd": w["costUsd"], "costFrom": "log"}
+    if r.get("total_cost_usd") is not None and c.get("action") != "message":
+        return {"costUsd": float(r["total_cost_usd"]), "costFrom": "claude"}
+    return {}
 
 
 def reset_time(text: str, after: datetime) -> datetime | None:
@@ -1016,8 +1041,8 @@ class Runs:
         stopped = (self.store.get(f"commands/{cid}") or {}).get("status") == "stopping"
         fields = {"endedAt": now_iso(), "exitCode": p.returncode}
         r = parse_result(out)
-        if r.get("total_cost_usd") is not None:
-            fields["costUsd"] = float(r["total_cost_usd"])
+        done_at = datetime.fromtimestamp((self.out_dir / f"{cid}.out").stat().st_mtime, timezone.utc).isoformat()
+        fields.update(run_cost(self.logs, r, self.store.get(f"commands/{cid}") or {}, fields["endedAt"], done_at))
         if not stopped and r.get("api_error") == "usage_limit_reached":
             # paused, not failed: Continue (or the auto continue at the reset) does the leftover work; an answer's
             # inbox item stays as it is until then

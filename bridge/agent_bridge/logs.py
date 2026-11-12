@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from .prices import cost
 from .redact import redact
 
 
@@ -146,3 +147,64 @@ def session_files(logs: Path, max_age_days: float | None = None) -> dict[str, li
             if max_age_days is None or now - newest <= max_age_days * 86400:
                 out[sid] = files
     return out
+
+
+def _when(ts: str) -> datetime | None:
+    try:
+        t = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return t if t.tzinfo else t.astimezone()
+
+
+def window_cost(logs: Path | None, session_id: str, start: str, end: str) -> dict | None:
+    """The list-price cost of the messages one run wrote: the assistant lines of the session's log and its subagents
+    whose own timestamp lies in [start, end], each message.id once with its largest token fields.
+
+    Why not claude's own total_cost_usd: on a resumed session it is the session's running total, not this run (run
+    f2069f82, a 2.5-min message, said $1,182.04 while its own tokens cost a few dollars). Old messages a resumed file
+    repeats keep their old timestamps, so the time window leaves them out. None when the log is not found."""
+    if not logs or not session_id or not logs.is_dir():
+        return None
+    t0, t1 = _when(start or ""), _when(end or "")
+    if t0 is None or t1 is None:
+        return None
+    files: list[Path] = []
+    for main in logs.glob(f"*/{session_id}.jsonl"):
+        files += [main] + sorted((main.parent / session_id / "subagents").glob("*.jsonl"))
+    if not files:
+        return None
+    msgs: dict[str, list] = {}
+    for path in files:
+        with open(path, "rb") as f:
+            for raw in f:
+                try:
+                    d = json.loads(raw)
+                except (ValueError, UnicodeDecodeError):
+                    continue
+                if d.get("type") != "assistant":
+                    continue
+                t = _when(d.get("timestamp") or "")
+                m = d.get("message") or {}
+                u = m.get("usage") or {}
+                mid = m.get("id")
+                if t is None or not (t0 <= t <= t1) or not mid or not u or m.get("model") == "<synthetic>":
+                    continue
+                cc = u.get("cache_creation") or {}
+                w5, w1h = cc.get("ephemeral_5m_input_tokens"), cc.get("ephemeral_1h_input_tokens")
+                if w5 is None and w1h is None:
+                    w5, w1h = u.get("cache_creation_input_tokens", 0), 0
+                new = [u.get("input_tokens", 0) or 0, u.get("output_tokens", 0) or 0, w5 or 0, w1h or 0,
+                       u.get("cache_read_input_tokens", 0) or 0]
+                old = msgs.get(mid)
+                msgs[mid] = [m.get("model") or "unknown", *(new if old is None else [max(a, b) for a, b in zip(old[1:], new)])]
+    usd, unpriced, total = 0.0, 0, 0
+    for model, *t in msgs.values():
+        n = sum(t)
+        total += n
+        c = cost(model, *t)
+        if c is None:
+            unpriced += n
+        else:
+            usd += c
+    return {"costUsd": round(usd, 6), "tokens": total, "unpricedTokens": unpriced, "messages": len(msgs)}
