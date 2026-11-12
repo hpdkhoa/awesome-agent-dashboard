@@ -23,6 +23,31 @@ from .sync import run
 COMMAND_SECONDS = 5  # how often watch acts on the commands the listener holds and checks its runs
 
 
+_LOCK = None
+
+
+def one_bridge(folder) -> bool:
+    """Holds watch.lock for the life of this process; False when another bridge holds it (step i10: the task
+    watchdog must never start a second bridge). The lock goes with the process, so a killed bridge frees it."""
+    global _LOCK
+    f = open(folder / "watch.lock", "a+")
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            f.seek(0)
+            msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        f.close()
+        return False
+    _LOCK = f
+    return True
+
+
 def main(argv: list[str] | None = None) -> None:
     if sys.stdout is None:
         # Started without a console (pythonw, a scheduled task): write to a log file next to the bridge's state.
@@ -78,12 +103,16 @@ def main(argv: list[str] | None = None) -> None:
             print(f"Sent to {n} device(s).")
         return
 
+    if a.cmd == "watch" and not one_bridge(data_dir()):
+        # the task watchdog fires every minute; a bridge started by hand already runs: this one stops quietly
+        print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} another bridge is running on this PC: not starting", flush=True)
+        return
     store = None
     if not getattr(a, "dry_run", False):
         store = Firestore(Session(cfg))
         store.check_owner()
     claude = find_claude(cfg.claude_bin)
-    runs = gone = publisher = None
+    runs = gone = publisher = health = None
     if store is not None and a.cmd == "watch":
         from .push import pusher
 
@@ -106,8 +135,12 @@ def main(argv: list[str] | None = None) -> None:
             plans.mkdir(parents=True, exist_ok=True)
             from .texts import Texts
 
+            from .config import REPO
+            from .health import Health
+
+            health = Health(REPO, data_dir(), cfg.machine, runs)
             serve(Files([*cfg.roots, ("plans", str(plans))], firebase_verifier(cfg.project_id, cfg.owner_email)),
-                  list(cfg.site_origins), cfg.files_port, Texts(cfg.logs, data_dir() / "runs"))
+                  list(cfg.site_origins), cfg.files_port, Texts(cfg.logs, data_dir() / "runs"), health=health)
             store.put_many({"meta/files": {"url": cfg.files_url}})
             print(f"file viewer on 127.0.0.1:{cfg.files_port} for {cfg.files_url}", flush=True)
         from .status import Publisher, Status, serve as serve_status
@@ -142,6 +175,8 @@ def main(argv: list[str] | None = None) -> None:
                     f"{r['toWrite'] if a.dry_run else r['written']}",
                     flush=True,
                 )
+                if health is not None:
+                    health.synced()
                 if store is not None and a.cmd == "watch":
                     # p10: this bridge's state into machines/<this machine>, on a change or every 5 min; at once when
                     # the sync above replaced that record (which drops the published fields)

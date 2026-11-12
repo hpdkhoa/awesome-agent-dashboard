@@ -11,6 +11,7 @@ import { usePush, type PushState } from "./notify";
 import { FileViewer, PcText } from "./FileView";
 import { SpendChart } from "./Charts";
 import { UsageCheck } from "./UsageCheck";
+import { HealthPanel, HealthPill, useHealth } from "./Health";
 import { MoreMenu } from "./MoreMenu";
 
 // A tap on a push opens /?item=<inbox id>, /?run=<command id> or /?plan=<plan id> (bridge/agent_bridge/push.py).
@@ -102,6 +103,7 @@ export function Dashboard() {
   const [store, setStore] = useState("inbox");
   const [pickedItem, setPickedItem] = useState<string | null>(opened.get("item"));
   const [push, turnOnPush] = usePush();
+  const [health, restartBridge] = useHealth();
   // Money data loads only while the Money or Rates tab is open.
   const entries = useEntries(tab === "money");
   const fx = useFx(tab === "money" || tab === "rates");
@@ -151,6 +153,7 @@ export function Dashboard() {
           {usage.length} days {num(month.tokens)} tok · {usd(month.cost)} est.
         </span>
         <span className="stat muted">{lastSync ? "synced " + ago(lastSync) : "no sync yet"}</span>
+        <HealthPill st={health} />
         {push && (
           <button className={push === "off" ? "pill wait" : "pill"} disabled={push !== "off"} onClick={turnOnPush}
             title="A push when a run needs your approval and when a run ends">
@@ -278,6 +281,9 @@ export function Dashboard() {
       <FileViewer />
 
       <section className="usage" hidden={layout.rightHidden}>
+        <Section id="usage.health" title="Bridge health" extra="pinged every 20 s through the tunnel">
+          <HealthPanel st={health} restart={restartBridge} />
+        </Section>
         <Section id="usage.days" title="Spend by day" extra={`${usage.length} days, whole history`}>
           <SpendChart usage={usage} />
         </Section>

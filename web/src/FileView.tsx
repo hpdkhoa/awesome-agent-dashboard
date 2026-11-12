@@ -15,7 +15,7 @@ const TEXT_MAX = 2 * 1024 * 1024;
 const EVENT = "aad.openFile";
 
 let base: Promise<string | null> | null = null;
-const filesUrl = () =>
+export const filesUrl = () =>
   (base ??= getDoc(doc(db, "meta", "files")).then((d) => (d.data()?.url as string | undefined) ?? null, () => null));
 
 export async function ticket(path: string, cwd: string): Promise<Ticket> {
