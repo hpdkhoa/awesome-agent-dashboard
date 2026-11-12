@@ -8,7 +8,7 @@
 .sec-head:hover { background: var(--accent-bg); }
 .sec-head:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .chev { display: inline-block; transition: transform 0.15s; color: var(--muted); font-size: 12px; }
-.sec.open > .sec-head .chev { transform: rotate(90deg); }
+.sec.open > .sec-head .chev, .sec.open > .sec-wrap > .sec-head .chev { transform: rotate(90deg); }
 .sec-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sec-extra { color: var(--muted); font-size: 12px; font-weight: 400; }
 .sec-body { padding: 0 14px 14px; }
@@ -70,3 +70,11 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
 .decision { border-top: 1px solid var(--line); padding: 8px 0; }
 .decision > p { margin: 0 0 4px; }
 .decision-pick { margin: 6px 0; max-width: 720px; }
+
+/* the owner's pick, 2026-11-12, "Both": an open reply shows its first 4 lines, then Show more (Clamp.tsx) */
+.clamp { overflow: hidden; position: relative; }
+.clamp:not(.open)::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1.8em;
+  background: linear-gradient(transparent, var(--card)); pointer-events: none; }
+.sec .sec .clamp:not(.open)::after { background: linear-gradient(transparent, var(--bg)); }
+.sec-body > .step-row { border-top: none; padding-top: 0; }
+.step-tools { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; padding: 6px 8px 0 0; }

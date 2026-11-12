@@ -19,6 +19,7 @@ import { buildNote } from "./harness";
 import { RunList, RunWithPicker } from "./Runs";
 import type { RunWith } from "./data";
 import { Section } from "./Section";
+import { Clamp } from "./Clamp";
 
 // A plan with six parts (plan from a session; the owner's words, 2026-11-03, in cc/dashboard/SESSION_PLAN.md).
 // Plan versions change only with the plan's data; each step shows its own versions, the last reply like a message.
@@ -129,19 +130,19 @@ function OnMessages({ runs, plan, where }: { runs: Run[]; plan: Plan; where: On 
   if (list.length === 0) return null;
   return (
     <div className="on-msgs">
-      {list.map((r) => (
-        <div key={r.id} className="on-msg">
-          <p className="small muted">
-            {KIND_NAME[r.kind!]} · {when(r.createdAt)} · <span className={"status " + r.status}>{r.status}</span>
-          </p>
-          <Md text={r.ownerText ?? r.prompt ?? ""} cwd={plan.cwd} />
+      {/* the owner's pick, 2026-11-12, "Both": each message folds to its header, the newest starts open, and its
+          text and reply show 4 lines, then Show more */}
+      {list.map((r, i) => (
+        <Section key={r.id} id={`plan.msg.${r.id}`} open={i === list.length - 1}
+          title={<>{KIND_NAME[r.kind!]} · {when(r.createdAt)} · <span className={"status " + r.status}>{r.status}</span></>}>
+          <Clamp><Md text={r.ownerText ?? r.prompt ?? ""} cwd={plan.cwd} /></Clamp>
           {(r.status === "done" || r.status === "lost") && (
             <>
               <p className="label">Reply</p>
-              <PcText run={r.id} cwd={plan.cwd} />
+              <Clamp><PcText run={r.id} cwd={plan.cwd} /></Clamp>
             </>
           )}
-        </div>
+        </Section>
       ))}
     </div>
   );
@@ -175,27 +176,28 @@ function ResultsSection({ plan, v, versions, runs, steps, generated, stale }: {
           <p className="small muted">on v{n}{n === plan.current ? " · current" : ""}</p>
           {rs.map((r) => {
             const rep = report(r);
+            const newest = r.id === list[0].id; // the owner's pick, 2026-11-12, "Both": only the newest card starts open
             const files = generated?.versions?.[`v${n}`] ?? [];
             const st = v.parts?.steps.find((s) => s.id === r.stepId);
             return (
-              <div key={r.id} className="result-card">
-                <div className="result-head">
+              <Section key={r.id} id={`plan.result.${r.id}`} open={newest}
+                title={<span className="result-head">
                   <span className={"status " + (rep?.state ?? r.status)}>{rep?.state ?? r.status}</span>
                   <b>{r.stepId} · {title(r.stepId!) || "step no longer in this version"}</b>
                   <span className="small muted">ran {when(r.startedAt ?? r.createdAt)}{r.endedAt ? ` → ${when(r.endedAt)}` : ""}</span>
-                </div>
+                </span>}>
                 {st && <p className="small muted">check: {st.check}{rep ? ` → ${rep.state === "done" ? "met, by the session's report" : rep.state}` : " → no report yet"}</p>}
                 {(r.status === "done" || r.status === "lost") && (
                   <>
                     <p className="label">Reply</p>
-                    <PcText run={r.id} cwd={plan.cwd} />
+                    <Clamp><PcText run={r.id} cwd={plan.cwd} /></Clamp>
                   </>
                 )}
                 {r.status !== "done" && r.status !== "lost" && r.error && <p className="bad small">{r.error}</p>}
                 <p className="small muted">
                   files approved for v{n}: {files.length ? files.map((f) => <code key={f.file} className="file-link" role="button" onClick={() => openFile(f.file, plan.cwd)}>{f.file.split(/[\\/]/).pop()}</code>).reduce<React.ReactNode[]>((a, x, i) => (i ? [...a, " · ", x] : [x]), []) : "none"}
                 </p>
-              </div>
+              </Section>
             );
           })}
         </div>
@@ -456,27 +458,31 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
           const last = sv?.versions[sv.versions.length - 1];
           const qs = asked.filter((i) => i.stepId === st.id);
           return (
-            <div key={st.id} className="step-row" data-step={st.id}>
-              <div>
+            // the owner's pick, 2026-11-12, "All folded": every step starts folded to its header line
+            <Section key={st.id} id={`plan.step.${plan.id}.${st.id}`} open={false}
+              title={<span data-step={st.id}>
                 <span className={"step-state " + (sv?.state ?? "next")}>{sv?.state ?? "next"}</span>
-                <b>{st.id} · {st.title}</b>{st.new && <span className="tag" title="Work the session's record does not hold">new</span>}{" "}
+                <b>{st.id} · {st.title}</b>{st.new && <span className="tag" title="Work the session's record does not hold">new</span>}
+              </span>}
+              tools={<span className="step-tools">
                 <RunStep plan={plan} step={st} runs={runs} harness={harnessNote} />
                 <StepActions step={st} />
                 {sv && <MoreMenu path={`planSteps/${plan.id}_${st.id}`} />}
-              </div>
+              </span>}>
+              <div className="step-row" data-step={st.id}>
               <Md text={linkEntries(`${st.does}\n\n**Check:** ${st.check}`, plan)} cwd={plan.cwd} />
               <OnMessages runs={runs} plan={plan} where={{ stepId: st.id }} />
               {last && (
-                <Section id="plan.step.last" title={`Last reply · step version ${last.n}`} extra={when(last.at)}>
-                  <Md text={last.reply} cwd={plan.cwd} />
+                <Section id={`plan.step.last.${plan.id}.${st.id}`} title={`Last reply · step version ${last.n}`} extra={when(last.at)}>
+                  <Clamp><Md text={last.reply} cwd={plan.cwd} /></Clamp>
                 </Section>
               )}
               {sv && sv.versions.length > 1 && (
-                <Section id="plan.step.older" title="Older step versions" extra={sv.versions.length - 1} open={false}>
+                <Section id={`plan.step.older.${plan.id}.${st.id}`} title="Older step versions" extra={sv.versions.length - 1} open={false}>
                   {sv.versions.slice(0, -1).reverse().map((x) => (
                     <div key={x.n}>
                       <p className="small muted">step version {x.n} · {x.state} · {when(x.at)} · on plan v{x.planVersion}</p>
-                      <Md text={x.reply} cwd={plan.cwd} />
+                      <Clamp><Md text={x.reply} cwd={plan.cwd} /></Clamp>
                     </div>
                   ))}
                 </Section>
@@ -487,7 +493,8 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
                   <span className={isWaiting(q) ? "wait-fg" : "muted"}>{isWaiting(q) ? "waiting for you" : q.answer?.choice ?? q.status}</span>
                 </p>
               ))}
-            </div>
+              </div>
+            </Section>
           );
         })}
       </Section>
