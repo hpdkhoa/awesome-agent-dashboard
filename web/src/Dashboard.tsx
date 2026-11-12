@@ -4,7 +4,7 @@ import { QUOTE_EVENT, type QuoteAsk } from "./quote";
 import { clampWidth, gridColumns, loadLayout, saveLayout, type Layout } from "./layout";
 import { signOut } from "firebase/auth";
 import { auth } from "./firebase";
-import { RECENT_DAYS, useInbox, useMachines, usePlans, useRuns, useSessions, useUsage, useWorkTypes, type Run, type Session, type Tokens } from "./data";
+import { RECENT_DAYS, useInbox, useMachines, usePager, usePlanInbox, usePlanRuns, usePlans, useRuns, useSessions, useUsage, useWorkTypes, type InboxItem, type Pager, type Plan, type Run, type Session, type Tokens } from "./data";
 import { MessageBox, ModeSwitch, PlanFromSession, RunList, StartForm } from "./Runs";
 import { PlanBoard, PlanList, PlanView } from "./Plans";
 import { usePush, type PushState } from "./notify";
@@ -52,16 +52,36 @@ function ago(iso: string) {
 
 const isActive = (s: Session) => Date.now() - Date.parse(s.lastAt) < ACTIVE_MS;
 const today = () => new Date().toLocaleDateString("en-CA");
+const dedupe = <T extends { id: string }>(rows: T[]) => rows.filter((r, i) => rows.findIndex((x) => x.id === r.id) === i);
+
+// Show more: the next 10 older rows, one read each, never a listener (the owner's words, 2026-11-13).
+function MoreRow<T>({ pager, what }: { pager: Pager<T>; what: string }) {
+  if (pager.done) return <li className="muted small">{pager.pages ? `no older ${what}` : ""}</li>;
+  return (
+    <li className="row muted small" onClick={pager.more}>
+      {pager.loading ? "loading" : `Show more ${what} (10 older, 10 reads)`}
+    </li>
+  );
+}
 
 export function Dashboard() {
-  const [older, setOlder] = useState(false);
-  const sessions = useSessions(older);
+  const [older] = useState(false);
+  const liveSessions = useSessions(older);
+  // older rows behind Show more, 10 a page (the owner's words, 2026-11-13)
+  const moreSessions = usePager<Session>("sessions", "lastAt");
+  const moreRuns = usePager<Run>("commands", "createdAt");
+  const moreInbox = usePager<InboxItem>("inbox", "createdAt");
+  const morePlans = usePager<Plan>("plans", "updatedAt");
+  const sessions = liveSessions ? dedupe([...liveSessions, ...moreSessions.rows]) : null;
   const usage = useUsage();
   const workTypes = useWorkTypes();
   const machines = useMachines();
-  const inbox = useInbox();
-  const runs = useRuns();
-  const plans = usePlans();
+  const liveInbox = useInbox();
+  const inbox = liveInbox ? dedupe([...liveInbox, ...moreInbox.rows]) : null;
+  const liveRuns = useRuns();
+  const runs = liveRuns ? dedupe([...liveRuns, ...moreRuns.rows]) : null;
+  const livePlans = usePlans();
+  const plans = livePlans ? dedupe([...livePlans, ...morePlans.rows]) : null;
   const [pickedPlan, setPickedPlan] = useState<string | null>(opened.get("plan"));
   const [wt, setWt] = useState<string>("all");
   const [picked, setPicked] = useState<string | null>(null);
@@ -80,7 +100,7 @@ export function Dashboard() {
         setTab("plans");
       } else if (q.sessionId) {
         setWt("all");
-        if (!known.current.some((x) => x.id === q.sessionId)) setOlder(true); // older than the recent days
+        if (!known.current.some((x) => x.id === q.sessionId)) moreSessions.more(); // older than the last day: the next 10
         setPicked(q.sessionId);
         setTab("sessions");
       }
@@ -123,6 +143,8 @@ export function Dashboard() {
   const item = items.find((i) => i.id === pickedItem) ?? items.find(isWaiting) ?? items[0];
   const shownPlans = (plans ?? []).filter((p) => wt === "all" || p.workType === wt);
   const plan = shownPlans.find((p) => p.id === pickedPlan) ?? shownPlans[0];
+  const planInbox = usePlanInbox(plan?.id);
+  const planRuns = usePlanRuns(plan?.id);
   const openItem = (id: string) => (pickItem(id), setTab("inbox"));
   const todayUse = usage?.find((u) => u.day === today());
   const month = (usage ?? []).reduce((a, u) => ({ tokens: a.tokens + u.total, cost: a.cost + u.costUsd }), { tokens: 0, cost: 0 });
@@ -222,9 +244,13 @@ export function Dashboard() {
               <StartForm machines={machines ?? []} plan />
             </div>
             <PlanList plans={shownPlans} items={inbox} picked={plan?.id} onPick={setPickedPlan} />
+            <ul className="list"><MoreRow pager={morePlans} what="plans" /></ul>
           </>
         ) : tab === "inbox" ? (
-          <InboxList items={items} picked={item?.id} onPick={pickItem} />
+          <>
+            <InboxList items={items} picked={item?.id} onPick={pickItem} />
+            <ul className="list"><MoreRow pager={moreInbox} what="items" /></ul>
+          </>
         ) : (
         <>
         <div className="pad">
@@ -243,10 +269,8 @@ export function Dashboard() {
               <MoreMenu path={`sessions/${s.id}`} />
             </li>
           ))}
-          {shown.length === 0 && <li className="muted">No sessions in the last {RECENT_DAYS} days.</li>}
-          <li className="row muted small" onClick={() => setOlder(!older)}>
-            {older ? `Hide sessions older than ${RECENT_DAYS} days` : `Show sessions older than ${RECENT_DAYS} days`}
-          </li>
+          {shown.length === 0 && <li className="muted">No sessions in the last {RECENT_DAYS} day.</li>}
+          <MoreRow pager={moreSessions} what="sessions" />
         </ul>
         </>
         )}
@@ -264,14 +288,16 @@ export function Dashboard() {
         ) : tab === "runs" ? (
           <>
             <ModeSwitch />
-            <RunList runs={runs ?? []} />
+            <RunList runs={liveRuns ?? []} title="Runs going now" />
+            {moreRuns.rows.length > 0 && <RunList runs={moreRuns.rows} title="Older runs" />}
+            <ul className="list"><MoreRow pager={moreRuns} what="runs" /></ul>
           </>
         ) : tab === "plans" ? (
           plan ? (
             <>
               <PlanBoard plans={shownPlans} items={inbox} picked={plan.id} onPick={setPickedPlan} />
-              <PlanView key={plan.id} plan={plan} items={inbox} session={sessions.find((s) => s.id === plan.sessionId)} runs={runs ?? []}
-                onOpenItem={openItem} />
+              <PlanView key={plan.id} plan={plan} items={dedupe([...(inbox ?? []), ...planInbox])} session={sessions.find((s) => s.id === plan.sessionId)}
+                runs={dedupe([...(runs ?? []), ...planRuns])} onOpenItem={openItem} />
             </>
           ) : (
             <p className="muted">No plans yet.</p>

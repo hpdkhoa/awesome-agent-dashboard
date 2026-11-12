@@ -2,7 +2,7 @@ import type { Phase } from "./phases";
 import { checkHash, itemHash, type HarnessItem, type HarnessTicks } from "./harness";
 import type { Kind } from "./planCheck";
 import { useEffect, useState } from "react";
-import { collection, doc, limit, onSnapshot, orderBy, query, setDoc, updateDoc, where, type QueryConstraint } from "firebase/firestore";
+import { collection, doc, getDocs, limit, onSnapshot, orderBy, query, setDoc, startAfter, updateDoc, where, type QueryConstraint, type QueryDocumentSnapshot } from "firebase/firestore";
 import { db } from "./firebase";
 import { countReads, useActive } from "./pageReads";
 export { pageReads, countReads } from "./pageReads";
@@ -204,7 +204,32 @@ function useCollection<T>(name: string, ...constraints: QueryConstraint[]): T[] 
 // Sessions active in the last 5 days only, unless the owner asks for older ones: older threads cost no reads until then
 // (the owner's words, 2026-11-01: "the thread with no active message more than 5 days need a collapse or hide state so
 // no read consume in there").
-export const RECENT_DAYS = 5;
+export const RECENT_DAYS = 1; // the owner's words, 2026-11-13: "session is 1 day display and the rest is hidden inside show more"
+export const PAGE = 10; // the first display and every Show more: 10 documents at most
+
+// Older rows behind Show more: one-shot reads, PAGE at a time, never a listener (the owner's words, 2026-11-13).
+export type Pager<T> = { rows: T[]; more: () => void; loading: boolean; done: boolean; pages: number };
+export function usePager<T>(name: string, orderField: string, on = true, ...constraints: QueryConstraint[]): Pager<T> {
+  const [rows, setRows] = useState<T[]>([]);
+  const [last, setLast] = useState<QueryDocumentSnapshot | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [done, setDone] = useState(false);
+  const [pages, setPages] = useState(0);
+  const more = () => {
+    if (loading || done || !on) return;
+    setLoading(true);
+    const q = query(collection(db, name), ...constraints, orderBy(orderField, "desc"), ...(last ? [startAfter(last)] : []), limit(PAGE));
+    getDocs(q).then((s) => {
+      countReads(s.docs.length, `${name} (older)`);
+      setRows((r) => [...r, ...s.docs.map((d) => d.data() as T)]);
+      setLast(s.docs[s.docs.length - 1] ?? last);
+      setDone(s.docs.length < PAGE);
+      setPages((p) => p + 1);
+      setLoading(false);
+    }, () => setLoading(false));
+  };
+  return { rows, more, loading, done, pages };
+}
 export function useSessions(older: boolean): Session[] | null {
   const [rows, setRows] = useState<Session[] | null>(null);
   const active = useActive();
@@ -212,8 +237,8 @@ export function useSessions(older: boolean): Session[] | null {
     if (!active) return;
     const since = new Date(Date.now() - RECENT_DAYS * 86400000).toISOString();
     const q = older
-      ? query(collection(db, "sessions"), orderBy("lastAt", "desc"), limit(300))
-      : query(collection(db, "sessions"), where("lastAt", ">=", since), orderBy("lastAt", "desc"));
+      ? query(collection(db, "sessions"), orderBy("lastAt", "desc"), limit(PAGE))
+      : query(collection(db, "sessions"), where("lastAt", ">=", since), orderBy("lastAt", "desc"), limit(PAGE));
     return onSnapshot(q, (s) => (countReads(s.docChanges().length, "sessions"), setRows(s.docs.map((d) => d.data() as Session))));
   }, [older, active]);
   return rows;
@@ -222,7 +247,20 @@ export function useSessions(older: boolean): Session[] | null {
 export const useUsage = () => useCollection<Usage>("usage", orderBy("day", "desc"));
 export const useWorkTypes = () => useCollection<WorkType>("workTypes");
 export const useMachines = () => useCollection<Machine>("machines");
-export const usePlans = () => useCollection<Plan>("plans", orderBy("updatedAt", "desc"), limit(100));
+export const usePlans = () => useCollection<Plan>("plans", orderBy("updatedAt", "desc"), limit(PAGE));
+// the plan page's own questions and runs, scoped to that plan (bounded by the plan, read only while it is open)
+export const usePlanInbox = (planId: string | undefined) => useScoped<InboxItem>("inbox", "planId", planId);
+export const usePlanRuns = (planId: string | undefined) => useScoped<Run>("commands", "planId", planId);
+function useScoped<T>(name: string, field: string, value: string | undefined): T[] {
+  const [rows, setRows] = useState<T[]>([]);
+  const active = useActive();
+  useEffect(() => {
+    if (!value) return setRows([]);
+    if (!active) return;
+    return onSnapshot(query(collection(db, name), where(field, "==", value)), (s) => (countReads(s.docChanges().length, `${name} (plan)`), setRows(s.docs.map((d) => d.data() as T))));
+  }, [name, field, value, active]);
+  return rows;
+}
 
 // One plan's versions, read only while its page is open. Sorted here, so the query needs no composite index.
 export function usePlanVersions(planId: string | undefined): PlanVersion[] | null {
@@ -237,7 +275,9 @@ export function usePlanVersions(planId: string | undefined): PlanVersion[] | nul
   }, [planId, active]);
   return rows;
 }
-export const useInbox = () => useCollection<InboxItem>("inbox", orderBy("createdAt", "desc"), limit(200));
+// only the items still open, answered or being delivered; the rest behind Show more (usePager)
+export const INBOX_LIVE = ["open", "answered", "delivering"];
+export const useInbox = () => useCollection<InboxItem>("inbox", where("status", "in", INBOX_LIVE), limit(PAGE));
 
 // The owner's answer. The session picks it up live, or the bridge resumes the session if it has closed.
 export const answerItem = (id: string, choice: string, text: string) =>
@@ -288,7 +328,9 @@ export const setPlanStatus = (planId: string, status: "open" | "closed") =>
   updateDoc(doc(db, "plans", planId), { status, updatedAt: new Date().toISOString() });
 export const isClosed = (p: Pick<Plan, "status">) => p.status !== "open";
 export const chooseVersion = (planId: string, n: number) => updateDoc(doc(db, "plans", planId), { chosen: n });
-export const useRuns = () => useCollection<Run>("commands", orderBy("createdAt", "desc"), limit(100));
+// only the runs going now; the rest behind Show more (usePager)
+export const RUN_LIVE = ["new", "waiting", "running", "stopping", "paused"];
+export const useRuns = () => useCollection<Run>("commands", where("status", "in", RUN_LIVE), limit(PAGE));
 
 const newId = () => crypto.randomUUID().replace(/-/g, "").slice(0, 20);
 
