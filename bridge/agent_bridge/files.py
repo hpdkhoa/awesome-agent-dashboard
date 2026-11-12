@@ -112,6 +112,11 @@ class Files:
         self.tickets: dict[str, tuple[str, float]] = {}  # ticket -> (root, expiry)
         self.lock = threading.Lock()
 
+    def add_root(self, root: str) -> None:
+        """A work folder added on the page (step i4) is served at once, with no restart."""
+        if root and root not in self.roots:
+            self.roots.append(root)
+
     def resolve(self, path: str, cwd: str) -> tuple[str, str]:
         """(root, the file's path inside it, with /). Raises ValueError with the reason."""
         p = clean(path)

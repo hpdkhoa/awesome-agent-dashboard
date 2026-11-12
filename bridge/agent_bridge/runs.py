@@ -509,6 +509,10 @@ class Runs:
         self.auto: dict[str, dict] | None = None
         self.auto_lock = threading.Lock()  # a plan pauses from its reading thread
         self.chains = Chains(store, machine, push)  # chain.py: Run all steps, one step after another
+        # step i4: a work folder added on the page joins self.roots in place (the same list the sync and the inbox
+        # read); on_roots tells the others that keep their own copy (the file viewer); env_path is where WORK_ROOTS lives
+        self.on_roots: list = []
+        self.env_path: Path | None = None
 
     def forget_lost(self) -> list[str]:
         """On start: runs an earlier bridge on this machine left running. One whose .out already holds claude's
@@ -591,6 +595,7 @@ class Runs:
                     else self._plan(c) if action == "plan" else self._approve_generated(c) if action == "approve_generated"
                     else self._delete_plan_files(c) if action == "delete_plan_files"
                     else self.chains.start(c) if action == "chain"
+                    else self._add_root(c) if action == "add_root"
                     else self._continue(c) if action == "continue" else self._auto_continue(c) if action == "auto_continue"
                     else self._unknown(c))
             if line:
@@ -713,6 +718,26 @@ class Runs:
             nid, line = self.continue_run(k)
             log.append(line + " (auto at the reset)" if nid else f"{k}: no auto continue, {line}")
         return log
+
+    def _add_root(self, c: dict) -> str:
+        """A work folder added on the page (step i4, the owner's choice, 2026-11-12: "Bridge checks"): checked
+        (config.root_refusal), then usable at once with no restart: the folder list in memory, WORK_ROOTS in .env, the
+        file viewer and the machine's folder list on the page."""
+        from .config import root_refusal, save_roots
+
+        path, name, folder = f"commands/{c['id']}", str(c.get("name") or "").strip(), str(c.get("folder") or "").strip()
+        why = root_refusal(name, folder, self.roots)
+        if why:
+            self.store.update(path, {"status": "failed", "endedAt": now_iso(), "error": why})
+            return f"{c['id']}: refused work folder {folder!r}, {why}"
+        full = os.path.realpath(folder)
+        save_roots([*self.roots, (name, full)], self.env_path)  # .env first: a failed write adds nothing
+        self.roots.append((name, full))
+        for f in self.on_roots:
+            f(self.roots)
+        self.store.update(f"machines/{self.machine}", {"folders": [{"workType": w, "path": r} for w, r in self.roots]})
+        self.store.update(path, {"status": "done", "endedAt": now_iso(), "workType": name, "folder": full})
+        return f"{c['id']}: work folder {name} = {full} added, no restart"
 
     def _unknown(self, c: dict) -> str:
         self.store.update(f"commands/{c['id']}", {"status": "failed", "error": "Unknown action."})

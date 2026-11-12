@@ -146,7 +146,7 @@ export type Run = {
   target?: string;
   cwd?: string;
   status: "new" | "waiting" | "running" | "stopping" | "done" | "stopped" | "failed" | "lost" | "cancelled" | "paused";
-  action: "start" | "stop" | "message" | "check" | "plan" | "approve_generated" | "continue" | "auto_continue";
+  action: "start" | "stop" | "message" | "check" | "plan" | "approve_generated" | "continue" | "auto_continue" | "add_root";
   pausedUntilAt?: string | null; // a run paused by the usage limit: the reset time the bridge read from claude's message
   autoContinue?: boolean; // continues by itself at the reset (bridge runs.py _pause, _auto_continue)
   autoBy?: "last" | "owner" | null; // the run that paused last, or the owner's pick
@@ -289,6 +289,22 @@ export const startRun = (machine: string, folder: string, prompt: string, w?: Ru
   const id = newId();
   return setDoc(doc(db, "commands", id), {
     id, action: "start", machine, folder, prompt, status: "new", createdAt: new Date().toISOString(), ...withRun(w), ...(keep ? {} : { noSession: true }),
+  });
+};
+// A work folder added on the page (step i4, the owner's choice, 2026-11-12: "Bridge checks"): the bridge on that
+// machine checks it (exists; not a drive root, the user folder, AppData or .ssh), then adds it with no restart.
+// onEnd gets the bridge's answer: done, or failed with why.
+export const addRoot = (machine: string, name: string, folder: string, onEnd: (ok: boolean, why: string) => void) => {
+  const id = newId();
+  const ref = doc(db, "commands", id);
+  return setDoc(ref, { id, action: "add_root", machine, name, folder, status: "new", createdAt: new Date().toISOString() }).then(() => {
+    const stop = onSnapshot(ref, (s) => {
+      const c = s.data() as { status?: string; error?: string; folder?: string } | undefined;
+      if (c?.status === "done" || c?.status === "failed") {
+        stop();
+        onEnd(c.status === "done", c.status === "done" ? c.folder ?? folder : c.error ?? "refused");
+      }
+    });
   });
 };
 // A message to an existing session: the bridge resumes it with the message once it is closed.

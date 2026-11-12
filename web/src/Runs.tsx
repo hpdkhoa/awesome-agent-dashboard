@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { forSession, QUOTE_EVENT, takeQuote } from "./quote";
 import {
-  cancelMessage, checkSession, continueRun, forceMessage, setAutoContinue, planFromSession, PLAN_KINDS, sendMessage, setRunMode, startRun, stopRun, useRunMode,
+  addRoot, cancelMessage, checkSession, continueRun, forceMessage, setAutoContinue, planFromSession, PLAN_KINDS, sendMessage, setRunMode, startRun, stopRun, useRunMode,
   EFFORTS, exactEffort, exactModel, FRESH_OVER, MODELS, setRunPrefs, useRunPrefs, type Fresh, type RunWith,
   type Machine, type Run, type Session,
 } from "./data";
@@ -120,7 +120,53 @@ export function StartForm({ machines, plan = false }: { machines: Machine[]; pla
       <button className="primary" disabled={busy} onClick={start}>
         Start
       </button>
+      {!plan && <AddFolder machines={machines} />}
     </Section>
+  );
+}
+
+// Step i4 (the owner's choice, 2026-11-12: "Bridge checks"): add a work folder on a machine; usable with no restart.
+function AddFolder({ machines }: { machines: Machine[] }) {
+  const [open, setOpen] = useState(false);
+  const [machine, setMachine] = useState(machines[0]?.name ?? "");
+  const [name, setName] = useState("");
+  const [folder, setFolder] = useState("");
+  const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  if (!open) return <p className="small"><button onClick={() => setOpen(true)}>Add a work folder</button></p>;
+  async function add() {
+    const m = machine || machines[0]?.name;
+    if (!m || !name.trim() || !folder.trim()) return setNote({ ok: false, text: "Pick a machine, give a name and the whole path." });
+    setBusy(true);
+    setNote({ ok: true, text: "asking the bridge" });
+    const sent = Date.now();
+    try {
+      await addRoot(m, name.trim(), folder.trim(), (ok, why) => {
+        setBusy(false);
+        setNote({ ok, text: ok ? `Added ${why} in ${((Date.now() - sent) / 1000).toFixed(1)} s: pick it above.` : why });
+        if (ok) (setName(""), setFolder(""));
+      });
+    } catch (e) {
+      setBusy(false);
+      setNote({ ok: false, text: String((e as { code?: string }).code ?? e) });
+    }
+  }
+  return (
+    <div className="add-folder">
+      <p className="label">Add a work folder</p>
+      {machines.length > 1 && (
+        <select value={machine} onChange={(e) => setMachine(e.target.value)}>
+          {machines.map((m) => (
+            <option key={m.name} value={m.name}>{m.name}</option>
+          ))}
+        </select>
+      )}
+      <input value={name} placeholder="name, such as labs" onChange={(e) => (setName(e.target.value), setNote(null))} />
+      <input value={folder} placeholder="whole path, such as K:\Projects\new" onChange={(e) => (setFolder(e.target.value), setNote(null))} />
+      {note && <p className={(note.ok ? "muted" : "bad") + " small"}>{note.text}</p>}
+      <p className="muted small">The bridge refuses a drive root, your user folder, AppData and .ssh.</p>
+      <button disabled={busy} onClick={add}>Add</button>
+    </div>
   );
 }
 

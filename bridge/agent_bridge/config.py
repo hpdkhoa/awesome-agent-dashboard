@@ -21,6 +21,50 @@ def read_env(path: Path) -> dict[str, str]:
     return env
 
 
+def save_roots(roots: list[tuple[str, str]], env_path: Path | None = None) -> None:
+    """Writes WORK_ROOTS in .env from roots (step i4: a folder added on the page). Only that line changes; every other
+    line stays as it was. Written to a side file first, then swapped in, so a crash never leaves half a .env."""
+    path = env_path or REPO / ".env"
+    line = "WORK_ROOTS=" + ";".join(f"{n}={r}" for n, r in roots)
+    old = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+    hit = [i for i, x in enumerate(old) if x.strip().startswith("WORK_ROOTS=")]
+    new = [line if hit and i == hit[-1] else x for i, x in enumerate(old) if i not in hit[:-1]]
+    if not hit:
+        new.append(line)
+    side = path.with_name(path.name + ".new")
+    side.write_text("\n".join(new) + "\n", encoding="utf-8")
+    os.replace(side, path)
+
+
+def root_refusal(name: str, folder: str, roots: list[tuple[str, str]], home: Path | None = None) -> str | None:
+    """Why a folder can't be added from the page, or None (step i4, the owner's choice, 2026-11-12: "Bridge checks":
+    the folder exists, is not a drive root or the user folder, is not inside AppData or .ssh). A folder that holds the
+    user folder (C:\\Users) is refused as the user folder, since it would show it."""
+    import re
+
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 _-]{0,39}", name or ""):
+        return "A name is 1 to 40 letters, digits, spaces, - or _."
+    if any(n.lower() == name.lower() for n, _ in roots):
+        return f"The name {name} is already used."
+    if not folder or not os.path.isabs(folder):
+        return "Give the whole path, such as K:\\Projects\\new."
+    full = Path(os.path.realpath(folder))
+    if not full.is_dir():
+        return "No such folder on this PC."
+    if full.parent == full:
+        return "A drive root can't be a work folder."
+    home_n = str(Path(os.path.realpath(home or Path.home()))).replace("\\", "/").rstrip("/").lower()
+    norm = lambda p: str(p).replace("\\", "/").rstrip("/").lower()
+    if norm(full) == home_n or home_n.startswith(norm(full) + "/"):
+        return "Your user folder (or a folder holding it) can't be a work folder."
+    parts = [p.lower() for p in full.parts]
+    if "appdata" in parts or ".ssh" in parts:
+        return "A folder inside AppData or .ssh can't be a work folder."
+    if any(norm(full) == norm(os.path.realpath(r)) for _, r in roots):
+        return "That folder is already a work folder."
+    return None
+
+
 def data_dir() -> Path:
     """The bridge's own folder, outside the repo: %APPDATA% on Windows, ~/.config elsewhere."""
     base = os.environ.get("APPDATA") or os.path.join(Path.home(), ".config")

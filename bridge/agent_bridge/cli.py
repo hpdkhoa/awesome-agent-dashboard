@@ -139,7 +139,10 @@ def main(argv: list[str] | None = None) -> None:
             from .health import Health
 
             health = Health(REPO, data_dir(), cfg.machine, runs)
-            serve(Files([*cfg.roots, ("plans", str(plans))], firebase_verifier(cfg.project_id, cfg.owner_email)),
+            files = Files([*cfg.roots, ("plans", str(plans))], firebase_verifier(cfg.project_id, cfg.owner_email))
+            if runs is not None:  # step i4: a folder added on the page is served at once
+                runs.on_roots.append(lambda roots: [files.add_root(r) for _, r in roots])
+            serve(files,
                   list(cfg.site_origins), cfg.files_port, Texts(cfg.logs, data_dir() / "runs"), health=health)
             store.put_many({"meta/files": {"url": cfg.files_url}})
             print(f"file viewer on 127.0.0.1:{cfg.files_port} for {cfg.files_url}", flush=True)
