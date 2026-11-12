@@ -597,3 +597,61 @@ def test_run_cost_window_ends_when_claude_wrote_its_result(tmp_path):
     c = {"action": "message", "sessionId": "s1", "startedAt": "2026-11-12T02:00:00+00:00"}
     got = run_cost(logs, {"session_id": "s1"}, c, "2026-11-12T11:00:00+00:00", "2026-11-12T02:00:30+00:00")
     assert got == {"costUsd": 0.02, "costFrom": "log"}
+
+
+def test_a_restart_keeps_following_a_live_run(tmp_path, monkeypatch):
+    # i10, "Adopt live runs": the new bridge follows a run whose claude still lives; no lost, no second run
+    import subprocess
+    from datetime import datetime, timezone
+
+    import agent_bridge.runs as R
+
+    store, runs, work = setup(tmp_path, monkeypatch)
+    p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(1.5)"])
+    started = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    cmd(store, "c9", action="message", status="running", sessionId="s9", pid=p.pid, startedAt=started)
+    (tmp_path / "out").mkdir(exist_ok=True)
+    monkeypatch.setattr(R, "live_claude", lambda pid, st, slack=120.0: __import__("psutil").Process(pid) if pid == p.pid else None)
+    log = runs.forget_lost()
+    assert any("followed again" in x for x in log) and store.get("commands/c9")["status"] == "running"
+    p.wait()
+    (tmp_path / "out" / "c9.out").write_text(json.dumps({"result": "ok", "total_cost_usd": 0.1}), encoding="utf-8")
+    c = wait_done(runs, "c9", store)
+    assert c["status"] == "done"
+
+
+def test_live_claude_refuses_a_reused_pid():
+    import os
+    from agent_bridge.runs import live_claude
+
+    assert live_claude(os.getpid(), "2026-11-12T00:00:00+00:00") is None  # python, not claude, and not that start
+    assert live_claude(None, "") is None
+
+
+def test_a_restart_keeps_following_a_live_run(tmp_path, monkeypatch):
+    # i10, "Adopt live runs": the new bridge follows a run whose claude still lives; no lost, no second run
+    import subprocess
+    from datetime import datetime, timezone
+
+    import agent_bridge.runs as R
+
+    store, runs, work = setup(tmp_path, monkeypatch)
+    p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(1.5)"])
+    started = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    cmd(store, "c9", action="message", status="running", sessionId="s9", pid=p.pid, startedAt=started)
+    (tmp_path / "out").mkdir(exist_ok=True)
+    monkeypatch.setattr(R, "live_claude", lambda pid, st, slack=120.0: __import__("psutil").Process(pid) if pid == p.pid else None)
+    log = runs.forget_lost()
+    assert any("followed again" in x for x in log) and store.get("commands/c9")["status"] == "running"
+    p.wait()
+    (tmp_path / "out" / "c9.out").write_text(json.dumps({"result": "ok", "total_cost_usd": 0.1}), encoding="utf-8")
+    c = wait_done(runs, "c9", store)
+    assert c["status"] == "done"
+
+
+def test_live_claude_refuses_a_reused_pid():
+    import os
+    from agent_bridge.runs import live_claude
+
+    assert live_claude(os.getpid(), "2026-11-12T00:00:00+00:00") is None  # python, not claude, and not that start
+    assert live_claude(None, "") is None

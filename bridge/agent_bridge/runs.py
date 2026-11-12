@@ -318,6 +318,78 @@ class _Ended:
         return self.returncode
 
 
+class _Adopted:
+    """Stands in for the process of a run an earlier bridge started that still lives (step i10, the owner's choice,
+    2026-11-12: "Adopt live runs"). A restart used to mark it lost, and the plan chain then sent the same step again
+    into the same session: 3 claude processes on one session at once, measured 11:49 to 11:51."""
+
+    def __init__(self, proc):
+        self.proc, self.pid, self.returncode = proc, proc.pid, None
+
+    def poll(self):
+        if self.returncode is None:
+            try:
+                code = self.proc.wait(timeout=0)
+                self.returncode = 0 if code is None else code
+            except Exception as e:  # psutil.TimeoutExpired: still running
+                if type(e).__name__ != "TimeoutExpired":
+                    self.returncode = 1
+        return self.returncode
+
+
+def live_claude(pid, started: str, slack: float = 120.0):
+    """The claude process a run's pid names, if it still lives and is that run's own (a claude program created within
+    `slack` seconds of the run's startedAt, so a reused pid is never taken). None otherwise."""
+    if not pid or not started:
+        return None
+    try:
+        import psutil
+
+        p = psutil.Process(int(pid))
+        t = datetime.fromisoformat(started.replace("Z", "+00:00")).timestamp()
+        if "claude" in p.name().lower() and abs(p.create_time() - t) <= slack and p.is_running():
+            return p
+    except Exception:
+        return None
+    return None
+
+
+class _Adopted:
+    """Stands in for the process of a run an earlier bridge started that still lives (step i10, the owner's choice,
+    2026-11-12: "Adopt live runs"). A restart used to mark it lost, and the plan chain then sent the same step again
+    into the same session: 3 claude processes on one session at once, measured 11:49 to 11:51."""
+
+    def __init__(self, proc):
+        self.proc, self.pid, self.returncode = proc, proc.pid, None
+
+    def poll(self):
+        if self.returncode is None:
+            try:
+                code = self.proc.wait(timeout=0)
+                self.returncode = 0 if code is None else code
+            except Exception as e:  # psutil.TimeoutExpired: still running
+                if type(e).__name__ != "TimeoutExpired":
+                    self.returncode = 1
+        return self.returncode
+
+
+def live_claude(pid, started: str, slack: float = 120.0):
+    """The claude process a run's pid names, if it still lives and is that run's own (a claude program created within
+    `slack` seconds of the run's startedAt, so a reused pid is never taken). None otherwise."""
+    if not pid or not started:
+        return None
+    try:
+        import psutil
+
+        p = psutil.Process(int(pid))
+        t = datetime.fromisoformat(started.replace("Z", "+00:00")).timestamp()
+        if "claude" in p.name().lower() and abs(p.create_time() - t) <= slack and p.is_running():
+            return p
+    except Exception:
+        return None
+    return None
+
+
 def parse_result(out: str | None) -> dict:
     """claude's JSON result. An "is_error" result carries its message in "result", such as "Not logged in"."""
     try:
@@ -431,6 +503,20 @@ class Runs:
             if r.get("result") is not None or r.get("is_error"):
                 self.procs[c["id"]] = _Ended(1 if r.get("is_error") else 0)
                 log.append(self._finish(c["id"], self.procs[c["id"]]) + " (finished from its .out after a bridge restart)")
+                continue
+            live = live_claude(c.get("pid"), c.get("startedAt", "")) if c.get("action") in ("start", "message") else None
+            if live is not None:  # i10: keep following it; it ends through _finish like a run this bridge started
+                self.procs[c["id"]] = _Adopted(live)
+                if c.get("sessionId"):
+                    self.sid_of[c["id"]] = c["sessionId"]
+                log.append(f"{c['id']}: still running after a bridge restart (pid {live.pid}), followed again")
+                continue
+            live = live_claude(c.get("pid"), c.get("startedAt", "")) if c.get("action") in ("start", "message") else None
+            if live is not None:  # i10: keep following it; it ends through _finish like a run this bridge started
+                self.procs[c["id"]] = _Adopted(live)
+                if c.get("sessionId"):
+                    self.sid_of[c["id"]] = c["sessionId"]
+                log.append(f"{c['id']}: still running after a bridge restart (pid {live.pid}), followed again")
                 continue
             error = "The bridge restarted while this run was going; its result is in the session log."
             self.store.update(f"commands/{c['id']}", {"status": "lost", "endedAt": now_iso(), "error": error})
