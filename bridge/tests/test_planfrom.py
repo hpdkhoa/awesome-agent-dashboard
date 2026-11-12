@@ -138,7 +138,9 @@ def test_a_qa_message_never_changes_the_plan_until_the_owner_confirms_a_switch()
 
 def test_a_plan_message_kind_goes_as_a_system_prompt_and_qa_cannot_edit():
     c = message_command("claude", "add a test", "sid", "manual", "step")
-    assert c[2] == "add a test" and "part 6" in c[c.index("--append-system-prompt") + 1]
+    # the owner's pick, 2026-11-12, "Scope in the message text": a resumed session never takes a new system prompt
+    assert c[2].endswith("\n\nadd a test") and "part 6" in c[2] and c[2].startswith("<run-scope>")
+    assert "part 6" not in c[c.index("--append-system-prompt") + 1]
     qa = message_command("claude", "why?", "sid", "manual", "qa")
     assert qa[qa.index("--disallowedTools") + 1] == "Edit,Write,NotebookEdit"
     from agent_bridge.planfrom import STYLE
@@ -303,12 +305,16 @@ def test_the_cite_holds_the_owners_words_and_part_1_says_what_the_plan_is_for():
 
 def test_a_run_step_message_carries_the_step_scope():
     c = message_command("claude", "Work on step s2: x. Report it with step_update.", "sid", "manual", "", "s2")
-    scope = c[c.index("--append-system-prompt") + 1]
+    # the scope is in the message itself (the owner's pick, 2026-11-12: "Scope in the message text"): a resumed
+    # session never takes a new appended system prompt, so step i8 once ran under "step i7 only"
+    scope = c[2]
     assert "only that step" in scope and "step s2" in scope and "inbox_ask" in scope and "never done in this run" in scope
+    assert "replaces any earlier one" in scope and scope.endswith("Work on step s2: x. Report it with step_update.")
+    assert "only that step" not in c[c.index("--append-system-prompt") + 1]
     plain = message_command("claude", "hi", "sid")
-    assert "only that step" not in plain[plain.index("--append-system-prompt") + 1]  # no scope without a step
+    assert plain[2] == "hi"  # no scope without a step
     k = message_command("claude", "why?", "sid", "manual", "qa", "s2")  # a kind keeps its own prompt
-    assert "Q&A" in k[k.index("--append-system-prompt") + 1]
+    assert "Q&A" in k[2] and "only that step" not in k[2]
 
 
 def test_the_plans_own_parts_are_checked_against_the_record(tmp_path):

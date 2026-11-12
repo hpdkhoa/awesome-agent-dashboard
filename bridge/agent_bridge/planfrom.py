@@ -120,17 +120,26 @@ STYLE = (
 
 
 def system_args(kind: str = "", step: str = "") -> list[str]:
-    """One appended system prompt for a run: the owner's reply style, then a plan message's kind prompt or a Run
-    step's scope (a run has at most one appended system prompt)."""
-    text = STYLE
-    extra: list[str] = []
+    """The appended system prompt holds only the owner's reply style (the owner's pick, 2026-11-12: "Scope in the
+    message text"): a resumed session keeps the system prompt of its first run and never takes a new one, so a Run
+    step's scope or a kind prompt there went stale (step i8 ran under "step i7 only"). Those go in the message
+    (scoped). A Q&A message still runs without edit tools: a command-line flag, read by every run."""
+    extra = ["--disallowedTools", NO_EDITS] if kind == "qa" else []
+    return ["--append-system-prompt", STYLE, *extra]
+
+
+def scope_text(kind: str = "", step: str = "") -> str:
+    """This message's own scope: a plan message's kind prompt, or a Run step's scope."""
     if kind in KIND_PROMPTS:
-        text += "\n\n" + KIND_PROMPTS[kind] + EXAMPLES
-        if kind == "qa":
-            extra = ["--disallowedTools", NO_EDITS]
-    elif step:
-        text += "\n\n" + STEP_SCOPE.format(step=step)
-    return ["--append-system-prompt", text, *extra]
+        return KIND_PROMPTS[kind] + EXAMPLES
+    return STEP_SCOPE.format(step=step) if step else ""
+
+
+def scoped(prompt: str, kind: str = "", step: str = "") -> str:
+    """The message with its scope on top, marked so it reads apart from the owner's words; it replaces any earlier
+    message's scope, so an old run's scope never holds the next one."""
+    s = scope_text(kind, step)
+    return f"<run-scope>\nThis message's scope replaces any earlier one.\n{s}\n</run-scope>\n\n{prompt}" if s else prompt
 
 def step_args(step_id: str) -> list[str]:
     """A Run step message: the scope goes as an appended system prompt."""

@@ -488,7 +488,11 @@ def test_every_run_carries_the_owners_reply_style_once():
         assert c.count("--append-system-prompt") == 1
         text = c[c.index("--append-system-prompt") + 1]
         assert text.startswith(STYLE)
-    assert "step s3" in message_command("claude", "hi", "sid", step="s3")[-1] or "step s3" in " ".join(message_command("claude", "hi", "sid", step="s3"))
+    # the scope rides in the message (the owner's pick, 2026-11-12: "Scope in the message text"), never the system prompt
+    m = message_command("claude", "hi", "sid", step="s3")
+    assert "step s3" in m[2] and m[2].endswith("\n\nhi") and "step s3" not in m[m.index("--append-system-prompt") + 1]
+    assert start_command("claude", "x", "sid", step="s3")[2].startswith("<run-scope>")
+    assert message_command("claude", "hi", "sid")[2] == "hi"
     qa = message_command("claude", "hi", "sid", kind="qa")
     assert "--disallowedTools" in qa and "Ask about the plan" in " ".join(qa) or "--disallowedTools" in qa
 

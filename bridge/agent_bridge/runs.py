@@ -68,7 +68,7 @@ from .logs import window_cost
 from .inbox import KINDS, PLAN_FORMAT, format_of, now_iso
 from .chain import Chains
 from .stepcheck import StepChecks
-from .planfrom import NO_EDITS, mark_quotes, note_command, plan_prompt, system_args
+from .planfrom import NO_EDITS, mark_quotes, note_command, plan_prompt, scoped, system_args
 from .redact import redact
 
 APPROVAL_TOOL = "mcp__agent-inbox__inbox_approve"
@@ -267,7 +267,7 @@ def start_command(claude: str, prompt: str, session_id: str, mode: str = "manual
                   keep: bool = True, kind: str = "", step: str = "") -> list[str]:
     """keep=False: a one-off job whose session is never saved (--no-session-persistence), so it leaves no log and no
     session on the dashboard (the owner's words, 2026-11-10: "A "don't keep the session" tick on Start")."""
-    return [claude, "-p", prompt, *STREAM, "--session-id", session_id,
+    return [claude, "-p", scoped(prompt, kind, step), *STREAM, "--session-id", session_id,
             "--permission-prompt-tool", APPROVAL_TOOL, *mode_args(mode), *model_args(model, effort),
             *([] if keep else ["--no-session-persistence"]), *system_args(kind, step)]
 
@@ -298,7 +298,7 @@ def message_command(claude: str, message: str, session_id: str, mode: str = "man
                     step: str = "", model: str = "", effort: str = "") -> list[str]:
     """kind: a plan message's kind (qa, goal, step, rule, lesson); step: a Run step's step id. Either goes as an
     appended system prompt; a Run step has no kind."""
-    return [claude, "-p", message, *STREAM, "--resume", session_id,
+    return [claude, "-p", scoped(message, kind, step), *STREAM, "--resume", session_id,
             "--permission-prompt-tool", APPROVAL_TOOL, *mode_args(mode), *system_args(kind, step),
             *model_args(model, effort)]
 
