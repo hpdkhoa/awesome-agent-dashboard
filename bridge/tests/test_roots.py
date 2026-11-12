@@ -48,14 +48,15 @@ def test_refusals(base):
 
 def test_save_roots_changes_only_that_line(tmp_path):
     env = tmp_path / ".env"
-    env.write_text("A=1\n# note\nWORK_ROOTS=labs=K:\\x\nSECRET=s\n", encoding="utf-8")
-    save_roots([("labs", "K:\\x"), ("new", "K:\\y z")], env)
-    assert env.read_text(encoding="utf-8") == "A=1\n# note\nWORK_ROOTS=labs=K:\\x;new=K:\\y z\nSECRET=s\n"
-    assert read_env(env)["WORK_ROOTS"] == "labs=K:\\x;new=K:\\y z"
+    for eol in ("\n", "\r\n"):  # the file's own line ends stay (the live .env is CRLF)
+        env.write_bytes(eol.join(["A=1", "# note", "WORK_ROOTS=labs=K:\\x", "SECRET=s", ""]).encode())
+        save_roots([("labs", "K:\\x"), ("new", "K:\\y z")], env)
+        assert env.read_bytes().decode() == eol.join(["A=1", "# note", "WORK_ROOTS=labs=K:\\x;new=K:\\y z", "SECRET=s", ""])
+        assert read_env(env)["WORK_ROOTS"] == "labs=K:\\x;new=K:\\y z"
     bare = tmp_path / "bare.env"
-    bare.write_text("A=1\n", encoding="utf-8")
+    bare.write_bytes(b"A=1\n")
     save_roots([("n", "K:\\q")], bare)
-    assert bare.read_text(encoding="utf-8") == "A=1\nWORK_ROOTS=n=K:\\q\n"
+    assert bare.read_bytes() == b"A=1\nWORK_ROOTS=n=K:\\q\n"
 
 
 def test_added_folder_is_usable_at_once_with_no_restart(base):

@@ -26,13 +26,16 @@ def save_roots(roots: list[tuple[str, str]], env_path: Path | None = None) -> No
     line stays as it was. Written to a side file first, then swapped in, so a crash never leaves half a .env."""
     path = env_path or REPO / ".env"
     line = "WORK_ROOTS=" + ";".join(f"{n}={r}" for n, r in roots)
-    old = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+    raw = path.read_bytes().decode("utf-8") if path.exists() else ""
+    eol = "\r\n" if "\r\n" in raw else "\n"  # the file's own line ends and last line end are kept
+    old = raw.splitlines()
     hit = [i for i, x in enumerate(old) if x.strip().startswith("WORK_ROOTS=")]
     new = [line if hit and i == hit[-1] else x for i, x in enumerate(old) if i not in hit[:-1]]
     if not hit:
         new.append(line)
     side = path.with_name(path.name + ".new")
-    side.write_text("\n".join(new) + "\n", encoding="utf-8")
+    end = eol if not raw or raw.endswith(("\n", "\r")) or not hit else ""
+    side.write_bytes((eol.join(new) + end).encode("utf-8"))
     os.replace(side, path)
 
 
