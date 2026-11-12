@@ -75,6 +75,7 @@ CONTINUE_NOTE = ("The last run of this message stopped at the usage limit. Go on
                  "stopped; do not redo what is already done. The message was:\n\n")
 MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
 RESETS = re.compile(r"resets\s+(?:([A-Za-z]{3})[a-z]*\s+(\d{1,2}),?\s+(?:at\s+)?)?(\d{1,2})(?::(\d{2}))?\s*([ap]m)", re.I)
+CLOSE_PUSH_SECONDS = 180  # i9: a message waiting this long for a session open in the app pushes the owner once
 SCAN_SECONDS = 3 # one process scan serves every waiting message and answer of one bridge round
 TAIL_BYTES = 256 * 1024  # the end of a session log: enough for its last turn's closing lines
 SKIP = {"queue-operation", "frame-link", "api-request", "api-request-shape", "api-request-blob", "attachment",
@@ -818,6 +819,8 @@ class Runs:
             if why == "app" and self._ask_archive(c, sid, cwd):
                 self.store.update(path, {"archive": "asked"})
                 return f"{c['id']}: waited 1 minute for session {sid}, the archiver is asked to free it"
+            if why == "app" and self._push_close(c, sid):
+                return f"{c['id']}: waited 3 minutes for session {sid}, the owner is pushed to close it in the app"
             return None
         mode, kind = self.mode(), c.get("kind") if c.get("kind") in KINDS else ""
         if c.get("generate"):
@@ -884,6 +887,26 @@ class Runs:
         logs = list(self.logs.glob(f"*/{sid}.jsonl")) if self.logs and self.logs.is_dir() else []
         last = datetime.fromtimestamp(logs[0].stat().st_mtime, timezone.utc).isoformat() if logs else ""
         return self.archiver.maybe_ask(c["id"], sid, cwd, since, last)
+
+    def _push_close(self, c: dict, sid: str) -> bool:
+        """Step i9, the owner's choice (2026-11-10): "Keep waiting, push me". After CLOSE_PUSH_SECONDS waiting for a
+        session open in the app that the archiver has not freed (not running, refused, or still asked), one push asks
+        the owner to close that session in the app. The message keeps waiting and goes once the session is closed; no
+        fresh session is started for it."""
+        if c.get("closePushed") or self.push is None:
+            return False
+        try:
+            since = datetime.fromisoformat(str(c.get("waitingSince"))).timestamp()
+        except ValueError:
+            return False
+        if time.time() - since < CLOSE_PUSH_SECONDS or self.archiver.of(c["id"]) == "archived":
+            return False
+        title = ((self.store.get(f"sessions/{sid}") or {}).get("title") or sid[:8])[:80]
+        n = self.push.notify("A message waits for a session open in the app",
+                             f"Close \"{title}\" in the app; the message goes as soon as it is closed.",
+                             f"/?run={c['id']}", f"close-{c['id']}")
+        self.store.update(f"commands/{c['id']}", {"closePushed": now_iso(), "closePushDevices": n})
+        return True
 
     def _archiver_reports(self) -> list[str]:
         """The archiver's reports go on their messages, before the messages are looked at."""

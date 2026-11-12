@@ -655,3 +655,35 @@ def test_live_claude_refuses_a_reused_pid():
 
     assert live_claude(os.getpid(), "2026-11-12T00:00:00+00:00") is None  # python, not claude, and not that start
     assert live_claude(None, "") is None
+
+
+class _Push:
+    def __init__(self):
+        self.sent = []
+
+    def notify(self, title, body, url="/", tag=""):
+        self.sent.append((title, body, url, tag))
+        return 1
+
+
+def test_a_message_waiting_3_minutes_for_an_app_session_pushes_once(tmp_path, monkeypatch):
+    # i9, "Keep waiting, push me": one push after 3 minutes, the message keeps waiting and goes when the session closes
+    from datetime import datetime, timedelta, timezone
+
+    store, runs, work = setup(tmp_path, monkeypatch)
+    runs.push = _Push()
+    OPEN[:] = [("app", str(work))]
+    (tmp_path / "logs" / "proj" / "app.jsonl").write_text(line("assistant", "claude-desktop", message={"stop_reason": "end_turn"}))
+    store.put_many({"sessions/app": {"title": "Zombie Coop FPS"}})
+    cmd(store, "m1", action="message", sessionId="app", cwd=str(work), prompt="hi")
+    runs.step()
+    assert store.get("commands/m1")["status"] == "waiting" and runs.push.sent == []
+    old = (datetime.now(timezone.utc) - timedelta(seconds=200)).isoformat(timespec="seconds")
+    store.update("commands/m1", {"waitingSince": old})
+    runs.step()
+    runs.step()
+    c = store.get("commands/m1")
+    assert c["status"] == "waiting" and c["closePushed"] and len(runs.push.sent) == 1  # once, still waiting
+    assert "Zombie Coop FPS" in runs.push.sent[0][1] and runs.push.sent[0][2] == "/?run=m1"
+    OPEN.clear()  # the owner closed it in the app
+    assert wait_done(runs, "m1", store)["status"] == "done" and len(runs.push.sent) == 2  # the second is the run's end
