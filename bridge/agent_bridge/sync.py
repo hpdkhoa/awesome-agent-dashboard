@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -25,11 +26,38 @@ class State:
             raw = {}
         self.files: dict[str, dict] = raw.get("files", {})
         self.written: dict[str, str] = raw.get("written", {})
+        self.held: dict[str, dict] = raw.get("held", {})  # per session document: tokens, lastAt and when it was last written
 
     def save(self) -> None:
         tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"version": self.VERSION, "files": self.files, "written": self.written}), encoding="utf-8")
+        tmp.write_text(json.dumps({"version": self.VERSION, "files": self.files, "written": self.written, "held": self.held}), encoding="utf-8")
         os.replace(tmp, self.path)
+
+
+# A session document mid-work is written only when it moved enough (the owner's words, 2026-11-13: "Write a session
+# document only when its tokens moved by more than a step (say 50k) or its lastAt by more than 5 minutes: fewer writes
+# while a session is mid-work, exact at rest"): tokens 50k or more, lastAt 5 min or more, or 5 min since its last
+# write, so a session that went quiet ends with its exact numbers.
+TOKEN_STEP = 50_000
+REST_SECONDS = 300
+
+
+def _ts(iso: str) -> float:
+    try:
+        return datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return 0.0
+
+
+def session_moved(prev: dict | None, doc: dict, now: float) -> bool:
+    if not prev:
+        return True
+    tokens = int((doc.get("tokens") or {}).get("total") or 0)
+    if abs(tokens - int(prev.get("tokens") or 0)) >= TOKEN_STEP:
+        return True
+    if abs(_ts(doc.get("lastAt") or "") - _ts(prev.get("lastAt") or "")) >= REST_SECONDS:
+        return True
+    return now - float(prev.get("wroteAt") or 0) >= REST_SECONDS
 
 
 def read_all(cfg: Config, state: State, days: float) -> dict[str, list[FileState]]:
@@ -63,12 +91,16 @@ def documents(cfg: Config, sessions: dict[str, list[FileState]], days: float) ->
     return out, now
 
 
-def changed_only(state: State, docs: dict[str, dict]) -> dict[str, dict]:
+def changed_only(state: State, docs: dict[str, dict], now: float | None = None) -> dict[str, dict]:
+    now = time.time() if now is None else now
     out = {}
     for path, d in docs.items():
         h = hashlib.sha256(json.dumps(d, sort_keys=True).encode()).hexdigest()
-        if state.written.get(path) != h:
-            out[path] = (d, h)
+        if state.written.get(path) == h:
+            continue
+        if path.startswith("sessions/") and not session_moved(state.held.get(path), d, now):
+            continue  # changed, but not enough yet: it goes with the next step, or at rest
+        out[path] = (d, h)
     return out
 
 
@@ -91,11 +123,16 @@ def run(cfg: Config, days: float, store=None, dry_run: bool = False, deleted=lam
     todo = changed_only(state, docs)
     if todo and store is not None:
         gone = deleted_paths(store, deleted())
+        for p in [p for p in todo if p in gone]:
+            state.written.pop(p, None)  # forgotten: when the owner clears its tombstone it is written again at once
+            state.held.pop(p, None)
         todo = {p: v for p, v in todo.items() if p not in gone}
     if not dry_run and todo:
         store.put_many({p: {**d, "syncedAt": now} for p, (d, _) in todo.items()})
-        for p, (_, h) in todo.items():
+        for p, (d, h) in todo.items():
             state.written[p] = h
+            if p.startswith("sessions/"):
+                state.held[p] = {"tokens": int((d.get("tokens") or {}).get("total") or 0), "lastAt": d.get("lastAt") or "", "wroteAt": time.time()}
     state.save()
     totals = {"sessions": sum(1 for p in docs if p.startswith("sessions/")), "written": 0 if dry_run else len(todo),
               "toWrite": len(todo), "machineWritten": not dry_run and f"machines/{cfg.machine}" in todo}

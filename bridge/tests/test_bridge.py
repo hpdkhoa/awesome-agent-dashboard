@@ -161,3 +161,19 @@ def test_dashboard_messages_count_as_prompts(tmp_path):
     write(p, [sdk, tool, assistant("m1", T2, text="done")])
     st = read_lines(p, FileState())
     assert st.prompts == 1 and st.first_prompt == "do it"
+
+
+def test_a_session_document_mid_work_waits_for_a_step_or_rest(tmp_path):
+    from agent_bridge.sync import State, changed_only
+
+    st = State(tmp_path / "state.json")
+    doc = lambda tokens, last: {"id": "s", "tokens": {"total": tokens}, "lastAt": last}
+    first = changed_only(st, {"sessions/s": doc(1000, "2026-11-13T10:00:00Z")}, now=1000.0)
+    assert "sessions/s" in first  # never written: goes
+    st.written["sessions/s"] = first["sessions/s"][1]
+    st.held["sessions/s"] = {"tokens": 1000, "lastAt": "2026-11-13T10:00:00Z", "wroteAt": 1000.0}
+    assert changed_only(st, {"sessions/s": doc(20000, "2026-11-13T10:01:00Z")}, now=1100.0) == {}  # 19k and 1 min: waits
+    assert "sessions/s" in changed_only(st, {"sessions/s": doc(60000, "2026-11-13T10:01:00Z")}, now=1100.0)  # 59k: a step
+    assert "sessions/s" in changed_only(st, {"sessions/s": doc(20000, "2026-11-13T10:06:00Z")}, now=1100.0)  # 6 min of lastAt
+    assert "sessions/s" in changed_only(st, {"sessions/s": doc(20000, "2026-11-13T10:01:00Z")}, now=1400.0)  # 5 min since the write: exact at rest
+    assert "usage/2026-11-13" in changed_only(st, {"usage/2026-11-13": {"day": "2026-11-13", "total": 5}}, now=1100.0)  # other documents: as before
