@@ -23,7 +23,9 @@ from pathlib import Path
 
 TASK = "AgentDashboardBridge"
 STAMP = re.compile(r"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d) (.*)$")
-ERROR = re.compile(r"failed|error|traceback|exception", re.I)
+# a bridge error line: the watch loop's "failed, retrying: ..." or a Python error name; a run or chain line that
+# reports a failed step is a result, not a bridge error
+ERROR = re.compile(r"^failed, retrying|\b\w*(?:Error|Exception)\b|^Traceback")
 TAIL_BYTES = 512 * 1024
 ERROR_HOURS = 24
 

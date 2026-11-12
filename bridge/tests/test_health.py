@@ -44,7 +44,8 @@ def test_log_errors_counts_the_last_day_only(tmp_path):
     old = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now - 2 * 86400))
     new = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now - 60))
     (tmp_path / "bridge.log").write_text(
-        f"{old} failed, retrying: old\n{new} sessions 94, tokens 1\n{new} failed, retrying: 429 quota\n", encoding="utf-8")
+        f"{old} failed, retrying: old\n{new} sessions 94, tokens 1\n{new} failed, retrying: 429 quota\n"
+        f"{new} run r1: done; chain p1: stopped, step i9: the session reported it failed\n", encoding="utf-8")
     e = log_errors(tmp_path / "bridge.log", now)
     assert e["count"] == 1 and e["last"][0]["line"] == "failed, retrying: 429 quota"
 
