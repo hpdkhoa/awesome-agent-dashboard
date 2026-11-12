@@ -82,3 +82,29 @@ html,body{margin:0;background:transparent;overflow:hidden;font-family:Tahoma,Ver
 .link{position:absolute;height:2px;background:linear-gradient(90deg,var(--green),transparent);box-shadow:0 0 6px var(--green);display:none}
 .boxopen .link{display:block}
 #wrap{display:none}.boxopen #wrap{display:block}
+/* p15 button 2 RATES and the rate box (approved preview rates-preview.png): gold ring, yellow box */
+.btn.gold{border-color:var(--yellow);color:var(--yellow);box-shadow:0 0 10px var(--yellow)}
+.btn.gold .dong{font:bold 22px Tahoma;text-decoration:underline;text-underline-offset:3px;line-height:1}
+#b2:hover,#b2.on{border-color:var(--yellow);color:var(--yellow);box-shadow:0 0 16px var(--yellow),0 0 4px var(--yellow) inset;background:#1a1600}
+#b2 .tag{background:var(--yellow)}
+#b2:hover .tag{opacity:1}
+.ratesopen #b2 .tag{display:none}
+.link.gold{background:linear-gradient(90deg,var(--yellow),transparent);box-shadow:0 0 6px var(--yellow)}
+.ratesopen #link2{display:block}
+#rwrap{display:none}.ratesopen #rwrap{display:block}
+.wrap.rates{--c:var(--yellow)}
+#rbox{width:316px;cursor:move}
+.rhead{display:flex;justify-content:flex-end;gap:0;font-size:10px;color:var(--dim)}
+.rhead span{width:86px;text-align:right}
+.rsec{font-size:11px;color:#9ab;letter-spacing:1px;border-bottom:1px solid #2a3a44;margin:6px 0 4px;padding-bottom:1px}
+.rrow{display:flex;align-items:flex-start;white-space:nowrap}
+.rrow .n{flex:1;color:#dfe;min-width:0}
+.rrow .c{width:86px;text-align:right}
+.rrow .c b{display:block;font-weight:normal;color:var(--blue)}
+.rrow .c i{display:block;font-style:normal;font-size:11px}
+.up{color:var(--green)}.dn{color:var(--pink)}.eq{color:#8a9aa0}
+.rnote{font-size:10px;color:#7a8a90;margin-top:6px;white-space:normal;line-height:1.4}
+.rerr{font-size:11px;color:var(--orange);white-space:normal;line-height:1.4}
+.rfoot{display:flex;justify-content:space-between;align-items:center;margin-top:8px;font-size:11px;color:#9ab}
+#rsync{font:12px Tahoma;letter-spacing:1px;color:var(--green);background:transparent;border:1px solid var(--green);padding:3px 14px;cursor:pointer}
+#rsync:disabled{color:#6a7a80;border-color:#4a5a60;cursor:default}

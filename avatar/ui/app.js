@@ -72,7 +72,7 @@ function render(s, offline) {
 // window grows and moves around it so every layer fits.
 const R = 92, ANG = [-78, -28, 22, 72], GLOW = 14;
 const BOX_X = Math.max(...ANG.map((a) => R * Math.cos(a * Math.PI / 180))) + 26 + 18;  // right of every button
-let layer = "closed";      // closed | menu | box
+let layer = "closed";      // closed | menu | box | rates (p15)
 let shown = "closed";      // the layer the window is sized for (it stays big while buttons fly back)
 let badgeAt = null;        // the badge centre in window CSS px (unzoomed), from the last layout
 let badgePx = null;        // the same in device px (zoom and Windows text size applied)
@@ -84,9 +84,13 @@ function rects(state) {
   if (state === "closed") return r;
   const b1 = [R * Math.cos(ANG[0] * Math.PI / 180), R * Math.sin(ANG[0] * Math.PI / 180)];
   ANG.forEach((a) => { const x = R * Math.cos(a * Math.PI / 180), y = R * Math.sin(a * Math.PI / 180); r.push([x - 26, y - 26, x + 26, y + 26]); });
-  if (state === "menu") r.push([b1[0] + 30, b1[1] - 14, b1[0] + 130, b1[1] + 14]);  // the STATUS label on hover
-  if (state === "box") {
-    const w = $("wrap").getBoundingClientRect(), z = zoom || 1;
+  const b2 = [R * Math.cos(ANG[1] * Math.PI / 180), R * Math.sin(ANG[1] * Math.PI / 180)];
+  if (state === "menu") {
+    r.push([b1[0] + 30, b1[1] - 14, b1[0] + 130, b1[1] + 14]);  // the STATUS label on hover
+    r.push([b2[0] + 30, b2[1] - 14, b2[0] + 120, b2[1] + 14]);  // the RATES label on hover (p15)
+  }
+  if (state === "box" || state === "rates") {
+    const w = $(state === "box" ? "wrap" : "rwrap").getBoundingClientRect(), z = zoom || 1;
     const x0 = BOX_X, y0 = b1[1] - 26 - 14;
     r.push([x0, y0, x0 + w.width / z, y0 + w.height / z]);
   }
@@ -108,6 +112,10 @@ async function fit() {
   const b1x = R * Math.cos(ANG[0] * Math.PI / 180), b1y = R * Math.sin(ANG[0] * Math.PI / 180);
   place($("wrap"), cx + BOX_X, cy + b1y - 26 - 14);
   place($("link"), cx + b1x + 26, cy + b1y - 1); $("link").style.width = `${BOX_X - b1x - 26 + 18}px`;
+  // p15: the rate box opens in the same place, its link from button 2
+  const b2x = R * Math.cos(ANG[1] * Math.PI / 180), b2y = R * Math.sin(ANG[1] * Math.PI / 180);
+  place($("rwrap"), cx + BOX_X, cy + b1y - 26 - 14);
+  place($("link2"), cx + b2x + 26, cy + b2y - 1); $("link2").style.width = `${BOX_X - b2x - 26 + 18}px`;
   setFly(layer !== "closed", true);
   const dpr = window.devicePixelRatio || 1, z = zoom || 1;
   // the badge's place in the window in device px; the window moves by its change, so the badge stays still on
@@ -140,8 +148,11 @@ async function go(next) {
   const was = layer;
   layer = next;
   document.body.classList.toggle("boxopen", next === "box");
+  document.body.classList.toggle("ratesopen", next === "rates");
   $("b1").classList.toggle("on", next === "box");
+  $("b2").classList.toggle("on", next === "rates");
   if (next === "box") load();
+  if (next === "rates") ratesOn(); else if (was === "rates") ratesOff();
   if (next === "closed") {           // fly back first, then shrink
     setFly(false, false);
     await new Promise((r) => setTimeout(r, 360));
@@ -283,6 +294,8 @@ document.addEventListener("mouseup", (e) => {
   const t = press.t; press = null;
   if (t.closest("#badge")) go(layer === "closed" ? "menu" : "closed");
   else if (t.closest("#b1")) go(layer === "box" ? "menu" : "box");
+  else if (t.closest("#rsync")) sync();
+  else if (t.closest("#b2")) go(layer === "rates" ? "menu" : "rates");
 });
 document.addEventListener("contextmenu", (e) => {
   e.preventDefault();
@@ -335,3 +348,120 @@ setInterval(poll, 5000);
 // p8 fix 3: CPU, RAM and GPU are read only while the box is open (nobody sees them otherwise)
 // p14 F2 (owner pick 2026-11-12): CPU/RAM/GPU every 5 s, not 2 s (box open measured 3.5-6.2% of one core in p13)
 setInterval(() => { if (layer === "box") load(); }, 5000);
+
+// Button 2: the rate box (plan b73e97ad p15). The owner's words (2026-11-11): "I want the second button is my rate board,
+// only need gold bar (SJC), USD (vietcombank and hsbc), change rate calculated from last sync and a sync button".
+// Picks: SJC from "giavang.net"; the change from "The sync before" (the newest saved record minus the one before it,
+// same source). Sync asks only these 3 sources through the dashboard Worker (main.rs price) and saves them as the Rates
+// tab does (web/src/moneyData.ts): a source unchanged since its last record writes nothing; at most one sync every 5
+// minutes (the owner's rule, 2026-11-01: "the sync must constraint the 5 mins between each sync so not spam my
+// firestore"); one error line per source (the owner's rule). The records are listened to only while the box is open.
+const GAP_MS = 5 * 60 * 1000;
+const RSRC = [
+  { id: "giavang", kind: "gold", label: "SJC", short: "SJC", path: "/api/gold/giavang" },
+  { id: "vcb", kind: "fx", label: "Vietcombank", short: "VCB", path: "/api/fx/vcb" },
+  { id: "hsbc", kind: "fx", label: "HSBC", short: "HSBC", path: "/api/fx/hsbc" },
+];
+let rfx = null, rgold = null, rerrs = {}, rbusy = false, rtick = null, rHtml = null, rFirebaseErr = "";
+const fxOf = (d) => d.sourceId ?? "vcb", goldOf = (d) => d.sourceId ?? "typed";
+const savedAt = (d) => d.savedAt || d.enteredAt || "";
+// the newest two records of one source, newest first
+function pair(src) {
+  const list = src.kind === "fx" ? (rfx || []).filter((d) => fxOf(d) === src.id) : (rgold || []).filter((d) => goldOf(d) === src.id);
+  return list.sort((a, b) => savedAt(b).localeCompare(savedAt(a))).slice(0, 2);
+}
+// buy and sell of one record: USD at Vietcombank cash buy (else transfer), as the Rates tab values it; gold per lượng
+function bs(src, d) {
+  if (!d) return null;
+  if (src.kind === "gold") return { buy: d.buy, sell: d.sell };
+  const u = (d.rates || {}).USD || {};
+  return { buy: u.buy ?? u.transfer ?? null, sell: u.sell ?? null };
+}
+const nf0 = (n) => Math.round(n).toLocaleString("en-US");
+const tr = (n) => (n / 1e6).toFixed(1);            // triệu đồng
+function cell(src, now, prev) {
+  if (now == null) return `<b>—</b><i class="eq">&nbsp;</i>`;
+  const val = src.kind === "gold" ? tr(now) : nf0(now);
+  if (prev == null) return `<b>${val}</b><i class="eq">no sync before</i>`;
+  const d = now - prev, pc = prev ? (d / prev) * 100 : 0;
+  const amt = src.kind === "gold" ? (Math.abs(d) / 1e6).toFixed(1) : nf0(Math.abs(d));
+  const [cls, ar] = d > 0 ? ["up", "▲"] : d < 0 ? ["dn", "▼"] : ["eq", "="];
+  return `<b>${val}</b><i class="${cls}">${ar} ${amt} · ${d >= 0 ? "+" : "−"}${Math.abs(pc).toFixed(2)}%</i>`;
+}
+const hm = (iso) => (iso ? new Date(iso).toTimeString().slice(0, 5) : "—");
+const dayOr = (iso) => {
+  if (!iso) return "—";
+  const d = new Date(iso), t = new Date();
+  // today: the time; an earlier day: its date and time (two syncs on one earlier day stay apart)
+  return d.toDateString() === t.toDateString() ? hm(iso) : `${String(d.getDate()).padStart(2, "0")}-${String(d.getMonth() + 1).padStart(2, "0")} ${hm(iso)}`;
+};
+function lastSyncAt() {
+  // the newest saved record of the 3 sources, or this avatar's own last try (a failed sync counts too)
+  const own = Number(localStorage.getItem("ratesLastSync")) || 0;
+  const rec = Math.max(0, ...RSRC.map((s) => Date.parse(savedAt(pair(s)[0] || {})) || 0));
+  return Math.max(own, rec);
+}
+function renderRates() {
+  if (layer !== "rates") return;
+  setText($("rclock"), new Date().toTimeString().slice(0, 8));
+  let h = "";
+  if (!window.FB || !FB.signedIn()) {
+    h = `<div class="rerr">${esc(rFirebaseErr || "Not signed in: right click > Sign in with Google to see your saved rates.")}</div>`;
+  } else if (!rfx || !rgold) {
+    h = `<div class="rnote">loading your saved rates…</div>`;
+  } else {
+    h += `<div class="rhead"><span>buy</span><span>sell</span></div>`;
+    const sec = (t) => `<div class="rsec">${t}</div>`;
+    const line = (src) => {
+      const [a, b] = pair(src), x = bs(src, a), y = bs(src, b);
+      return `<div class="rrow"><span class="n">${esc(src.label)}</span><span class="c">${cell(src, x && x.buy, y && y.buy)}</span><span class="c">${cell(src, x && x.sell, y && y.sell)}</span></div>`;
+    };
+    h += sec("GOLD BAR SJC · triệu đ / lượng") + line(RSRC[0]);
+    h += sec("USD · đ") + line(RSRC[1]) + line(RSRC[2]);
+    for (const s of RSRC) if (rerrs[s.id]) h += `<div class="rerr">${esc(rerrs[s.id])}</div>`;
+    const spans = RSRC.map((s) => { const [a, b] = pair(s); return `${s.short} ${b ? dayOr(savedAt(b)) : "—"} → ${a ? dayOr(savedAt(a)) : "—"}`; });
+    h += `<div class="rnote">▲▼ = change from the sync before (${esc(spans.join(", "))})</div>`;
+  }
+  if (h !== rHtml) { $("rrows").innerHTML = rHtml = h; fit(); }
+  // the Sync button: greyed with a countdown inside the 5-minute gap
+  const wait = lastSyncAt() + GAP_MS - Date.now(), btn = $("rsync");
+  const ok = !!(window.FB && FB.signedIn() && rfx && rgold);
+  const inGap = wait > 0;
+  btn.disabled = rbusy || inGap || !ok;
+  setText(btn, rbusy ? "SYNC…" : inGap ? `SYNC ${Math.floor(wait / 60000)}:${String(Math.floor(wait / 1000) % 60).padStart(2, "0")}` : "SYNC");
+  const n = RSRC.filter((s) => pair(s)[0]).length, last = lastSyncAt();
+  setText($("rlast"), inGap ? `next sync after ${hm(new Date(last + GAP_MS).toISOString())}` : last ? `last sync ${dayOr(new Date(last).toISOString())} · ${n} sources` : "");
+}
+function ratesOn() {
+  rHtml = null;
+  if (window.FB && FB.signedIn())
+    FB.ratesOpen({ fx: ["vcb", "hsbc"], gold: ["giavang"] }, (fx, gold) => { rfx = fx; rgold = gold; renderRates(); },
+      (e) => { rFirebaseErr = `Firestore: ${e}`; renderRates(); });
+  renderRates();
+  clearInterval(rtick); rtick = setInterval(renderRates, 1000);   // the clock and the countdown, only while open
+}
+function ratesOff() { clearInterval(rtick); rtick = null; if (window.FB) FB.ratesClose(); rfx = rgold = null; }
+async function sync() {
+  if (rbusy || Date.now() < lastSyncAt() + GAP_MS) { renderRates(); return; }   // inside the gap: nothing asked or written
+  rbusy = true; localStorage.setItem("ratesLastSync", String(Date.now())); renderRates();
+  const at = new Date().toISOString();
+  await Promise.all(RSRC.map(async (s) => {
+    const [latest] = pair(s);
+    try {
+      const body = JSON.parse(await invoke("price", { path: s.path }));
+      const same = s.kind === "fx"
+        ? latest && JSON.stringify(sortKeys(latest.rates)) === JSON.stringify(sortKeys(body.rates))
+        : latest && latest.buy === body.buy && latest.sell === body.sell && JSON.stringify(sortKeys(latest.ring ?? null)) === JSON.stringify(sortKeys(body.ring ?? null));
+      if (!same) await (s.kind === "fx" ? FB.saveFx(body, s.id) : FB.saveGold(body));   // unchanged: nothing written
+      delete rerrs[s.id];
+    } catch (e) {
+      rerrs[s.id] = `${s.label}: ${String(e).replace(/^Error: /, "")} at ${hm(at)}${latest ? ` (shows ${dayOr(savedAt(latest))} rate)` : ""}`;
+    }
+  }));
+  rbusy = false; rHtml = null; renderRates();
+}
+// Firestore hands maps back with their keys sorted; compare with sorted keys (moneyData.ts same())
+function sortKeys(v) {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return v;
+  return Object.fromEntries(Object.keys(v).sort().map((k) => [k, sortKeys(v[k])]));
+}

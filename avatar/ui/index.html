@@ -3,10 +3,11 @@
 <body><div id="stage">
  <!-- layer 1: the bridge badge -->
  <div class="badge done" id="badge"><div class="face" id="face"></div><span class="inbox" id="binbox" hidden></span></div>
- <!-- the arc menu: button 1 opens the status box; the dashed slots wait for later buttons -->
+ <!-- the arc menu: button 1 opens the status box, button 2 the rate box (p15); the dashed slots wait for later buttons -->
  <div class="btn" id="b1" data-i="0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16"/><path d="M3 9h18M8 13h8M8 16h5"/></svg><span class="tag">STATUS</span></div>
- <div class="btn empty" data-i="1"></div><div class="btn empty" data-i="2"></div><div class="btn empty" data-i="3"></div>
- <div class="link" id="link"></div>
+ <div class="btn gold" id="b2" data-i="1"><span class="dong">₫</span><span class="tag">RATES</span></div>
+ <div class="btn empty" data-i="2"></div><div class="btn empty" data-i="3"></div>
+ <div class="link" id="link"></div><div class="link gold" id="link2"></div>
  <!-- layer 2: the status box -->
  <div class="wrap" id="wrap"><div class="glow"><i></i></div><div class="glow2"><i></i></div><div class="box" id="box">
   <div class="title"><span>AGENT//BOX</span><span id="clock"></span></div>
@@ -19,6 +20,12 @@
    <div class="g"><span class="k">GPU</span> <span id="gpu">–</span><b><span id="gpub"></span></b></div>
   </div>
   <div class="grip" id="grip" title="Drag to resize"></div>
+ </div></div>
+ <!-- layer 2: the rate box (p15, approved preview cc/dashboard/avatar/rates-preview.png) -->
+ <div class="wrap rates" id="rwrap"><div class="glow"><i></i></div><div class="glow2"><i></i></div><div class="box" id="rbox">
+  <div class="title"><span>RATE//BOARD</span><span id="rclock"></span></div>
+  <div id="rrows"></div>
+  <div class="rfoot"><span id="rlast"></span><button id="rsync" type="button">SYNC</button></div>
  </div></div>
 </div>
 <script src="fb.js"></script><script src="robot.js"></script><script src="app.js"></script></body></html>

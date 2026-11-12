@@ -41,6 +41,40 @@ async fn status() -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(fetch_status).await.map_err(|e| e.to_string())?
 }
 
+// Button 2 RATES (plan b73e97ad p15; the owner's words, 2026-11-11: "I want the second button is my rate board, only need
+// gold bar (SJC), USD (vietcombank and hsbc), change rate calculated from last sync and a sync button"). The page asks
+// the dashboard Worker's routes, the same ones the Rates tab uses (worker/index.ts, 5-minute cache). The Worker sends no
+// CORS header, so the page cannot ask it itself; this asks from the Rust side, these three paths only.
+const SITE: &str = "https://agent.500kv.co";
+const PRICE_PATHS: [&str; 3] = ["/api/fx/vcb", "/api/fx/hsbc", "/api/gold/giavang"];
+
+fn fetch_price(path: &str) -> Result<String, String> {
+    let site = std::env::var("AGENT_SITE").unwrap_or_else(|_| SITE.to_string());
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(20)))
+        .http_status_as_error(false)
+        .build()
+        .into();
+    let mut r = agent.get(&format!("{site}{path}")).header("Cache-Control", "no-store").call().map_err(|e| e.to_string())?;
+    let code = r.status().as_u16();
+    let body = r.body_mut().read_to_string().map_err(|e| e.to_string())?;
+    if code >= 400 {
+        // the Worker's own reason ({"error": "..."}), else the status
+        let why = serde_json::from_str::<serde_json::Value>(&body).ok()
+            .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_string));
+        return Err(why.unwrap_or_else(|| format!("sync failed ({code})")));
+    }
+    Ok(body)
+}
+
+#[tauri::command]
+async fn price(path: String) -> Result<String, String> {
+    if !PRICE_PATHS.contains(&path.as_str()) {
+        return Err(format!("{path} is not a rate route"));
+    }
+    tauri::async_runtime::spawn_blocking(move || fetch_price(&path)).await.map_err(|e| e.to_string())?
+}
+
 struct Load {
     sys: Mutex<Option<sysinfo::System>>, // None when sysinfo cannot start on this machine
     nvml: Option<nvml_wrapper::Nvml>,
@@ -135,7 +169,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .manage(Load { sys: Mutex::new(sys), nvml: nvml_wrapper::Nvml::init().ok() })
         .manage(avatar::Pending(Mutex::new(None)))
-        .invoke_handler(tauri::generate_handler![status, load, menu, avatar::avatars, avatar::drop_ask, auth::fb_config,
+        .invoke_handler(tauri::generate_handler![status, load, price, menu, avatar::avatars, avatar::drop_ask, auth::fb_config,
             auth::auth_get, auth::auth_set])
         .on_menu_event(|app, e| match e.id().as_ref() {
             "hide" => toggle(app, Some(false)),

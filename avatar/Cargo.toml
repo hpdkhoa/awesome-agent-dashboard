@@ -13,6 +13,7 @@ tauri = { version = "2.12.5", features = ["tray-icon", "protocol-asset", "macos-
 tauri-plugin-dialog = "2.8.4"
 tauri-plugin-single-instance = "2.5.5"
 tauri-plugin-window-state = "2.5.0"
+ureq = "3" # p15: the RATES box asks the dashboard Worker (rustls, blocking, small)
 
 [build-dependencies]
 tauri-build = "2.7.4"
