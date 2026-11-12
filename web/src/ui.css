@@ -90,6 +90,18 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
   .sec-wrap > .step-tools, .sec-wrap > .step-actions { padding: 0 10px 8px 34px; margin-left: 0; }
 }
 
+/* Phone run headers (the owner's words, 2026-11-12: "check the message box in send a message to this session and all
+   the message collapsed in phone size, the box margin is too big that it cover whole screen"): at 390 px a run row's
+   extra line (message · cc · machine · auto · model · effort · time) took 272 of 326 px, the title got 0 px and its
+   words stacked one letter wide, so one folded message stood 1,446 px tall. On a phone the title keeps its line and
+   the extra wraps below it; a tap leaves no hover colour behind. */
+@media (max-width: 560px) {
+  .sec-head { flex-wrap: wrap; }
+  .sec-head > .sec-title { flex: 1 1 calc(100% - 30px); white-space: normal; overflow-wrap: anywhere; }
+  .sec-head > .sec-extra { flex: 1 1 100%; padding-left: 26px; }
+}
+@media (hover: none) { .sec-head:hover { background: transparent; } }
+
 /* step i6: the local search box on the Sessions tab */
 .local-search { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .local-search > input { flex: 1 1 160px; min-width: 0; }
