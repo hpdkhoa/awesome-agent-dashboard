@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 OPS = {
@@ -80,12 +81,23 @@ class LocalStore:
                 "CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL);"
             )
 
-    def _db(self) -> sqlite3.Connection:
+    @contextmanager
+    def _db(self):
+        """One connection per call, closed when the call ends: sqlite3's own `with` only ends the transaction and
+        leaves the file open, which on Windows keeps it from being renamed or replaced."""
         db = sqlite3.connect(self.path, timeout=30, isolation_level=None)
-        db.execute("PRAGMA journal_mode=WAL")
-        db.execute("PRAGMA synchronous=NORMAL")
-        db.execute("PRAGMA busy_timeout=30000")
-        return db
+        try:
+            db.execute("PRAGMA journal_mode=WAL")
+            db.execute("PRAGMA synchronous=NORMAL")
+            db.execute("PRAGMA busy_timeout=30000")
+            yield db
+        finally:
+            db.close()
+
+    def settle(self) -> None:
+        """Folds the write-ahead log into the file, so the one file is the whole database (before it is moved)."""
+        with self._db() as db:
+            db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
     # the Firestore client's calls -------------------------------------------------------------------------------
     def check_owner(self) -> None:

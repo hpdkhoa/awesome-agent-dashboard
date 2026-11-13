@@ -113,3 +113,14 @@ def test_data_api_and_remote_store(tmp_path):
         assert r.get("commands/r1") is None and s.get("commands/r1") is None
     finally:
         srv.shutdown()
+
+
+def test_the_file_can_be_moved_after_use(tmp_path):
+    import os
+
+    s = LocalStore(tmp_path / "a.importing")
+    s.put_many({"plans/p": {"id": "p"}})
+    assert s.get("plans/p") and s.count("plans") == 1 and s.seq() == 1
+    s.settle()
+    os.replace(tmp_path / "a.importing", tmp_path / "data.sqlite")  # no connection left open (Windows refuses otherwise)
+    assert LocalStore(tmp_path / "data.sqlite").get("plans/p") == {"id": "p"}
