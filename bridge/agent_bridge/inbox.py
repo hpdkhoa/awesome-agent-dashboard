@@ -482,6 +482,67 @@ class Inbox:
         thread = list(item.get("thread") or []) + [{"who": "session", "kind": "reply", "chars": len(text), "at": now_iso()}]
         return self.store.update(f"inbox/{item_id}", {"thread": thread})
 
+    def redraw(self, item_id: str, note: str, question: str | None = None, options: list[dict] | None = None,
+               option: int | None = None, svg: str | None = None, recommended: int | None = None) -> str:
+        """Changes one open question in place, during the ask back rounds (the owner's words, 2026-11-13: "I only as for
+        1 question redraw not all questions"; "I want the ask can work on its question and images so I can alter the
+        question and answer the most correct with the deepen question ask back rounds"). Only this item changes: the
+        other questions of its batch and their saved answers stay. option + svg swaps one drawing; options replaces the
+        whole list (same checks as inbox_ask); question replaces the text. The old form goes to revisions, the thread
+        gets a session "redraw" entry (it answers the open ask back) and the item is marked redrawn. A saved answer on
+        this question stays unless its picked option no longer exists. Returns "" when done, else why not."""
+        item = self.store.get(f"inbox/{item_id}")
+        if not item or item.get("kind") != "question":
+            return f"No question {item_id}."
+        if item.get("sessionId") != self.session_id:
+            return "Only the session that asked can redraw its question."
+        if item.get("status") != "open":
+            return "The question is already answered; ask a new one instead."
+        opts = [dict(o) for o in item.get("options") or []]
+        changed = []
+        if options is not None:
+            bad = [f'"{o.get("label", "")}": {why}' for o in options if item.get("planId") and (why := check_example(o.get("example")))]
+            plain = [o.get("label", "") for o in options if not str(o.get("differs") or "").strip()
+                     and (o.get("example") or {}).get("type") not in ("visual", "image")]
+            if not options or bad or plain:
+                return ("Not redrawn: " + "; ".join(bad) if bad else "Not redrawn: every option needs a drawing (example type "
+                        "visual) or a differs line. Missing on: " + ", ".join(plain or ["(no options)"]))
+            opts = [{"label": redact(o.get("label", ""), 120), "detail": redact(o.get("detail", ""), 400),
+                     **({"differs": redact(str(o["differs"]), 160)} if o.get("differs") else {}),
+                     **({"example": clean_example(o["example"])} if o.get("example") else {})} for o in options]
+            changed.append("options")
+        if svg is not None:
+            if option is None or not 0 <= option < len(opts):
+                return f"Not redrawn: option is the index (0 to {len(opts) - 1}) of the drawing to swap."
+            s = clean_svg(svg)
+            if not s:
+                return "Not redrawn: svg must be an inline <svg> drawing (under 30000 characters)."
+            ex = dict(opts[option].get("example") or {})
+            opts[option]["example"] = {"type": "visual", "svg": s, **({"note": ex["note"]} if ex.get("note") else {})}
+            changed.append(f"drawing ({chr(97 + option)})")
+        update: dict = {}
+        if question is not None and question.strip():
+            update["text"] = redact(question, 4000)
+            changed.append("question")
+        if not changed:
+            return "Not redrawn: give question, options, or option + svg."
+        if recommended is not None:
+            update["recommended"] = recommended if 0 <= recommended < len(opts) else None
+        elif options is not None and item.get("recommended") is not None and item["recommended"] >= len(opts):
+            update["recommended"] = None
+        at = now_iso()
+        old = {k: item.get(k) for k in ("text", "options", "recommended")}
+        update.update(options=opts, redrawn=at, revisions=list(item.get("revisions") or []) + [{**old, "at": at}])
+        labels = {o["label"] for o in opts}
+        draft = item.get("draft") or {}
+        if draft.get("choice") and not set(draft["choice"].split(", ")) <= labels:
+            update["draft"] = None  # the picked option is gone: this one question is answered again
+            changed.append("saved pick cleared")
+        text = redact(f"Redrew {', '.join(changed)}." + (f" {note.strip()}" if note.strip() else ""), 600)
+        update["thread"] = list(item.get("thread") or []) + [{"who": "session", "kind": "redraw", "text": text, "at": at}]
+        self.store.update(f"inbox/{item_id}", update)
+        return ""
+
     def beat(self) -> None:
         if self.session_id == "unknown" or self.beats < 0:
             return
@@ -564,8 +625,9 @@ def ask_back_text(item: dict, ask: dict) -> str:
     2026-11-08: "A, bridge delivers"). It is not an answer: the session replies in the thread, then waits again."""
     return (f'The owner asks back on your question "{item.get("title", "")}" (id {item.get("id", "")}) on the dashboard: '
             f'"{ask.get("text", "")}". This is not an answer. Reply in a few words with inbox_reply(item_id="{item.get("id", "")}", '
-            f'text=...) (draw it with an svg when it can be drawn), then call inbox_wait(item_id="{item.get("id", "")}") '
-            f"for the answers.")
+            f'text=...) (draw it with an svg when it can be drawn), or, when the owner wants the question, its options or '
+            f'a drawing changed, change only this question in place with inbox_redraw(item_id="{item.get("id", "")}", ...) '
+            f'(never a new batch); then call inbox_wait(item_id="{item.get("id", "")}") for the answers.')
 
 
 def is_live(store, session_id: str) -> bool:
@@ -639,7 +701,9 @@ def server():
                     title = next((x.get("title", "") for x in [await asyncio.to_thread(inbox.store.get, f"inbox/{i}") or {}]), "")
                     return (f'The owner asks back on "{title}" (id {i}): "{ask.get("text", "")}". This is not an answer. '
                             f"Reply in a few words with inbox_reply(item_id=\"{i}\", text=...) (draw it with an svg when "
-                            f"it can be drawn), then call inbox_wait(item_id=\"{item_id}\").")
+                            f"it can be drawn), or, when the owner wants this question, its options or a drawing "
+                            f"changed, change only it in place with inbox_redraw(item_id=\"{i}\", ...) (never a new "
+                            f"batch); then call inbox_wait(item_id=\"{item_id}\").")
             items = [await asyncio.to_thread(inbox.store.get, f"inbox/{i}") or {} for i in ids]
             if all(x.get("status") == "answered" for x in items):
                 texts = [t for i in ids if (t := await asyncio.to_thread(inbox.take_answer, i))]
@@ -670,7 +734,8 @@ def server():
         facts the owner needs to decide. wait_minutes: up to 25; then call inbox_wait.
         more_questions: other questions asked together, each {"question", "title", "options", "recommended"}: the
         owner sees and answers them as one batch, and you get all the answers at once.
-        The owner may ask back before answering: you then get their question; reply with inbox_reply and wait again.
+        The owner may ask back before answering: you then get their question; reply with inbox_reply, or change that
+        one question in place with inbox_redraw (never a new batch), and wait again.
 
         example (required on every option while a plan is open), one of:
         {"type": "visual", "svg": an inline <svg> drawing of the option, small, labelled, no script};
@@ -699,6 +764,17 @@ def server():
         when it explains better). It never answers the question for the owner. Then call inbox_wait."""
         ok = await asyncio.to_thread(inbox.reply, item_id, text)
         return "Replied. Call inbox_wait to wait for the answer." if ok else f"No question {item_id}."
+
+    @mcp.tool()
+    async def inbox_redraw(item_id: str, note: str = "", question: str | None = None, options: list[dict] | None = None,
+                           option: int | None = None, svg: str | None = None, recommended: int | None = None) -> str:
+        """Change one open question in place when the owner asks back for it (a new drawing, a sharper question,
+        better options). Only this question changes: the rest of its batch and the owner's saved answers stay; never
+        post a new inbox_ask for this. option + svg: swap the drawing of option number option (0 = a). options: the
+        whole new option list (same form and checks as inbox_ask). question: the new question text. note: a few words
+        on what changed, shown in the thread. The question is marked redrawn, its old form kept. Then call inbox_wait."""
+        why = await asyncio.to_thread(inbox.redraw, item_id, note, question, options, option, svg, recommended)
+        return why or "Redrawn in place. Call inbox_wait to wait for the answer."
 
     @mcp.tool()
     async def inbox_wait(item_id: str, ctx: Context, wait_minutes: float = MAX_WAIT_MINUTES) -> str:

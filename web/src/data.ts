@@ -77,6 +77,8 @@ export type InboxItem = {
   // one batch: questions asked together show as one entry and are answered together (2026-11-07)
   batchId?: string; batchIndex?: number; batchSize?: number;
   draft?: { choice: string; text: string; at: string }; // your latest saved answer, used when the batch is sent
+  // the session changed this one question in place after an ask back (bridge inbox.py redraw, 2026-11-13); old forms kept
+  redrawn?: string; revisions?: { text: string; options: unknown[]; recommended: number | null; at: string }[];
   thread?: ThreadEntry[]; // your saved answers, your questions back and the session's replies, in order
   switch?: { to: PlanKind; commandId: string }; // a Q&A message asks to change the plan (bridge inbox.py ask_switch)
 };
@@ -84,7 +86,7 @@ export type InboxItem = {
 // Every option of a plan question carries one (the owner's words, 2026-11-03: "every choose will have an example").
 export type Bench = { name: string; before: string; after: string; measured: boolean; source?: string };
 // a session reply made after 2026-11-08 keeps only chars: its words are read from the session log on the PC (PcText)
-export type ThreadEntry = { who: "owner" | "session"; kind: "answer" | "ask" | "reply"; choice?: string; text?: string; chars?: number; at: string };
+export type ThreadEntry = { who: "owner" | "session"; kind: "answer" | "ask" | "reply" | "redraw"; choice?: string; text?: string; chars?: number; at: string };
 export type Example =
   | { type: "visual"; svg: string; note?: string } // a drawing of the option
   | { type: "image"; before: string; after: string; note?: string }

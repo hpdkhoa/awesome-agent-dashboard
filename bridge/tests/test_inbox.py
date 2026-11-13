@@ -300,3 +300,39 @@ def test_deliver_takes_the_listened_rows_and_asks_firestore_nothing():
     log = deliver(store, "PC", "claude", rows)
     assert asked == [] and len(log) == 1 and store.get(f"inbox/{qid}")["status"] == "delivering"
     assert deliver(store, "PC", "claude", []) == [] and asked == []
+
+
+def test_redraw_changes_one_question_in_place_and_keeps_the_batch_and_its_answers():
+    store = FakeStore()
+    ib = make(store)
+    old = '<svg><rect/></svg>'
+    ids = ib.post_batch([{"title": "one", "text": "1?", "options": [{"label": "A", "example": {"type": "visual", "svg": old}},
+                                                                   {"label": "B", "differs": "slow"}]},
+                         {"title": "two", "text": "2?", "options": [{"label": "C", "differs": "d"}]}])
+    store.update(f"inbox/{ids[0]}", {"draft": {"choice": "B", "text": "", "at": "t0"},
+                                     "thread": [{"who": "owner", "kind": "ask", "text": "redraw a please", "at": "t1"}]})
+    store.update(f"inbox/{ids[1]}", {"draft": {"choice": "C", "text": "", "at": "t0"}})
+    before_two = dict(store.docs[f"inbox/{ids[1]}"])
+    assert ib.redraw(ids[0], "bigger labels", option=0, svg='<svg onload="x()"><circle/></svg>') == ""
+    a = store.docs[f"inbox/{ids[0]}"]
+    assert a["options"][0]["example"]["svg"] == "<svg><circle/></svg>" and a["options"][1]["differs"] == "slow"
+    assert a["draft"]["choice"] == "B" and a["redrawn"] and a["revisions"][0]["options"][0]["example"]["svg"] == old
+    assert a["thread"][-1]["kind"] == "redraw" and "drawing (a)" in a["thread"][-1]["text"] and ib.ask_back(ids[0]) is None
+    assert store.docs[f"inbox/{ids[1]}"] == before_two  # the other question and its saved answer are untouched
+    assert len(store.where("inbox", "batchId", a["batchId"])) == 2  # no new batch
+
+
+def test_redraw_can_reshape_the_question_and_clears_only_a_pick_that_is_gone():
+    store = FakeStore()
+    ib = make(store)
+    i = ib.post("question", "q", "old?", [{"label": "A", "differs": "x"}, {"label": "B", "differs": "y"}], 1)
+    store.update(f"inbox/{i}", {"draft": {"choice": "B", "text": "", "at": "t"}})
+    assert "differs" in ib.redraw(i, "", options=[{"label": "A2"}])
+    assert ib.redraw(i, "", question="sharper?", options=[{"label": "A2", "differs": "x2"}]) == ""
+    d = store.docs[f"inbox/{i}"]
+    assert d["text"] == "sharper?" and [o["label"] for o in d["options"]] == ["A2"] and d["recommended"] is None
+    assert d["draft"] is None and "saved pick cleared" in d["thread"][-1]["text"]
+    assert "index" in ib.redraw(i, "", option=5, svg="<svg/>")
+    assert "Only the session" in make(store, "s2").redraw(i, "", question="x")
+    store.update(f"inbox/{i}", {"status": "answered"})
+    assert "already answered" in ib.redraw(i, "", question="x")

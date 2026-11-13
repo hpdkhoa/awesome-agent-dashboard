@@ -86,7 +86,7 @@ function QuestionCard({ q, batch, k, onSaved }: { q: InboxItem; batch: InboxItem
   const left = batch.filter((x) => x.status === "open" && !x.draft && x.id !== q.id).length;
   return (
     <div className="qcard">
-      <b>{batch.length > 1 ? `${k + 1}. ` : ""}{q.title}</b>
+      <b>{batch.length > 1 ? `${k + 1}. ` : ""}{q.title}</b>{q.redrawn && <span className="tag">Redrawn {ago(q.redrawn)}{(q.revisions?.length ?? 0) > 1 ? ` · ${q.revisions!.length}x` : ""}</span>}
       {q.text && q.text !== q.title && <Md text={q.text} cwd={q.cwd} />}
       {q.options.length > 0 && (
         <div className={q.options.some((o) => o.example) ? "options wide" : "options"}>
@@ -156,11 +156,11 @@ function QuestionCard({ q, batch, k, onSaved }: { q: InboxItem; batch: InboxItem
           <ul className="thread">
             {(q.thread ?? []).map((t, n) => (
               <li key={n} className={t.who}>
-                <span className="small muted">{t.who === "owner" ? (t.kind === "ask" ? "you asked" : "you saved") : "session"} · {ago(t.at)}</span>{" "}
+                <span className="small muted">{t.who === "owner" ? (t.kind === "ask" ? "you asked" : "you saved") : t.kind === "redraw" ? "session redrew" : "session"} · {ago(t.at)}</span>{" "}
                 {t.kind === "answer" ? (
                   <b>{[t.choice, t.text].filter(Boolean).join(" · ")}</b>
                 ) : t.who === "session" && t.text == null && q.sessionId ? (
-                  <PcText reply={{ session: q.sessionId, item: q.id, k: (q.thread ?? []).slice(0, n).filter((x) => x.who === "session").length }} cwd={q.cwd} />
+                  <PcText reply={{ session: q.sessionId, item: q.id, k: (q.thread ?? []).slice(0, n).filter((x) => x.who === "session" && x.kind !== "redraw").length }} cwd={q.cwd} />
                 ) : (
                   <Md text={t.text ?? ""} cwd={q.cwd} />
                 )}
