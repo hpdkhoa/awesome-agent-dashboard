@@ -18,6 +18,11 @@ if prompt == "fail":
 if prompt == "notlogged":
     print(json.dumps({"type": "result", "is_error": True, "result": "Not logged in · Please run /login", "subtype": "success"}))
     sys.exit(1)
+if prompt == "nosession":
+    print("No conversation found with session ID: abc", file=sys.stderr)
+    print(json.dumps({"type": "result", "subtype": "error_during_execution", "is_error": True, "num_turns": 0,
+                      "errors": ["No conversation found with session ID: abc"]}))
+    sys.exit(1)
 if prompt.startswith("limit") or prompt.endswith("limit"):
     print(json.dumps({"type": "result", "is_error": True, "api_error_status": 429, "api_error": "usage_limit_reached",
                       "result": "You've hit your 5-hour limit · resets 5:30pm (Asia/Ho_Chi_Minh)"}))
@@ -154,6 +159,28 @@ def test_claude_error_shows_its_message_not_json(tmp_path, monkeypatch):
     cmd(store, "c1", action="start", folder=str(work), prompt="notlogged")
     c = wait_done(runs, "c1", store)
     assert c["status"] == "failed" and c["error"] == "Not logged in · Please run /login"
+
+
+def test_claude_error_with_no_result_shows_its_errors(tmp_path, monkeypatch):
+    # runs 93b4759d to 291358a9 (2026-11-12) showed only "claude reported an error"
+    store, runs, work = setup(tmp_path, monkeypatch)
+    cmd(store, "c1", action="start", folder=str(work), prompt="nosession")
+    c = wait_done(runs, "c1", store)
+    assert c["status"] == "failed" and c["error"] == "No conversation found with session ID: abc"
+
+
+def test_answer_to_a_gone_session_closes_it_and_its_siblings_no_retry(tmp_path, monkeypatch):
+    # 2026-11-13: 3 answers to session 8143f4fb retried every 10 minutes, 9 failed runs; the owner: "close and no rerty
+    # for same orphan cases"
+    store, runs, work = setup(tmp_path, monkeypatch)
+    store.put_many({"inbox/q1": {"id": "q1", "status": "delivering", "sessionId": "gone", "machine": "PC"},
+                    "inbox/q2": {"id": "q2", "status": "answered", "sessionId": "gone", "machine": "PC"},
+                    "inbox/q3": {"id": "q3", "status": "answered", "sessionId": "other", "machine": "PC"}})
+    cmd(store, "m1", action="message", sessionId="gone", cwd=str(work), prompt="nosession", inboxId="q1")
+    assert wait_done(runs, "m1", store)["status"] == "failed"
+    assert store.get("inbox/q1")["status"] == "closed" and store.get("inbox/q2")["status"] == "closed"
+    assert "not retried" in store.get("inbox/q1")["error"]
+    assert store.get("inbox/q3")["status"] == "answered"  # another session's answer is left alone
 
 
 def test_message_to_a_closed_session_resumes_it(tmp_path, monkeypatch):
