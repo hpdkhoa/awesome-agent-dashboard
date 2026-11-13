@@ -2,7 +2,7 @@ import type { Phase } from "./phases";
 import { checkHash, itemHash, type HarnessItem, type HarnessTicks } from "./harness";
 import type { Kind } from "./planCheck";
 import { useEffect, useState } from "react";
-import { collection, doc, getDocs, limit, onSnapshot, orderBy, query, setDoc, startAfter, updateDoc, where, type QueryConstraint, type QueryDocumentSnapshot } from "firebase/firestore";
+import { collection, doc, getDocs, limit, onSnapshot, orderBy, query, setDoc, startAfter, updateDoc, where, type QueryConstraint, type QueryDocumentSnapshot } from "./fs";
 import { db } from "./firebase";
 import { countReads, useActive } from "./pageReads";
 export { pageReads, countReads } from "./pageReads";

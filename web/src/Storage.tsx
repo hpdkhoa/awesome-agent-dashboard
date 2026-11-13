@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { QueryDocumentSnapshot } from "firebase/firestore";
+import type { QueryDocumentSnapshot } from "./fs";
 import { MoreMenu } from "./MoreMenu";
 import { COLLECTIONS, countAll, listPage, removeRows, type Row } from "./storeData";
 

@@ -90,6 +90,8 @@ class Config:
     site_origins: tuple[str, ...] = ()  # the page origins allowed to ask the file viewer
     status_port: int = 8794  # the desktop avatar's read-only /status (status.py); 127.0.0.1, never tunnelled
     status_hosts: tuple[tuple[str, str], ...] = ()  # name=host pairs whose ssh and Ollama ports /status checks
+    db: str = ""  # "firestore" keeps Firestore as the database even when the local file exists (store.py)
+    db_host_url: str = ""  # another machine: the address of the bridge that hosts the database (its FILES_URL)
 
     @classmethod
     def load(cls, env_path: Path | None = None) -> Config:
@@ -110,4 +112,5 @@ class Config:
                       (p.partition("=") for p in env.get("STATUS_HOSTS", "").split(";")) if n.strip() and h.strip())
         return cls(project, key, machine, logs, roots, env.get("CLAUDE_BIN", ""), env.get("OWNER_EMAIL", ""),
                    env.get("FILES_URL", "").rstrip("/"), int(env.get("FILES_PORT") or 8793), origins,
-                   int(env.get("STATUS_PORT") or 8794), hosts)
+                   int(env.get("STATUS_PORT") or 8794), hosts, env.get("DB", "").strip().lower(),
+                   env.get("DB_HOST_URL", "").rstrip("/"))

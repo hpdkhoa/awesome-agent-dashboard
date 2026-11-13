@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc } from "./fs";
 import { db } from "./firebase";
 
 // Web Push on this device (the owner's choice, 2026-11-01: "do the web push"). The bridge sends a push when a run needs

@@ -64,6 +64,12 @@ def patient(what: str, fn, sleep=time.sleep, wait: float = 60.0):
             sleep(wait)
 
 
+def _data_api(store):
+    from .dataapi import DataApi
+
+    return DataApi(store)
+
+
 def main(argv: list[str] | None = None) -> None:
     if sys.stdout is None:
         # Started without a console (pythonw, a scheduled task): write to a log file next to the bridge's state.
@@ -83,6 +89,7 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("ask-hook", help="the question hook: Claude Code's question box goes to the inbox first")
     sub.add_parser("push-setup", help="make this machine's push key once and publish its public half for the page")
     sub.add_parser("push-test", help="send a test notification to every subscribed phone")
+    sub.add_parser("import-firestore", help="copy Firestore into the local database once; from then the bridge uses the local file")
     a = p.parse_args(argv)
 
     if a.cmd == "inbox":
@@ -119,14 +126,37 @@ def main(argv: list[str] | None = None) -> None:
             print(f"Sent to {n} device(s).")
         return
 
+    if a.cmd == "import-firestore":
+        # the owner's words, 2026-11-13: "switch firestore into local DB in the place bridge is hosted"
+        from .localdb import LocalStore
+        from .mirror import import_firestore
+        from .store import db_path
+
+        fs = Firestore(Session(cfg))
+        fs.check_owner()
+        tmp = db_path().with_suffix(".importing")
+        for f in (tmp, tmp.with_name(tmp.name + "-wal"), tmp.with_name(tmp.name + "-shm")):
+            f.unlink(missing_ok=True)
+        counts = import_firestore(fs, LocalStore(tmp))
+        if db_path().exists():
+            raise SystemExit(f"{db_path()} already exists: the import is in {tmp}; move it by hand if you mean to replace the database")
+        os.replace(tmp, db_path())
+        print(f"imported {sum(counts.values())} documents of {len(counts)} collections into {db_path()}. Restart the bridge to use it.")
+        return
+
     if a.cmd == "watch" and not one_bridge(data_dir()):
         # the task watchdog fires every minute; a bridge started by hand already runs: this one stops quietly
         print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} another bridge is running on this PC: not starting", flush=True)
         return
     store = None
+    from .store import is_firestore, is_local, open_store
+
     if not getattr(a, "dry_run", False):
-        store = Firestore(Session(cfg))
+        store = open_store(cfg)
         patient("owner check", store.check_owner)
+        print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} database: "
+              f"{'the local file' if is_local(store) else 'Firestore' if is_firestore(store) else 'the host bridge at ' + cfg.db_host_url}", flush=True)
+    mirror = None
     claude = find_claude(cfg.claude_bin)
     runs = gone = publisher = health = None
     if store is not None and a.cmd == "watch":
@@ -180,7 +210,8 @@ def main(argv: list[str] | None = None) -> None:
             if runs is not None:  # step i4: a folder added on the page is served at once
                 runs.on_roots.append(lambda roots: [files.add_root(r) for _, r in roots])
             serve(files,
-                  list(cfg.site_origins), cfg.files_port, Texts(cfg.logs, data_dir() / "runs", local), health=health)
+                  list(cfg.site_origins), cfg.files_port, Texts(cfg.logs, data_dir() / "runs", local), health=health,
+                  data=_data_api(store) if is_local(store) else None)
             store.put_many({"meta/files": {"url": cfg.files_url}})
             print(f"file viewer on 127.0.0.1:{cfg.files_port} for {cfg.files_url}", flush=True)
         from .status import Publisher, Status, serve as serve_status
@@ -190,20 +221,35 @@ def main(argv: list[str] | None = None) -> None:
         publisher = Publisher(store, cfg.machine)
         print(f"avatar status on 127.0.0.1:{cfg.status_port}/status", flush=True)
         feed = gone = None
-        try:
-            from .listen import AccountFeeds, CommandFeed, DeletedFeed, firestore_client
+        if not is_firestore(store):
+            # the local database (or its host): the feeds ask it, no Firestore listen; Firestore gets the backup writes
+            from .listen import STATUSES, LocalAccountFeeds
+            from .localdb import LocalDeletedFeed, command_feed, doc_feed
 
-            client = firestore_client(store.s)
-            feed, gone = CommandFeed(client), DeletedFeed(client)
-            status.feeds = AccountFeeds(client)  # p10: the avatar's counts from listens, not a 20-read round
-            if runs is not None:  # p16: the owner's run settings (meta/runs) from a listen, not a read each turn
-                from .listen import QueryFeed
+            feed, gone = command_feed(store, STATUSES), LocalDeletedFeed(store)
+            status.feeds = LocalAccountFeeds(store)
+            if runs is not None:
+                runs.prefs_feed = doc_feed(store, "meta/runs")
+            if is_local(store):
+                from .mirror import Mirror
 
-                runs.prefs_feed = QueryFeed(client, lambda c: c.collection("meta").document("runs"), name="meta/runs")
-        except ImportError:
-            print("google-cloud-firestore is not installed: asking for commands every 5 s instead of listening", flush=True)
+                mirror = Mirror(store, Firestore(Session(cfg)))
+        else:
+            try:
+                from .listen import AccountFeeds, CommandFeed, DeletedFeed, firestore_client
+
+                client = firestore_client(store.s)
+                feed, gone = CommandFeed(client), DeletedFeed(client)
+                status.feeds = AccountFeeds(client)  # p10: the avatar's counts from listens, not a 20-read round
+                if runs is not None:  # p16: the owner's run settings (meta/runs) from a listen, not a read each turn
+                    from .listen import QueryFeed
+
+                    runs.prefs_feed = QueryFeed(client, lambda c: c.collection("meta").document("runs"), name="meta/runs")
+            except ImportError:
+                print("google-cloud-firestore is not installed: asking for commands every 5 s instead of listening", flush=True)
     stamp = lambda: time.strftime("%Y-%m-%d %H:%M:%S")
     next_sync = 0.0
+    next_mirror = 0.0
     while True:
         try:
             if time.time() >= next_sync:
@@ -228,6 +274,14 @@ def main(argv: list[str] | None = None) -> None:
             if runs is not None:
                 for line in runs.step(feed.current() if feed is not None else None):
                     print(f"{stamp()} run {line}", flush=True)
+            if mirror is not None and time.time() >= next_mirror:
+                next_mirror = time.time() + 60  # the backup: every change, batched each minute (the owner's pick 3a)
+                try:
+                    line = mirror.step()
+                    if line:
+                        print(f"{stamp()} {line}", flush=True)
+                except (Exception, SystemExit) as e:  # a refused backup never stops the bridge: next minute again
+                    print(f"{stamp()} backup waits: {str(e).splitlines()[0][:120]}", flush=True)
             if publisher is not None:
                 # p11: every 5 s turn; writes only when a value changed (an avatar sees it within ~5 s), else nothing
                 publisher.publish(status.publish_state())

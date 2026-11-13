@@ -1,4 +1,4 @@
-import { collection, doc, getDoc, getDocs, query, setDoc, where } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, query, setDoc, where } from "./fs";
 import { db } from "./firebase";
 import { removeRows } from "./storeData";
 

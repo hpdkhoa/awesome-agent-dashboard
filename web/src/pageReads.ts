@@ -7,7 +7,8 @@
 // - A tab that is hidden for more than GRACE_MS turns its listeners off; they come back when it shows again (a
 //   re-open re-reads the documents a query holds, so a quick tab switch keeps them on).
 import { useEffect, useState } from "react";
-import { bridgePost } from "./FileView";
+import { bridgePost } from "./bridge";
+import { usingBackup } from "./fs";
 
 const GRACE_MS = 2 * 60 * 1000;
 const FLUSH_MS = 60 * 1000;
@@ -17,7 +18,8 @@ let total = 0;
 const pending: Record<string, number> = {};
 export const pageReads = () => total;
 export function countReads(n: number, name = "other"): void {
-  if (n <= 0) return;
+  // the bridge's local database costs no Firestore read: only the backup's reads (the PC is off) are counted
+  if (n <= 0 || !usingBackup()) return;
   total += n;
   pending[name] = (pending[name] ?? 0) + n;
 }

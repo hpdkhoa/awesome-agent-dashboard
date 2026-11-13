@@ -10,6 +10,7 @@ import { PlanBoard, PlanList, PlanView } from "./Plans";
 import { usePush, type PushState } from "./notify";
 import { FileViewer, PcText } from "./FileView";
 import { SpendChart } from "./Charts";
+import { useSource } from "./fs";
 import { UsageCheck } from "./UsageCheck";
 import { HealthPanel, HealthPill, useHealth } from "./Health";
 import { MoreMenu } from "./MoreMenu";
@@ -73,6 +74,7 @@ export function Dashboard() {
   const moreInbox = usePager<InboxItem>("inbox", "createdAt");
   const morePlans = usePager<Plan>("plans", "updatedAt");
   const sessions = liveSessions ? dedupe([...liveSessions, ...moreSessions.rows]) : null;
+  const source = useSource(); // "bridge": the local database on the PC; "backup": Firestore, read-only, while the PC is off
   const [spendDays, setSpendDays] = useState(1); // the spend range: today by default (the owner's words, 2026-11-13)
   const usage = useUsage(spendDays);
   const workTypes = useWorkTypes();
@@ -171,6 +173,7 @@ export function Dashboard() {
         <button className="chip panel-btn" title={layout.leftHidden ? "Show the left panel" : "Hide the left panel"}
           onClick={() => setLayout((l) => ({ ...l, leftHidden: !l.leftHidden }))}>{layout.leftHidden ? "›" : "‹"}</button>
         <strong>Agent dashboard</strong>
+        {source === "backup" && <span className="stat wait-fg" title="The bridge on your PC does not answer: this is the Firestore backup, read-only. The page tries the bridge again every 30 s.">PC off · backup, read-only</span>}
         <button className={waiting ? "pill wait" : "pill"} onClick={() => setTab("inbox")}>
           {waiting} waiting for you
         </button>

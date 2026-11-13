@@ -205,3 +205,17 @@ plan stays one session. The session list shows the last
 This project follows Anthropic's terms for Claude Code: one person's own use of their own plan, the unmodified
 `claude` program, and no Claude credentials collected, stored or passed on. See
 [Legal and compliance](https://code.claude.com/docs/en/legal-and-compliance).
+
+## The local database
+
+The bridge can keep all dashboard data in one SQLite file on its own machine (`%APPDATA%\awesome-agent-dashboard\data.sqlite`)
+instead of Firestore. The page then reads and writes through the bridge (POST `/data` on the file viewer's address),
+and Firestore becomes the backup: the bridge writes every change to it once a minute and never reads it.
+
+- Switch: stop the bridge, run `python -m agent_bridge import-firestore` once (copies every collection but the money
+  ones), start the bridge. Its log says `database: the local file`. Restart open Claude sessions so their inbox servers
+  use the file too.
+- Back to Firestore: set `DB=firestore` in `.env` and restart.
+- Another machine's bridge: set `DB_HOST_URL` to the host bridge's `FILES_URL`; it then calls the host's data API.
+- The PC is off: the page shows the Firestore backup, read-only, and tries the bridge again every 30 s.
+- Money (entries, rates, gold) stays on Firestore.

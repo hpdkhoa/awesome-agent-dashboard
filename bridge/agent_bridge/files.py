@@ -157,7 +157,7 @@ class Files:
         return full if inside(full, root) and os.path.isfile(full) and not secret(full) else None
 
 
-def handler(files: Files, origins: list[str], texts=None, usage=None, health=None):
+def handler(files: Files, origins: list[str], texts=None, usage=None, health=None, data=None):
     class H(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
@@ -190,6 +190,22 @@ def handler(files: Files, origins: list[str], texts=None, usage=None, health=Non
                                               "Access-Control-Max-Age": "600"})
 
         def do_POST(self):
+            if self.path == "/data" and data is not None:
+                # the data API (dataapi.py): the local database, for the owner's page and the owner's other machines
+                auth = self.headers.get("Authorization", "")
+                try:
+                    body = json.loads(self.rfile.read(min(int(self.headers.get("Content-Length") or 0), 4 * 1024 * 1024)) or b"{}")
+                    if not auth.startswith("Bearer "):
+                        raise PermissionError("no sign-in")
+                    files.verify(auth[7:])
+                except Exception:
+                    return self._json(401, {"error": "sign in again"})
+                try:
+                    return self._json(200, data.answer(body))
+                except ValueError as e:
+                    return self._json(400, {"error": str(e)})
+                except Exception as e:
+                    return self._json(500, {"error": f"the database refused: {type(e).__name__}"})
             if self.path not in ("/ticket", "/text", "/usage", "/health", "/restart") or (self.path == "/text" and texts is None) or (self.path == "/usage" and usage is None) or (self.path in ("/health", "/restart") and health is None):
                 return self._json(404, {"error": "not found"})
             auth = self.headers.get("Authorization", "")
@@ -239,7 +255,7 @@ def handler(files: Files, origins: list[str], texts=None, usage=None, health=Non
     return H
 
 
-def serve(files: Files, origins: list[str], port: int, texts=None, usage=None, health=None) -> ThreadingHTTPServer:
+def serve(files: Files, origins: list[str], port: int, texts=None, usage=None, health=None, data=None) -> ThreadingHTTPServer:
     """Starts the server on 127.0.0.1:port in a daemon thread. texts: a texts.Texts, for POST /text. usage: a
     usage.UsageCheck for POST /usage; the bridge's default one when texts is given and usage is not."""
     if usage is None and texts is not None:
@@ -250,7 +266,7 @@ def serve(files: Files, origins: list[str], port: int, texts=None, usage=None, h
         if fs.counter is None:
             fs.set_counter(Counter(data_dir() / "firestore-usage.json"))
         usage = UsageCheck(fs.counter, default_creds_path())
-    srv = ThreadingHTTPServer(("127.0.0.1", port), handler(files, origins, texts, usage, health))
+    srv = ThreadingHTTPServer(("127.0.0.1", port), handler(files, origins, texts, usage, health, data))
     srv.daemon_threads = True
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv

@@ -213,6 +213,34 @@ class AccountFeeds:
                 f.close()
 
 
+class LocalAccountFeeds(AccountFeeds):
+    """The same counts from the local database (localdb.LocalFeed): no Firestore listen, no read."""
+
+    def __init__(self, store, wall=time.time, live_count=None):
+        from .localdb import LocalFeed, with_ids
+
+        self.store, self.wall = store, wall
+        self._feed, self._ids = LocalFeed, with_ids
+        self.commands = LocalFeed(store, "commands", lambda s: with_ids(s, "commands", [("status", "IN", GOING)]), "commands(going)")
+        self.live = None
+        self.live_count = live_count or _open_sessions
+        self.inbox = LocalFeed(store, "inbox", lambda s: with_ids(s, "inbox", [("status", "IN", INBOX)]), "inbox(open,answered,delivering)")
+        self.machines = LocalFeed(store, "machines", lambda s: with_ids(s, "machines"), "machines")
+        self.plans = LocalFeed(store, "plans", lambda s: with_ids(s, "plans", None, "updatedAt", 5), "plans(5)")
+        self.plan_key = None
+        self.version = None
+        self.steps = None
+
+    def _plan(self, plan: dict):
+        key = (plan["id"], plan.get("current", 0))
+        if key != self.plan_key:
+            pid, cur = key
+            self.version = self._feed(self.store, "planVersions", lambda s: [d for d in [s.get(f"planVersions/{pid}_v{cur}")] if d], "planVersions")
+            self.steps = self._feed(self.store, "planSteps", lambda s: self._ids(s, "planSteps", [("planId", "EQUAL", pid)]), "planSteps")
+            self.plan_key = key
+        return self.version.current(), self.steps.current()
+
+
 def _open_sessions() -> int:
     """Sessions open in the app or a terminal on this machine, from the process scan (runs.claude_processes)."""
     from .runs import claude_processes

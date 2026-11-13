@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { doc, getDoc } from "firebase/firestore";
-import { auth, db } from "./firebase";
+import { auth } from "./firebase";
+import { bridgePost, filesUrl } from "./bridge";
+export { bridgePost, filesUrl } from "./bridge";
 import { Md } from "./Markdown";
 
 // The file viewer (the owner's idea, 2026-11-01: "just move binary to render it on the page using my local instance").
@@ -14,9 +15,6 @@ type Ask = { path: string; cwd: string };
 const TEXT_MAX = 2 * 1024 * 1024;
 const EVENT = "aad.openFile";
 
-let base: Promise<string | null> | null = null;
-export const filesUrl = () =>
-  (base ??= getDoc(doc(db, "meta", "files")).then((d) => (d.data()?.url as string | undefined) ?? null, () => null));
 
 export async function ticket(path: string, cwd: string): Promise<Ticket> {
   const url = await filesUrl();
@@ -44,24 +42,6 @@ export type PcTurn = { n: number; at: string; prompt: string; chars: number };
 export type PcReply = { text: string; chars: number; n?: number; at?: string; prompt?: string; turns?: PcTurn[]; isError?: boolean };
 
 // One signed call to the bridge on the PC (POST /text, POST /usage): the answer is shown, never stored.
-export async function bridgePost<T>(path: string, body: unknown): Promise<T> {
-  const url = await filesUrl();
-  if (!url) throw new Error("The file viewer is off: set FILES_URL on the bridge.");
-  const token = await auth.currentUser?.getIdToken();
-  let r: Response;
-  try {
-    r = await fetch(url + path, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-  } catch {
-    throw new Error("The PC does not answer: is the bridge running and the tunnel up?");
-  }
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j.error ?? `The bridge answered ${r.status}.`);
-  return j as T;
-}
 
 export type PcReplyRef = { session: string; item: string; k: number };
 export const pcText = (body: { session?: string; turn?: number; run?: string; reply?: PcReplyRef }) => bridgePost<PcReply>("/text", body);

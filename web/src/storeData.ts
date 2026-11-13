@@ -1,7 +1,7 @@
 import {
   collection, doc, getCountFromServer, getDoc, getDocs, limit, orderBy, query, setDoc, startAfter, writeBatch,
   type QueryConstraint, type QueryDocumentSnapshot,
-} from "firebase/firestore";
+} from "./fs";
 import { db } from "./firebase";
 
 // Every collection the page and the bridge write. `bridge`: the bridge writes it again from Claude Code's logs, so a

@@ -589,7 +589,9 @@ def server():
     cfg = Config.load()
     from .push import pusher
 
-    store = Firestore(Session(cfg))
+    from .store import open_store
+
+    store = open_store(cfg)
     push = pusher(store, cfg.owner_email)
     inbox = Inbox(store, cfg.machine, cfg.roots, os.environ.get("CLAUDE_CODE_SESSION_ID", ""), os.getcwd(), push)
 

@@ -107,7 +107,9 @@ def main() -> None:
         cfg = Config.load()
         from .push import pusher
 
-        store = Firestore(Session(cfg))
+        from .store import open_store
+
+        store = open_store(cfg)
         inbox = Inbox(store, cfg.machine, cfg.roots, event.get("session_id", ""), event.get("cwd") or os.getcwd(),
                       pusher(store, cfg.owner_email))
         out = handle(event, inbox)
