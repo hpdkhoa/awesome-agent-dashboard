@@ -152,10 +152,14 @@ def main(argv: list[str] | None = None) -> None:
         tmp = db_path().with_suffix(".importing")
         for f in (tmp, tmp.with_name(tmp.name + "-wal"), tmp.with_name(tmp.name + "-shm")):
             f.unlink(missing_ok=True)
-        counts = import_firestore(fs, LocalStore(tmp))
+        local = LocalStore(tmp)
+        counts = import_firestore(fs, local)
+        local.settle()
         if db_path().exists():
             raise SystemExit(f"{db_path()} already exists: the import is in {tmp}; move it by hand if you mean to replace the database")
         os.replace(tmp, db_path())
+        for f in (tmp.with_name(tmp.name + "-wal"), tmp.with_name(tmp.name + "-shm")):
+            f.unlink(missing_ok=True)
         print(f"imported {sum(counts.values())} documents of {len(counts)} collections into {db_path()}. Restart the bridge to use it.")
         return
 

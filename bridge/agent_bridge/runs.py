@@ -76,6 +76,8 @@ APPROVAL_TOOL = "mcp__agent-inbox__inbox_approve"
 STREAM = ["--output-format", "stream-json", "--verbose", "--include-partial-messages"]
 NOTE_SECONDS = 20 * 60  # one page's notes
 NO_CLI = "No signed-in claude CLI on this machine. Install Claude Code and sign in, or set CLAUDE_BIN."
+NO_SESSION = "No conversation found with session ID"  # claude's error when the session's transcript is gone
+ORPHAN_NOTE = "Closed: the session is gone (no conversation found), so this answer is not retried."
 SESSION_ARG = re.compile(r"^--(?:resume|session-id)(?:=(.+))?$")
 LIMIT_MARGIN = 120  # seconds after the reset time before an auto continue, so the limit is surely lifted
 CONTINUE_NOTE = ("The last run of this message stopped at the usage limit. Go on with the leftover work from where it "
@@ -1254,9 +1256,13 @@ class Runs:
         if stopped:
             fields["status"] = "stopped"
         elif r.get("is_error"):
-            # claude ran but reported an error: show its message, not the raw JSON
+            # claude ran but reported an error: show its message, not the raw JSON. A run that fails before its first
+            # turn (subtype error_during_execution, e.g. "No conversation found with session ID") has no "result":
+            # its message is in "errors" and in .err (the owner's OK, 2026-11-12: "show error approved")
+            errs = "; ".join(str(e) for e in (r.get("errors") or []) if e)
             fields["status"] = "failed"
-            fields["error"] = redact(str(r.get("result") or r.get("terminal_reason") or "claude reported an error"), 800)
+            fields["error"] = redact(str(r.get("result") or errs or r.get("terminal_reason") or err.strip()[-800:]
+                                         or "claude reported an error"), 800)
         elif p.returncode == 0:
             fields["status"] = "done"
             # the result itself is not stored: the page reads the whole text from <cid>.out on this PC (texts.py; the
@@ -1270,12 +1276,19 @@ class Runs:
         c = self.store.get(f"commands/{cid}") or {}
         if fields["status"] == "done" and c.get("action") == "plan" and self.budget is not None:
             self.budget.wrote(fields.get("costUsd"))  # step i5: the plan write's measured cost for the next guard
+        orphans = None
         if fields["status"] == "done":
             # no followUp text: the page reads the run's whole result from the PC (texts.py, the owner's choice,
             # 2026-11-08: "From the PC too")
             self._answer_back(c, {"status": "delivered", "deliveredAt": now_iso(), "deliveredVia": "resume", "error": None})
         elif fields["status"] == "stopped":
             self._answer_back(c, {"status": "closed", "error": "Stopped on the page before it reached the session."})
+        elif NO_SESSION in (fields.get("error") or "") and c.get("inboxId"):
+            # an orphan: the session's transcript is gone, so every try fails the same way. Close this answer and the
+            # other answers waiting for the same session, never retried (the owner's words, 2026-11-13: "close and no
+            # rerty for same orphan cases")
+            orphans = self._close_orphans(c)
+            self._answer_back(c, {"status": "closed", "error": ORPHAN_NOTE})
         else:
             self._answer_back(c, {"status": "answered", "lastTryAt": now_iso(),
                                   "error": fields.get("error") or f"The message run {fields['status']}."})
@@ -1289,4 +1302,17 @@ class Runs:
             self.evidence.finished(c, fields["status"], str(r.get("result") or ""),
                                    "Stopped on the page." if stopped else fields.get("error") or "")
         after = self.chains.after(c) if c.get("chain") else None
-        return f"{cid}: {fields['status']}" + (f"; {after}" if after else "")
+        return (f"{cid}: {fields['status']}" + (f"; orphan session, closed {orphans + 1} answer(s), no retry"
+                                                 if orphans is not None else "") + (f"; {after}" if after else ""))
+
+    def _close_orphans(self, c: dict) -> int:
+        """Closes the other answers still waiting for the same gone session on this machine. Returns how many."""
+        sid, n = c.get("sessionId"), 0
+        if not sid:
+            return 0
+        for status in ("answered", "delivering"):
+            for item in self.store.where("inbox", "status", status):
+                if item.get("id") != c.get("inboxId") and item.get("sessionId") == sid and item.get("machine") == self.machine:
+                    self.store.update(f"inbox/{item['id']}", {"status": "closed", "error": ORPHAN_NOTE})
+                    n += 1
+        return n
