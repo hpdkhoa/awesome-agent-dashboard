@@ -1,17 +1,22 @@
-// The page's database calls, with the names the Firestore SDK has, served by the bridge's local database (the owner's
+// The page's database calls, with the names the Firestore SDK has, served by the bridges' local databases (the owner's
 // words, 2026-11-13: "switch firestore into local DB in the place bridge is hosted, and then use the bridge to read and
-// write to that DB, firestore can keep as backup but I want to least the read request from firestore").
+// write to that DB, firestore can keep as backup but I want to least the read request from firestore"; then: "use
+// firestore as control plane, the bridge and data on dashboard will select directly from each bridge ... each bridge
+// give out their data and dashboard will render all data after filter in dashboard side").
 //
-// - The bridge answers (POST /data, bridge/agent_bridge/dataapi.py): every read and write goes there; live updates come
-//   from one open "changes" call, and a listener asks again only when its collection changed. 0 Firestore reads.
-// - The PC is off (the owner's pick 1b): reads fall back to the Firestore backup, read-only; a write says so. Every 30 s
-//   the page tries the bridge again and moves back.
-// - The bridge has no data API (it still keeps its data on Firestore: before the import, or DB=firestore): the page
-//   reads and writes Firestore itself, as before the switch.
+// - Every plugged box (bridge.ts) is asked; the answers are merged by id, sorted and cut here. A record belongs to the
+//   box that gave it: its updates and deletes go back there. A new record goes to the box its `machine` names, or to
+//   the box that holds its plan; settings (meta, pushSubs) go to every box.
+// - Live updates: one open "changes" call per box; a listener asks again only when its collection changed there.
+// - A box is off: its records are missing until it is back; the header says which. Every box is off (the owner's pick
+//   1b): reads fall back to the Firestore backup, read-only. Every 30 s the page tries the boxes again.
+// - No box keeps its data locally yet (before the import, or DB=firestore): Firestore itself, as before the switch.
 // Money (moneyData.ts) stays on Firestore itself (the owner's pick 2b) and does not come through here.
 import * as fb from "firebase/firestore";
 import { useEffect, useState } from "react";
-import { BridgeDown, bridgePost, NoDataApi } from "./bridge";
+import { BridgeDown, boxes, NoDataApi, postTo, type Box } from "./bridge";
+import { db as realDb } from "./firebase";
+import { mergeRows, targetOf, type Row, type Write } from "./fanout";
 
 type Filter = [string, string, unknown];
 export type QueryConstraint =
@@ -43,63 +48,110 @@ export const startAfter = (snap: QueryDocumentSnapshot): QueryConstraint => ({ t
 export const query = (c: CollRef | Query, ...cons: QueryConstraint[]): Query =>
   c.kind === "coll" ? { kind: "query", name: c.name, cons } : { kind: "query", name: c.name, cons: [...c.cons, ...cons] };
 
-// where the data comes from now -------------------------------------------------------------------------------------
+// the boxes and where the data comes from now -----------------------------------------------------------------------
 export type Source = "bridge" | "backup" | "firestore";
+export type BoxState = { name: string; url: string; up: boolean };
+type Live = Box & { up: boolean; seq: number; pumping: boolean };
+let live: Live[] | null = null;
 let source: Source = "bridge";
-// tests, and nothing else: the page's logic against the Firestore emulator
-export const forceSource = (s: Source) => setSource(s);
-const sourceSeen = new Set<(s: Source) => void>();
+const owners = new Map<string, string>(); // record path -> the url of the box that gave it
+const seen = new Set<() => void>();
+const tell = () => seen.forEach((f) => f());
+
+export const forceSource = (s: Source) => setSource(s); // tests, and nothing else: the page's logic against the emulator
 export const usingBackup = () => source !== "bridge"; // any read from Firestore itself, backup or not
-export function useSource(): Source {
-  const [s, setS] = useState(source);
+export function useSource(): { source: Source; boxes: BoxState[] } {
+  const snap = () => ({ source, boxes: (live ?? []).map((b) => ({ name: b.name, url: b.url, up: b.up })) });
+  const [s, setS] = useState(snap);
   useEffect(() => {
-    sourceSeen.add(setS);
-    setS(source);
+    const f = () => setS(snap());
+    seen.add(f);
+    f();
     return () => {
-      sourceSeen.delete(setS);
+      seen.delete(f);
     };
   }, []);
   return s;
 }
-let retry: ReturnType<typeof setTimeout> | null = null;
-function setSource(s: Source) {
-  if (s === source) return;
-  source = s;
-  sourceSeen.forEach((f) => f(s));
-  for (const l of listeners) restart(l);
-  if (s === "backup") tryBridgeLater();
-  else void pump();
+
+async function all(): Promise<Live[]> {
+  if (!live) live = (await boxes()).map((b) => ({ ...b, up: true, seq: -1, pumping: false }));
+  return live;
 }
-function tryBridgeLater() {
+// The registry changed (a box plugged or unplugged): take the new list, keep what is known about the old boxes.
+export async function reloadBoxes(): Promise<void> {
+  const old = live ?? [];
+  live = (await boxes()).map((b) => old.find((o) => o.url === b.url) ?? { ...b, up: true, seq: -1, pumping: false });
+  if (source !== "firestore") setSource("bridge", true);
+  tell();
+}
+
+let retry: ReturnType<typeof setTimeout> | null = null;
+function setSource(s: Source, again = false) {
+  if (s === source && !again) return;
+  source = s;
+  tell();
+  for (const l of listeners) restart(l);
+  if (s === "bridge") for (const b of live ?? []) void pump(b);
+}
+function retryLater() {
   if (retry) return;
   retry = setTimeout(async () => {
     retry = null;
-    try {
-      await bridgePost("/data", { op: "seq" });
-      setSource("bridge");
-    } catch {
-      if (source === "backup") tryBridgeLater();
+    for (const b of (live ?? []).filter((x) => !x.up)) {
+      try {
+        await postTo(b.url, "/data", { op: "seq" });
+        mark(b, true);
+      } catch {
+        // still off
+      }
     }
+    if ((live ?? []).some((x) => !x.up)) retryLater();
   }, 30000);
+}
+function mark(b: Live, up: boolean) {
+  if (b.up === up) return;
+  b.up = up;
+  if (!up) {
+    b.seq = -1;
+    retryLater();
+  }
+  const anyUp = (live ?? []).some((x) => x.up);
+  if (source !== "firestore") {
+    if (!anyUp) setSource("backup");
+    else if (source === "backup") setSource("bridge");
+    else {
+      for (const l of listeners) void refresh(l); // one box came or went: every list is asked again
+      if (up) void pump(b);
+    }
+  }
+  tell();
 }
 const READ_ONLY = "The PC is off: the page shows the Firestore backup, read-only. Try again when the bridge is back.";
 
-async function call<T>(body: unknown, signal?: AbortSignal): Promise<T> {
+async function callBox<T>(b: Live, body: unknown, signal?: AbortSignal): Promise<T> {
   try {
-    const r = await bridgePost<T>("/data", body, signal);
-    if (source === "backup") setSource("bridge");
+    const r = await postTo<T>(b.url, "/data", body, signal);
+    mark(b, true);
     return r;
   } catch (e) {
-    if (e instanceof NoDataApi) setSource("firestore");
-    else if (e instanceof BridgeDown && !signal?.aborted) setSource("backup");
+    if (e instanceof NoDataApi) {
+      if ((live ?? []).length <= 1) setSource("firestore");
+      else mark(b, false);
+    } else if (e instanceof BridgeDown && !signal?.aborted) mark(b, false);
     throw e;
   }
+}
+// The boxes that answer now; empty: use Firestore (the backup, or Firestore itself).
+async function ups(): Promise<Live[]> {
+  if (source !== "bridge") return [];
+  return (await all()).filter((b) => b.up);
 }
 
 // snapshots ---------------------------------------------------------------------------------------------------------
 const docSnap = (ref: DocRef, data: Data | null | undefined): DocumentSnapshot =>
   ({ id: ref.id, data: () => data ?? undefined, exists: () => data != null, ref });
-function querySnap(name: string, rows: { id: string; data: Data }[], before?: Map<string, string>): QuerySnapshot {
+function querySnap(name: string, rows: Row[], before?: Map<string, string>): QuerySnapshot {
   const docs = rows.map((r) => ({ id: r.id, data: () => r.data, exists: () => true as const, ref: doc(null, name, r.id) }));
   const changed = before ? docs.filter((d) => before.get(d.id) !== JSON.stringify(d.data())) : docs;
   const gone = before ? [...before.keys()].filter((id) => !rows.some((r) => r.id === id)).length : 0;
@@ -108,23 +160,65 @@ function querySnap(name: string, rows: { id: string; data: Data }[], before?: Ma
     docChanges: () => [...changed.map((d) => ({ doc: d })), ...Array.from({ length: gone }, () => ({ doc: docs[0] }))],
   };
 }
-
-function findBody(q: Query) {
+const fieldOf = (d: Data, path: string) => path.split(".").reduce<unknown>((cur, k) => (cur as Data | undefined)?.[k], d);
+function shape(q: Query) {
   const order = q.cons.find((c) => c.t === "orderBy") as Extract<QueryConstraint, { t: "orderBy" }> | undefined;
   const after = q.cons.find((c) => c.t === "startAfter") as Extract<QueryConstraint, { t: "startAfter" }> | undefined;
   const lim = q.cons.find((c) => c.t === "limit") as Extract<QueryConstraint, { t: "limit" }> | undefined;
+  return { order, after, limit: lim?.n ?? 0 };
+}
+function findBody(q: Query) {
+  const { order, after, limit: n } = shape(q);
   return {
     op: "find", coll: q.name, filters: q.cons.filter((c) => c.t === "where").map((c) => (c as { f: Filter }).f),
-    order: order?.field ?? "", desc: order?.desc ?? false, limit: lim?.n ?? 0,
+    order: order?.field ?? "", desc: order?.desc ?? false, limit: n,
     ...(after && order ? { after: [fieldOf(after.snap.data(), order.field), after.snap.id] } : {}),
   };
 }
-const fieldOf = (d: Data, path: string) => path.split(".").reduce<unknown>((cur, k) => (cur as Data | undefined)?.[k], d);
 
-// the Firestore backup, for reads while the PC is off --------------------------------------------------------------
-import { db as realDb } from "./firebase";
+// Every box that answers is asked; null: none answered (use Firestore).
+async function findAll(q: Query): Promise<Row[] | null> {
+  const list = await ups();
+  if (!list.length) return null;
+  const got = await Promise.allSettled(list.map((b) => callBox<{ docs: Row[] }>(b, findBody(q))));
+  const parts: Row[][] = [];
+  got.forEach((g, i) => {
+    if (g.status !== "fulfilled") return;
+    for (const r of g.value.docs) owners.set(`${q.name}/${r.id}`, list[i].url);
+    parts.push(g.value.docs);
+  });
+  if (!parts.length) {
+    const hard = got.find((g) => g.status === "rejected" && !(g.reason instanceof BridgeDown)) as PromiseRejectedResult | undefined;
+    if (hard) throw hard.reason;
+    return null;
+  }
+  const { order, limit: n } = shape(q);
+  return mergeRows(parts, order?.field ?? "", order?.desc ?? false, n, q.name);
+}
+async function getAll(ref: DocRef): Promise<{ doc: Data | null } | null> {
+  const list = await ups();
+  if (!list.length) return null;
+  const own = owners.get(ref.path);
+  const ordered = [...list.filter((b) => b.url === own), ...list.filter((b) => b.url !== own)];
+  let answered = false;
+  for (const b of ordered) {
+    try {
+      const d = (await callBox<{ doc: Data | null }>(b, { op: "get", path: ref.path })).doc;
+      answered = true;
+      if (d) {
+        owners.set(ref.path, b.url);
+        return { doc: d };
+      }
+    } catch (e) {
+      if (!(e instanceof BridgeDown)) throw e;
+    }
+  }
+  return answered ? { doc: null } : null;
+}
+
+// Firestore itself: the backup while every box is off, or the database before the switch ---------------------------
 function realQuery(q: Query): fb.Query {
-  const order = q.cons.find((c) => c.t === "orderBy") as Extract<QueryConstraint, { t: "orderBy" }> | undefined;
+  const { order } = shape(q);
   const cons = q.cons.map((c) =>
     c.t === "where" ? fb.where(c.f[0], c.f[1] as fb.WhereFilterOp, c.f[2])
     : c.t === "orderBy" ? fb.orderBy(c.field, c.desc ? "desc" : "asc")
@@ -132,48 +226,37 @@ function realQuery(q: Query): fb.Query {
     : fb.startAfter(order ? fieldOf(c.snap.data(), order.field) : c.snap.id));
   return fb.query(fb.collection(realDb, q.name), ...cons);
 }
-const fromReal = (name: string, s: fb.QuerySnapshot) => s.docs.map((d) => ({ id: d.id, data: d.data() as Data }));
+const fromReal = (s: fb.QuerySnapshot): Row[] => s.docs.map((d) => ({ id: d.id, data: d.data() as Data }));
 
 // one-shot reads -----------------------------------------------------------------------------------------------------
 export async function getDoc(ref: DocRef): Promise<DocumentSnapshot> {
-  if (source === "bridge") {
-    try {
-      return docSnap(ref, (await call<{ doc: Data | null }>({ op: "get", path: ref.path })).doc);
-    } catch (e) {
-      if (!(e instanceof BridgeDown)) throw e;
-    }
-  }
+  const got = await getAll(ref);
+  if (got) return docSnap(ref, got.doc);
   const s = await fb.getDoc(fb.doc(realDb, ref.coll, ref.id));
   return docSnap(ref, s.exists() ? (s.data() as Data) : null);
 }
 export async function getDocs(q: Query | CollRef): Promise<QuerySnapshot> {
   const qq = q.kind === "coll" ? query(q) : q;
-  if (source === "bridge") {
-    try {
-      return querySnap(qq.name, (await call<{ docs: { id: string; data: Data }[] }>(findBody(qq))).docs);
-    } catch (e) {
-      if (!(e instanceof BridgeDown)) throw e;
-    }
-  }
-  return querySnap(qq.name, fromReal(qq.name, await fb.getDocs(realQuery(qq))));
+  const rows = await findAll(qq);
+  return querySnap(qq.name, rows ?? fromReal(await fb.getDocs(realQuery(qq))));
 }
 export async function getCountFromServer(c: CollRef) {
-  if (source === "bridge") {
-    try {
-      const n = (await call<{ count: number }>({ op: "count", coll: c.name })).count;
+  const list = await ups();
+  if (list.length) {
+    const got = await Promise.allSettled(list.map((b) => callBox<{ count: number }>(b, { op: "count", coll: c.name })));
+    const ok = got.filter((g) => g.status === "fulfilled") as PromiseFulfilledResult<{ count: number }>[];
+    if (ok.length) {
+      const n = ok.reduce((a, g) => a + g.value.count, 0);
       return { data: () => ({ count: n }) };
-    } catch (e) {
-      if (!(e instanceof BridgeDown)) throw e;
     }
   }
   const s = await fb.getCountFromServer(fb.collection(realDb, c.name));
   return { data: () => ({ count: s.data().count }) };
 }
 
-// writes: the bridge only; the backup is read-only -------------------------------------------------------------------
-type W = { op: "set"; path: string; data: Data; merge: boolean } | { op: "update"; path: string; fields: Data } | { op: "delete"; path: string };
+// writes: to the box that owns the record; Firestore only before the switch; the backup is read-only ---------------
 const realRef = (path: string) => fb.doc(realDb, path.split("/")[0], path.split("/")[1]);
-async function realWrite(ws: W[]): Promise<void> {
+async function realWrite(ws: Write[]): Promise<void> {
   if (ws.length === 1) {
     const w = ws[0];
     if (w.op === "set") await fb.setDoc(realRef(w.path), w.data, { merge: w.merge });
@@ -189,23 +272,46 @@ async function realWrite(ws: W[]): Promise<void> {
   }
   await b.commit();
 }
-async function write(ws: W[]): Promise<void> {
+async function write(ws: Write[]): Promise<void> {
   if (source === "firestore") return realWrite(ws);
   if (source === "backup") throw new Error(READ_ONLY);
-  let r: { ok?: boolean };
+  const everyone = await all();
+  const list = everyone.filter((b) => b.up);
+  if (!list.length) throw new Error(READ_ONLY);
+  const per = new Map<Live, Write[]>();
+  const anywhere: Write[] = []; // an update or delete of a record no box has shown yet: every box is asked
+  for (const w of ws) {
+    const t = targetOf(w, owners, everyone.map((b) => ({ name: b.name, url: b.url })));
+    if (t === "all") for (const b of list) per.set(b, [...(per.get(b) ?? []), w]);
+    else if (t === "any") anywhere.push(w);
+    else {
+      const b = everyone.find((x) => x.url === t) ?? list[0];
+      if (!b.up) throw new Error(`The box ${b.name || "that holds this record"} is off: try again when its bridge is back.`);
+      per.set(b, [...(per.get(b) ?? []), w]);
+    }
+  }
   try {
-    r = await call<{ ok?: boolean }>(ws.length === 1 ? ws[0] : { op: "batch", writes: ws });
+    for (const [b, mine] of per) {
+      const r = await callBox<{ ok?: boolean }>(b, mine.length === 1 ? mine[0] : { op: "batch", writes: mine });
+      if (mine.length === 1 && mine[0].op === "update" && r.ok === false) throw Object.assign(new Error("No such record: it was deleted."), { code: "not-found" });
+      for (const w of mine) if (w.op === "set") owners.set(w.path, b.url);
+    }
+    for (const w of anywhere) {
+      const got = await Promise.allSettled(list.map((b) => callBox<{ ok?: boolean }>(b, w)));
+      const hit = got.findIndex((g) => g.status === "fulfilled" && g.value.ok !== false);
+      if (w.op === "update" && hit < 0) throw Object.assign(new Error("No such record: it was deleted."), { code: "not-found" });
+      if (hit >= 0 && w.op === "update") owners.set(w.path, list[hit].url);
+    }
   } catch (e) {
-    if (e instanceof NoDataApi) return realWrite(ws);
+    if (e instanceof NoDataApi && (source as Source) === "firestore") return realWrite(ws); // callBox just found the bridge keeps Firestore
     throw e instanceof BridgeDown ? new Error(READ_ONLY) : e;
   }
-  if (ws.length === 1 && ws[0].op === "update" && r.ok === false) throw Object.assign(new Error("No such record: it was deleted."), { code: "not-found" });
 }
 export const setDoc = (ref: DocRef, data: Data, opts?: { merge?: boolean }) => write([{ op: "set", path: ref.path, data, merge: !!opts?.merge }]);
 export const updateDoc = (ref: DocRef, fields: Data) => write([{ op: "update", path: ref.path, fields }]);
 export const deleteDoc = (ref: DocRef) => write([{ op: "delete", path: ref.path }]);
 export function writeBatch(_db: unknown) {
-  const writes: W[] = [];
+  const writes: Write[] = [];
   return {
     set: (ref: DocRef, data: Data, opts?: { merge?: boolean }) => void writes.push({ op: "set", path: ref.path, data, merge: !!opts?.merge }),
     update: (ref: DocRef, fields: Data) => void writes.push({ op: "update", path: ref.path, fields }),
@@ -225,21 +331,22 @@ async function refresh(l: Listener): Promise<void> {
   if (l.gone || source !== "bridge") return;
   try {
     if (l.target.kind === "doc") {
-      const d = (await call<{ doc: Data | null }>({ op: "get", path: l.target.path })).doc;
-      const key = JSON.stringify(d);
+      const got = await getAll(l.target);
+      if (!got) return;
+      const key = JSON.stringify(got.doc);
       if (l.before?.get("doc") === key) return;
       l.before = new Map([["doc", key]]);
-      if (!l.gone) (l.cb as (s: DocumentSnapshot) => void)(docSnap(l.target, d));
+      if (!l.gone) (l.cb as (s: DocumentSnapshot) => void)(docSnap(l.target, got.doc));
     } else {
-      const rows = (await call<{ docs: { id: string; data: Data }[] }>(findBody(l.target))).docs;
+      const rows = await findAll(l.target);
+      if (!rows) return;
       const snap = querySnap(l.target.name, rows, l.before);
-      const first = !l.before;
-      if (!first && snap.docChanges().length === 0) return;
+      if (l.before && snap.docChanges().length === 0) return;
       l.before = new Map(rows.map((r) => [r.id, JSON.stringify(r.data)]));
       if (!l.gone) (l.cb as (s: QuerySnapshot) => void)(snap);
     }
   } catch {
-    // the bridge went away: setSource("backup") restarted this listener on the backup
+    // a box went away: mark() asked every listener again, or moved them to the backup
   }
 }
 function restart(l: Listener) {
@@ -253,26 +360,24 @@ function restart(l: Listener) {
     l.stopReal = fb.onSnapshot(fb.doc(realDb, ref.coll, ref.id), (s) => (l.cb as (s: DocumentSnapshot) => void)(docSnap(ref, s.exists() ? (s.data() as Data) : null)), () => undefined);
   } else {
     const q = l.target;
-    l.stopReal = fb.onSnapshot(realQuery(q), (s) => (l.cb as (s: QuerySnapshot) => void)(querySnap(q.name, fromReal(q.name, s))), () => undefined);
+    l.stopReal = fb.onSnapshot(realQuery(q), (s) => (l.cb as (s: QuerySnapshot) => void)(querySnap(q.name, fromReal(s))), () => undefined);
   }
 }
 
-// one open call for every listener: the bridge answers when something changed, or after 25 s
-let pumping = false;
-let seq = -1;
-async function pump(): Promise<void> {
-  if (pumping) return;
-  pumping = true;
+// one open call per box for every listener: the box answers when something changed there, or after 25 s
+async function pump(b: Live): Promise<void> {
+  if (b.pumping) return;
+  b.pumping = true;
   try {
-    while (listeners.size > 0 && source === "bridge") {
+    while (listeners.size > 0 && source === "bridge" && b.up && (live ?? []).includes(b)) {
       if (typeof document !== "undefined" && document.visibilityState === "hidden") {
         await new Promise((r) => setTimeout(r, 5000)); // a hidden tab asks nothing; its listeners refresh when it shows
         continue;
       }
       try {
-        if (seq < 0) seq = (await call<{ seq: number }>({ op: "seq" })).seq;
-        const r = await call<{ seq: number; changes: { path: string; coll: string }[]; reset?: boolean }>({ op: "changes", since: seq, wait: 25 });
-        seq = r.seq;
+        if (b.seq < 0) b.seq = (await callBox<{ seq: number }>(b, { op: "seq" })).seq;
+        const r = await callBox<{ seq: number; changes: { path: string; coll: string }[]; reset?: boolean }>(b, { op: "changes", since: b.seq, wait: 25 });
+        b.seq = r.seq;
         const colls = new Set(r.changes.map((c) => c.coll));
         const paths = new Set(r.changes.map((c) => c.path));
         for (const l of [...listeners]) {
@@ -283,15 +388,19 @@ async function pump(): Promise<void> {
       }
     }
   } finally {
-    pumping = false;
+    b.pumping = false;
   }
+}
+async function pumpAll(): Promise<void> {
+  if (source !== "bridge") return;
+  for (const b of await all()) void pump(b);
 }
 if (typeof document !== "undefined") {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible" && source === "bridge") {
-      seq = -1; // changes while hidden were not followed: ask every listener once
+      for (const b of live ?? []) b.seq = -1; // changes while hidden were not followed: ask every listener once
       for (const l of listeners) void refresh(l);
-      void pump();
+      void pumpAll();
     }
   });
 }
@@ -302,7 +411,7 @@ export function onSnapshot(target: DocRef | Query | CollRef, cb: ((s: DocumentSn
   const l: Listener = { target: target.kind === "coll" ? query(target) : target, cb: cb as (s: never) => void };
   listeners.add(l);
   restart(l);
-  void pump();
+  void pumpAll();
   return () => {
     l.gone = true;
     l.stopReal?.();

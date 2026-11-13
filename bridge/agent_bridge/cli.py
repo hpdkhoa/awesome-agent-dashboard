@@ -90,6 +90,7 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("push-setup", help="make this machine's push key once and publish its public half for the page")
     sub.add_parser("push-test", help="send a test notification to every subscribed phone")
     sub.add_parser("import-firestore", help="copy Firestore into the local database once; from then the bridge uses the local file")
+    sub.add_parser("init-local", help="a new box: make an empty local database; the bridge then registers this box by itself")
     a = p.parse_args(argv)
 
     if a.cmd == "inbox":
@@ -126,6 +127,20 @@ def main(argv: list[str] | None = None) -> None:
             print(f"Sent to {n} device(s).")
         return
 
+    if a.cmd == "init-local":
+        # plug and play (the owner's words, 2026-11-13: "plug and play another box in this dashboard")
+        from .localdb import LocalStore
+        from .store import db_path
+
+        if db_path().exists():
+            print(f"{db_path()} is already there: nothing to do.")
+            return
+        if not cfg.files_url:
+            raise SystemExit("Set FILES_URL in .env first: this box's own tunnel address, so the page can reach it.")
+        LocalStore(db_path())
+        print(f"made {db_path()}. Start the bridge: it registers this box as {cfg.machine} at {cfg.files_url}, and the dashboard shows it.")
+        return
+
     if a.cmd == "import-firestore":
         # the owner's words, 2026-11-13: "switch firestore into local DB in the place bridge is hosted"
         from .localdb import LocalStore
@@ -156,7 +171,7 @@ def main(argv: list[str] | None = None) -> None:
         patient("owner check", store.check_owner)
         print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} database: "
               f"{'the local file' if is_local(store) else 'Firestore' if is_firestore(store) else 'the host bridge at ' + cfg.db_host_url}", flush=True)
-    mirror = None
+    mirror = registry = None
     claude = find_claude(cfg.claude_bin)
     runs = gone = publisher = health = None
     if store is not None and a.cmd == "watch":
@@ -232,8 +247,11 @@ def main(argv: list[str] | None = None) -> None:
                 runs.prefs_feed = doc_feed(store, "meta/runs")
             if is_local(store):
                 from .mirror import Mirror
+                from .registry import Registry
 
-                mirror = Mirror(store, Firestore(Session(cfg)))
+                backup = Firestore(Session(cfg))
+                mirror = Mirror(store, backup)
+                registry = Registry(backup, cfg.machine, cfg.files_url, "local")
         else:
             try:
                 from .listen import AccountFeeds, CommandFeed, DeletedFeed, firestore_client
@@ -276,6 +294,13 @@ def main(argv: list[str] | None = None) -> None:
                     print(f"{stamp()} run {line}", flush=True)
             if mirror is not None and time.time() >= next_mirror:
                 next_mirror = time.time() + 60  # the backup: every change, batched each minute (the owner's pick 3a)
+                try:
+                    if registry is not None:  # this box in the registry: on start, then every 15 minutes
+                        line = registry.step()
+                        if line:
+                            print(f"{stamp()} {line}", flush=True)
+                except (Exception, SystemExit) as e:
+                    print(f"{stamp()} registry waits: {str(e).splitlines()[0][:120]}", flush=True)
                 try:
                     line = mirror.step()
                     if line:

@@ -219,3 +219,15 @@ and Firestore becomes the backup: the bridge writes every change to it once a mi
 - Another machine's bridge: set `DB_HOST_URL` to the host bridge's `FILES_URL`; it then calls the host's data API.
 - The PC is off: the page shows the Firestore backup, read-only, and tries the bridge again every 30 s.
 - Money (entries, rates, gold) stays on Firestore.
+
+### Several boxes
+
+Each box runs its own bridge with its own local database; Firestore keeps only a registry, one document per box
+(`bridges/<name>`: its address, when it was last seen, plugged or not). The page asks every plugged box and merges the
+answers; a record's changes go back to the box that holds it.
+
+- Plug a box in: install the bridge there, `python -m agent_bridge signin`, set `FILES_URL` (that box's own tunnel
+  address) and `SITE_ORIGINS` in its `.env`, run `python -m agent_bridge init-local`, start the bridge. It registers
+  itself and shows under Boxes on the dashboard.
+- Unplug: Boxes, Unplug. The page stops asking that box; its data and bridge stay as they are. Plug in brings it back.
+- A box that is off: its records are missing until its bridge answers; the header names it.

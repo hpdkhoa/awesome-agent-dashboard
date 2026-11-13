@@ -12,6 +12,7 @@ import { FileViewer, PcText } from "./FileView";
 import { SpendChart } from "./Charts";
 import { useSource } from "./fs";
 import { UsageCheck } from "./UsageCheck";
+import { Boxes } from "./Boxes";
 import { HealthPanel, HealthPill, useHealth } from "./Health";
 import { MoreMenu } from "./MoreMenu";
 
@@ -173,7 +174,12 @@ export function Dashboard() {
         <button className="chip panel-btn" title={layout.leftHidden ? "Show the left panel" : "Hide the left panel"}
           onClick={() => setLayout((l) => ({ ...l, leftHidden: !l.leftHidden }))}>{layout.leftHidden ? "›" : "‹"}</button>
         <strong>Agent dashboard</strong>
-        {source === "backup" && <span className="stat wait-fg" title="The bridge on your PC does not answer: this is the Firestore backup, read-only. The page tries the bridge again every 30 s.">PC off · backup, read-only</span>}
+        {source.source === "backup" && <span className="stat wait-fg" title="No bridge answers: this is the Firestore backup, read-only. The page tries the boxes again every 30 s.">PC off · backup, read-only</span>}
+        {source.source === "bridge" && source.boxes.some((b) => !b.up) && (
+          <span className="stat wait-fg" title="This box's bridge does not answer: its records are missing until it is back. The page tries again every 30 s.">
+            off: {source.boxes.filter((b) => !b.up).map((b) => b.name || "the bridge").join(", ")}
+          </span>
+        )}
         <button className={waiting ? "pill wait" : "pill"} onClick={() => setTab("inbox")}>
           {waiting} waiting for you
         </button>
@@ -332,6 +338,9 @@ export function Dashboard() {
         </Section>
         <Section id="usage.days" title="Spend by day" extra={spendDays === 1 ? "today" : spendDays ? `last ${spendDays} days` : `${usage.length} days, whole history`}>
           <SpendChart usage={usage} range={spendDays} onRange={setSpendDays} />
+        </Section>
+        <Section id="usage.boxes" title="Boxes" extra={`${source.boxes.filter((b) => b.up).length} on`} open={false}>
+          <Boxes />
         </Section>
         <Section id="usage.check" title="Usage check" extra="Claude plan · Firestore">
           <UsageCheck />

@@ -113,3 +113,20 @@ def test_data_api_and_remote_store(tmp_path):
         assert r.get("commands/r1") is None and s.get("commands/r1") is None
     finally:
         srv.shutdown()
+
+
+def test_a_box_registers_itself_and_never_touches_plugged(tmp_path):
+    from agent_bridge.registry import KEEPALIVE_SECONDS, Registry
+
+    fs, now = FakeStore(), [1000.0]
+    r = Registry(fs, "linux", "https://linux.example.com", "local", clock=lambda: now[0])
+    assert r.step() == "registered as box linux at https://linux.example.com"
+    d = fs.docs["bridges/linux"]
+    assert d["plugged"] is True and d["db"] == "local" and d["url"] == "https://linux.example.com" and d["seenAt"]
+    fs.docs["bridges/linux"]["plugged"] = False  # the owner unplugs it on the page
+    assert r.step() is None  # inside the keepalive: no write
+    now[0] += KEEPALIVE_SECONDS
+    seen = d["seenAt"]
+    r.step()
+    assert fs.docs["bridges/linux"]["plugged"] is False and fs.docs["bridges/linux"]["seenAt"] != seen  # still unplugged, seen again
+    assert Registry(fs, "pc", "", "local").step() is None  # no address: nothing to register

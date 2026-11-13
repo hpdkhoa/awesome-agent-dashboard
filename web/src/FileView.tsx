@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
-import { auth } from "./firebase";
-import { bridgePost, filesUrl } from "./bridge";
+import { bridgePostAny } from "./bridge";
 export { bridgePost, filesUrl } from "./bridge";
 import { Md } from "./Markdown";
 
@@ -16,23 +15,10 @@ const TEXT_MAX = 2 * 1024 * 1024;
 const EVENT = "aad.openFile";
 
 
+// A file lives on one box: each box is asked for a ticket until one has the file.
 export async function ticket(path: string, cwd: string): Promise<Ticket> {
-  const url = await filesUrl();
-  if (!url) throw new Error("The file viewer is off: set FILES_URL on the bridge.");
-  const token = await auth.currentUser?.getIdToken();
-  let r: Response;
-  try {
-    r = await fetch(url + "/ticket", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ path, cwd }),
-    });
-  } catch {
-    throw new Error("The PC does not answer: is the bridge running and the tunnel up?");
-  }
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j.error ?? `The bridge answered ${r.status}.`);
-  return { ...j, url: url + j.url };
+  const { answer, url } = await bridgePostAny<Ticket>("/ticket", { path, cwd });
+  return { ...answer, url: url + answer.url };
 }
 
 // The whole text of a session's turn or of a run's result, read from the PC and never stored (the owner's words,
@@ -44,13 +30,14 @@ export type PcReply = { text: string; chars: number; n?: number; at?: string; pr
 // One signed call to the bridge on the PC (POST /text, POST /usage): the answer is shown, never stored.
 
 export type PcReplyRef = { session: string; item: string; k: number };
-export const pcText = (body: { session?: string; turn?: number; run?: string; reply?: PcReplyRef }) => bridgePost<PcReply>("/text", body);
+// a run's text or a session's log lives on one box: each box is asked until one has it
+export const pcText = (body: { session?: string; turn?: number; run?: string; reply?: PcReplyRef }) => bridgePostAny<PcReply>("/text", body).then((r) => r.answer);
 
 // The running turn, streamed by claude into the run's .out on the PC (step i3, the owner's choice, 2026-11-12: "Token
 // stream"): asked every 2 s while the run is running, shown, never stored (no Firestore write).
 export type PcLive = { text: string; chars: number; cut: boolean; tools: number; started: boolean; done: boolean };
 export const LIVE_EVERY_MS = 2000;
-export const pcLive = (run: string) => bridgePost<PcLive>("/text", { live: run });
+export const pcLive = (run: string) => bridgePostAny<PcLive>("/text", { live: run }).then((r) => r.answer);
 
 export function LiveText({ run, cwd }: { run: string; cwd: string }) {
   const [got, setGot] = useState<PcLive | string | null>(null);
