@@ -226,8 +226,13 @@ Each box runs its own bridge with its own local database; Firestore keeps only a
 (`bridges/<name>`: its address, when it was last seen, plugged or not). The page asks every plugged box and merges the
 answers; a record's changes go back to the box that holds it.
 
-- Plug a box in: install the bridge there, `python -m agent_bridge signin`, set `FILES_URL` (that box's own tunnel
-  address) and `SITE_ORIGINS` in its `.env`, run `python -m agent_bridge init-local`, start the bridge. It registers
-  itself and shows under Boxes on the dashboard.
+- Plug a box in, one script: clone this repo on the box, copy `.env` from a box that already works, route the box's
+  own tunnel address to `127.0.0.1:8793`, then run
+  `sh bridge/setup-box.sh --url https://<its address> --roots "name=/path;..."` (Linux, macOS) or
+  `powershell -ExecutionPolicy Bypass -File bridge\setup-box.ps1 -Url https://<its address> -Roots "name=path;..."`
+  (Windows). It installs the packages, writes the box's lines into `.env`, signs you in, makes the empty local
+  database, registers the inbox with Claude Code, installs the background service and waits until the bridge says it
+  registered. The box then shows under Boxes on the dashboard. `--dry-run` / `-DryRun` says what it would do; over ssh
+  add `--signin-port 8790`. Safe to run again.
 - Unplug: Boxes, Unplug. The page stops asking that box; its data and bridge stay as they are. Plug in brings it back.
 - A box that is off: its records are missing until its bridge answers; the header names it.
