@@ -1,6 +1,9 @@
 // The avatar's Firebase part (plan b73e97ad p11; the owner's picks "C: bridges publish, avatar listens", "All, merged +
 // picker"). Built into ../ui/fb.js by build.mjs (the app loads no script from the web). The avatar listens to the
 // machines records only: each bridge publishes its own state and the account's counts there (bridge status.py).
+// Since 2026-11-13 (the owner's words: "Change the avatar to read the bridge") the records come from the boxes
+// themselves: Firestore gives the registry of boxes once (bridges/<name>, asked again every 10 minutes), then each
+// plugged box's data API gives its own machines record, live. With no registered box it listens to Firestore, as before.
 // Sign-in: the owner's Google account through the same localhost page the bridge uses (main.rs auth.rs); the Firebase
 // user it returns lives in the OS key store and only in this page's memory (session storage) while the app runs.
 import { initializeApp } from "firebase/app";
@@ -8,6 +11,63 @@ import { initializeAuth, browserSessionPersistence, onIdTokenChanged, signOut } 
 import { getFirestore, collection, doc, getDocs, limit, onSnapshot, orderBy, query, setDoc, where } from "firebase/firestore";
 
 let app = null, auth = null, db = null, unsub = null;
+
+// --- the boxes -------------------------------------------------------------------------------------------------
+const invoke = (cmd, args) => window.__TAURI__.core.invoke(cmd, args);
+const REGISTRY_MS = 10 * 60 * 1000;
+let boxes = [], boxRows = new Map(), boxStop = false;
+async function ask(box, body) {
+  const token = await auth.currentUser.getIdToken();
+  return JSON.parse(await invoke("box_data", { url: box.url, token, body: JSON.stringify(body) }));
+}
+async function readRegistry(onError) {
+  try {
+    const q = await getDocs(collection(db, "bridges"));
+    window.FB.reads += Math.max(1, q.size);
+    return q.docs.map((d) => ({ name: d.id, ...d.data() })).filter((b) => b.url && b.plugged !== false && b.db === "local");
+  } catch (e) { onError(e.code || e.message); return null; }
+}
+// One box: its machines records now, then one open "changes" call that answers when something changed there.
+async function follow(box, onMachines) {
+  let seq = -1;
+  while (!boxStop && boxes.includes(box)) {
+    try {
+      if (seq < 0) seq = (await ask(box, { op: "seq" })).seq;
+      const rows = (await ask(box, { op: "find", coll: "machines" })).docs.map((d) => ({ id: d.id, ...d.data }));
+      if (boxStop || !boxes.includes(box)) return;
+      boxRows.set(box.name, rows);
+      window.FB.boxAsks += 1;
+      onMachines([...boxRows.values()].flat());
+      seq = (await ask(box, { op: "changes", since: seq, wait: 25 })).seq;   // up to 25 s, or at once on a change
+    } catch (e) {
+      // the box does not answer: its last record stays and ages, so it turns offline after the usual 7 minutes
+      seq = -1;
+      await new Promise((r) => setTimeout(r, 15000));
+    }
+  }
+}
+async function startBoxes(onMachines, onError) {
+  boxStop = false;
+  const list = await readRegistry(onError);
+  if (!list || !list.length) return false;
+  boxes = list;
+  boxRows = new Map();
+  for (const b of boxes) follow(b, onMachines);
+  const again = setInterval(async () => {
+    if (boxStop) return clearInterval(again);
+    const next = await readRegistry(onError);
+    if (!next || boxStop) return;
+    const same = (a, b) => a.name === b.name && a.url === b.url;
+    const kept = boxes.filter((b) => next.some((n) => same(n, b)));
+    const fresh = next.filter((n) => !boxes.some((b) => same(n, b)));
+    for (const b of boxes) if (!kept.includes(b)) boxRows.delete(b.name);   // unplugged: its record leaves
+    boxes = [...kept, ...fresh];
+    for (const b of fresh) follow(b, onMachines);                         // plugged in: followed from now
+    onMachines([...boxRows.values()].flat());
+  }, REGISTRY_MS);
+  return true;
+}
+function stopBoxes() { boxStop = true; boxes = []; boxRows = new Map(); }
 
 // cfg: {apiKey, authDomain, projectId, ownerEmail}; user: the Firebase user JSON from the key store
 async function start(cfg, user, onUser, onMachines, onError) {
@@ -22,9 +82,14 @@ async function start(cfg, user, onUser, onMachines, onError) {
     }
     onUser(JSON.stringify(u.toJSON()));     // an hourly token refresh: kept in the key store, the listen stays open
     if (unsub) return;
-    unsub = onSnapshot(collection(db, "machines"),
-      (snap) => { window.FB.reads += Math.max(1, snap.docChanges().length); onMachines(snap.docs.map((d) => ({ id: d.id, ...d.data() }))); },
-      (e) => onError(e.code || e.message));
+    unsub = () => {};                       // taken while the registry is read, so a token refresh starts nothing twice
+    startBoxes(onMachines, onError).then((fromBoxes) => {
+      if (fromBoxes) { unsub = stopBoxes; return; }
+      // no box keeps its data locally yet: the machines records on Firestore, as before
+      unsub = onSnapshot(collection(db, "machines"),
+        (snap) => { window.FB.reads += Math.max(1, snap.docChanges().length); onMachines(snap.docs.map((d) => ({ id: d.id, ...d.data() }))); },
+        (e) => onError(e.code || e.message));
+    });
   });
 }
 async function stop() { ratesClose(); if (unsub) unsub(); unsub = null; if (auth) await signOut(auth); }
@@ -72,4 +137,5 @@ async function saveGold(q) {
   window.FB.writes += 1;
 }
 // reads/writes: Firestore bills one read per changed record delivered (at least one per answer); counted for the checks
-window.FB = { start, stop, ratesOpen, ratesClose, saveFx, saveGold, signedIn: () => !!(auth && auth.currentUser), reads: 0, writes: 0 };
+window.FB = { start, stop, ratesOpen, ratesClose, saveFx, saveGold, signedIn: () => !!(auth && auth.currentUser), reads: 0, writes: 0,
+  boxAsks: 0, boxes: () => boxes.map((b) => b.name) };

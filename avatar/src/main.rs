@@ -75,6 +75,44 @@ async fn price(path: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || fetch_price(&path)).await.map_err(|e| e.to_string())?
 }
 
+// The boxes' bridges (the owner's words, 2026-11-13: "Change the avatar to read the bridge"): each box keeps its own
+// data and answers POST <its address>/data (bridge dataapi.py) for the owner's sign-in. The page cannot ask a box
+// itself (its content policy names fixed hosts, and a box's address is the owner's own), so this asks from the Rust
+// side: https addresses only (or this PC), the data route only, reads only.
+fn post_box(url: &str, token: &str, body: &str) -> Result<String, String> {
+    let url = url.trim_end_matches("/");
+    if !(url.starts_with("https://") || url.starts_with("http://127.0.0.1:")) {
+        return Err("a box address must be https".to_string());
+    }
+    let v: serde_json::Value = serde_json::from_str(body).map_err(|e| e.to_string())?;
+    let op = v.get("op").and_then(|o| o.as_str()).unwrap_or("");
+    if !["find", "get", "count", "seq", "changes"].contains(&op) {
+        return Err(format!("{op} is not a read"));
+    }
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(35)))
+        .http_status_as_error(false)
+        .build()
+        .into();
+    let mut r = agent.post(&format!("{url}/data"))
+        .header("Authorization", &format!("Bearer {token}"))
+        .header("Content-Type", "application/json")
+        .header("User-Agent", "agent-avatar")
+        .send(body)
+        .map_err(|e| e.to_string())?;
+    let code = r.status().as_u16();
+    let text = r.body_mut().read_to_string().map_err(|e| e.to_string())?;
+    if code >= 400 {
+        return Err(format!("the box answered {code}"));
+    }
+    Ok(text)
+}
+
+#[tauri::command]
+async fn box_data(url: String, token: String, body: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || post_box(&url, &token, &body)).await.map_err(|e| e.to_string())?
+}
+
 struct Load {
     sys: Mutex<Option<sysinfo::System>>, // None when sysinfo cannot start on this machine
     nvml: Option<nvml_wrapper::Nvml>,
@@ -169,7 +207,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .manage(Load { sys: Mutex::new(sys), nvml: nvml_wrapper::Nvml::init().ok() })
         .manage(avatar::Pending(Mutex::new(None)))
-        .invoke_handler(tauri::generate_handler![status, load, price, menu, avatar::avatars, avatar::drop_ask, auth::fb_config,
+        .invoke_handler(tauri::generate_handler![status, load, price, box_data, menu, avatar::avatars, avatar::drop_ask, auth::fb_config,
             auth::auth_get, auth::auth_set])
         .on_menu_event(|app, e| match e.id().as_ref() {
             "hide" => toggle(app, Some(false)),
