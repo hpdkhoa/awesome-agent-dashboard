@@ -208,7 +208,7 @@ This project follows Anthropic's terms for Claude Code: one person's own use of 
 
 ## The local database
 
-The bridge can keep all dashboard data in one SQLite file on its own machine (`%APPDATA%\awesome-agent-dashboard\data.sqlite`)
+The bridge can keep all dashboard data in one SQLite file on its own machine (`%USERPROFILE%\.awesome-agent-dashboard\data.sqlite`)
 instead of Firestore. The page then reads and writes through the bridge (POST `/data` on the file viewer's address),
 and Firestore becomes the backup: the bridge writes every change to it once a minute and never reads it.
 

@@ -173,8 +173,12 @@ def main(argv: list[str] | None = None) -> None:
     if not getattr(a, "dry_run", False):
         store = open_store(cfg)
         patient("owner check", store.check_owner)
+        from .store import db_path
+
+        why = "" if not is_firestore(store) else (" (DB=firestore in .env)" if cfg.db == "firestore"
+                                                   else f" (no local file at {db_path()}: run import-firestore or init-local)")
         print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} database: "
-              f"{'the local file' if is_local(store) else 'Firestore' if is_firestore(store) else 'the host bridge at ' + cfg.db_host_url}", flush=True)
+              f"{'the local file ' + str(db_path()) if is_local(store) else 'Firestore' + why if is_firestore(store) else 'the host bridge at ' + cfg.db_host_url}", flush=True)
     mirror = registry = None
     claude = find_claude(cfg.claude_bin)
     runs = gone = publisher = health = None

@@ -8,16 +8,23 @@ is hosted ... firestore can keep as backup"; pick 4a: other machines call this P
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 from .auth import Session
-from .config import data_dir
 from .firestore import Firestore
 from .localdb import LocalStore, RemoteStore
 
 DB_FILE = "data.sqlite"
 
 
-def db_path():
-    return data_dir() / DB_FILE
+def db_path() -> Path:
+    """The local database's file: in the user's own folder, not under AppData. A process the Claude desktop app starts
+    (a session's inbox server, a shell) gets a private copy of AppData, so a file there is not the one the bridge sees
+    (found 2026-11-13: the import made a file the task-started bridge could not see). AAD_DB_FILE overrides."""
+    p = Path(os.environ.get("AAD_DB_FILE") or Path.home() / ".awesome-agent-dashboard" / DB_FILE)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p
 
 
 def open_store(cfg):
