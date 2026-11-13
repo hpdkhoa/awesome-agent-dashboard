@@ -49,6 +49,15 @@ describe("delete with linked records", () => {
     expect(Object.keys(gone)).toEqual(["sessions/s1"]);
   });
 
+  it("an inbox row takes its whole batch, answered or open; other batches stay", async () => {
+    await put("inbox/b0", { batchId: "B", batchIndex: 0, status: "delivered", title: "F1" });
+    await put("inbox/b1", { batchId: "B", batchIndex: 1, status: "open", title: "F2" });
+    await put("inbox/b2", { batchId: "B", batchIndex: 2, status: "delivering", title: "F3" });
+    await put("inbox/x0", { batchId: "X", batchIndex: 0, status: "open", title: "other" });
+    expect((await linkedRecords("inbox/b1")).map((x) => x.path).sort()).toEqual(["inbox/b0", "inbox/b1", "inbox/b2"]);
+    expect((await linkedRecords("inbox/x0")).map((x) => x.path)).toEqual(["inbox/x0"]);
+  });
+
   it("marks running runs, sends them a deleting stop, and warns about a session open in the app", async () => {
     const fresh = new Date().toISOString();
     await put("sessions/app", { title: "in the app" });

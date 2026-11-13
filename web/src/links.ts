@@ -43,6 +43,12 @@ export async function linkedRecords(path: string): Promise<Linked[]> {
       const rows = await getDocs(query(collection(db, coll), where(field, "==", id)));
       rows.forEach((d) => todo.push(`${coll}/${d.id}`));
     }
+    // one inbox row stands for its whole batch, so its delete takes every question of the batch, answered or not
+    // (the owner, 2026-11-13: "make the delete that I can delete the record even it not done all answers")
+    if (name === "inbox" && d.batchId) {
+      const rows = await getDocs(query(collection(db, "inbox"), where("batchId", "==", String(d.batchId))));
+      rows.forEach((r) => todo.push(`inbox/${r.id}`));
+    }
   }
   const list = [...out.values()];
   // a fresh heartbeat with a bridge run behind it is that run, which the bridge stops; any other is the Claude app

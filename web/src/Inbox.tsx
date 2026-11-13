@@ -29,7 +29,10 @@ function ago(iso: string) {
 
 export function InboxList({ items, picked, onPick }: { items: InboxItem[]; picked?: string; onPick: (id: string) => void }) {
   // one row per batch: its first question stands for it
-  const sorted = [...items].filter((i) => !i.batchId || (i.batchIndex ?? 0) === 0)
+  // the lowest index still stored, so a batch whose first question is gone still has a row
+  const head = (i: InboxItem) =>
+    !i.batchId || !items.some((x) => x.batchId === i.batchId && (x.batchIndex ?? 0) < (i.batchIndex ?? 0));
+  const sorted = [...items].filter(head)
     .sort((a, b) => Number(isWaiting(b)) - Number(isWaiting(a)));
   const size = (i: InboxItem) => (i.batchId ? items.filter((x) => x.batchId === i.batchId) : [i]);
   return (
