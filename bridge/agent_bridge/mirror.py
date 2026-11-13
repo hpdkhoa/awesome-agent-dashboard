@@ -14,6 +14,8 @@ from datetime import datetime
 SKIP = {"liveSessions"}
 MONEY = {"moneyEntries", "fxRates", "goldPrices"}  # stay on Firestore: the page reads and writes them there
 KEY = "mirror_seq"
+COLLECTIONS = ["commands", "inbox", "liveSessions", "machines", "meta", "planChains", "planChecks", "planEvidence", "planGenerated",
+               "planHarness", "planSteps", "planVersions", "plans", "pushSubs", "sessions", "usage", "workTypes"]
 
 
 class Mirror:
@@ -47,9 +49,8 @@ def import_firestore(fs, local, say=print) -> dict[str, int]:
     """Copies every Firestore collection but the money ones into the local database. Returns the count of each."""
     from .firestore import from_value
 
-    ids = (fs._call(f"{fs.base}:listCollectionIds", {"pageSize": 300}) or {}).get("collectionIds") or []
     out: dict[str, int] = {}
-    for coll in sorted(ids):
+    for coll in COLLECTIONS:  # the owner's sign-in may not list collection ids (403): the names the code writes
         if coll in MONEY:
             say(f"{coll}: stays on Firestore")
             continue
