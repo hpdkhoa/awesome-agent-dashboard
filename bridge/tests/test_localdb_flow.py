@@ -11,9 +11,12 @@ def test_question_answer_and_delivery_on_the_local_database(tmp_path):
     store = LocalStore(tmp_path / "data.sqlite")
     ib = Inbox(store, "PC", [("labs", "K:/labs")], "s1", "K:/labs/x")
     qid = ib.post("question", "Which way?", "Pick one", [{"label": "A", "differs": "d"}, {"label": "B", "differs": "d"}], 0)
-    feeds = LocalAccountFeeds(store, live_count=lambda: 2)
+    from datetime import datetime, timezone
+    iso = lambda t: datetime.fromtimestamp(t, timezone.utc).isoformat(timespec="seconds")
+    store.put_many({"liveSessions/a": {"beatAt": iso(990)}, "liveSessions/b": {"beatAt": iso(950)}, "liveSessions/old": {"beatAt": iso(100)}})
+    feeds = LocalAccountFeeds(store)
     d = feeds.read(1000.0)
-    assert (d["going"], d["sessions"], d["inbox"]) == (0, 2, 1)
+    assert (d["going"], d["sessions"], d["inbox"]) == (0, 2, 1)  # two beat in the last 180 s, one went quiet
     api = DataApi(store)  # the page answers through the bridge
     found = api.answer({"op": "find", "coll": "inbox", "filters": [["status", "in", ["open", "answered", "delivering"]]], "limit": 10})
     assert [r["id"] for r in found["docs"]] == [qid]

@@ -222,7 +222,9 @@ class LocalAccountFeeds(AccountFeeds):
         self.store, self.wall = store, wall
         self._feed, self._ids = LocalFeed, with_ids
         self.commands = LocalFeed(store, "commands", lambda s: with_ids(s, "commands", [("status", "IN", GOING)]), "commands(going)")
-        self.live = None
+        # sessions open now: their heartbeats, as before the local database (app sessions and bridge runs alike);
+        # the beats are local, so listening costs no Firestore read. read() counts the ones under LIVE_SECONDS old.
+        self.live = LocalFeed(store, "liveSessions", lambda s: s.find("liveSessions"), "liveSessions")
         self.live_count = live_count or _open_sessions
         self.inbox = LocalFeed(store, "inbox", lambda s: with_ids(s, "inbox", [("status", "IN", INBOX)]), "inbox(open,answered,delivering)")
         self.machines = LocalFeed(store, "machines", lambda s: with_ids(s, "machines"), "machines")

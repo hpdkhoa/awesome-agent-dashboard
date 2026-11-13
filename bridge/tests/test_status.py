@@ -351,3 +351,16 @@ def test_rest_calls_keep_one_connection_and_reopen_a_dropped_one(monkeypatch):
                                        ("GET", "/v1/projects/p/databases/(default)/documents/meta/b")]
     store._local.conn.drop = True  # the server closed the idle connection
     assert store.get("meta/c") == {} and len(made) == 2
+
+
+def test_publisher_also_writes_the_record_to_firestore_at_once():
+    from agent_bridge.status import Publisher
+    from test_inbox import FakeStore
+
+    local, fs = FakeStore(), FakeStore()
+    local.docs["machines/PC"] = {"name": "PC"}
+    p = Publisher(local, "PC", clock=lambda: 1000.0, also=fs)
+    assert p.publish({"status": "in progress", "runs": 1})
+    assert fs.docs["machines/PC"]["avatar"] == {"status": "in progress", "runs": 1} and fs.docs["machines/PC"]["seenAt"]
+    assert p.publish({"status": "done", "runs": 0})  # a change goes at once, no minute's wait
+    assert fs.docs["machines/PC"]["avatar"]["status"] == "done"

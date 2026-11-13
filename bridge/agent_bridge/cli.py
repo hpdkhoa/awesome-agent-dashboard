@@ -248,7 +248,7 @@ def main(argv: list[str] | None = None) -> None:
 
         status = Status(store, cfg.machine, cfg.status_hosts, runs)
         serve_status(status, cfg.status_port)
-        publisher = Publisher(store, cfg.machine)
+        publisher = Publisher(store, cfg.machine, also=Firestore(Session(cfg)) if is_local(store) else None)
         print(f"avatar status on 127.0.0.1:{cfg.status_port}/status", flush=True)
         feed = gone = None
         if not is_firestore(store):

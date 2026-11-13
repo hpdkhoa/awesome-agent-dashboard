@@ -45,9 +45,11 @@ ASKED_SECONDS = 120
 # p10 (the owner's picks, 2026-11-11: "C: bridges publish, avatar listens"; Firestore "Optimized": written only on a
 # change, plus a 5 min still-alive write): each bridge writes its own state into machines/<name> on a change and at least
 # every KEEPALIVE_SECONDS; a bridge counts as online while that is under MACHINE_LIVE_SECONDS old (keepalive + 2 rounds).
-KEEPALIVE_SECONDS = 900  # the owner's words, 2026-11-12: "machines doc: write it only when it changes" (608 writes a day)
-MACHINE_LIVE_SECONDS = 1020  # keepalive + 2 rounds; the background thread refreshes only while /status was asked this recently
-PUBLISH_GAP_SECONDS = 60  # a changed state waits for the next minute, so a busy minute is one write, not ten
+# 5 minutes again (2026-11-13): the avatar counts a bridge online while its record is under 420 s old (avatar
+# ui/app.js MACHINE_LIVE_S), so the 15-minute keepalive of 2026-11-12 showed every other bridge offline. That cut was
+# for the page's Firestore reads; the page reads the local database now, so the record costs writes only.
+KEEPALIVE_SECONDS = 300
+MACHINE_LIVE_SECONDS = 420  # keepalive + 2 rounds; the background thread refreshes only while /status was asked this recently
 GOING = ["new", "running", "waiting", "stopping"]  # chain.GOING
 HOST_PORTS = (("ssh", 22), ("ollama", 11434))
 
@@ -282,8 +284,11 @@ class Publisher:
     avatar listens" and Firestore "Optimized"): only when the state changed, at least every KEEPALIVE_SECONDS so other
     avatars see it online, and at once after sync replaced the record (force). One update: the fields seenAt, avatar."""
 
-    def __init__(self, store, machine: str, clock=time.time):
+    def __init__(self, store, machine: str, clock=time.time, also=None):
         self.store, self.machine, self.clock = store, machine, clock
+        # also: Firestore, when `store` is the local database: an avatar on another machine listens to the machines
+        # records there, so this one goes at once, not with the minute's backup
+        self.also = also
         self.last: str | None = None
         self.at = 0.0
         self.writes = 0
@@ -293,9 +298,14 @@ class Publisher:
         key = json.dumps(state, sort_keys=True)
         if not force and key == self.last and now - self.at < KEEPALIVE_SECONDS:
             return False
-        if not force and key != self.last and now - self.at < PUBLISH_GAP_SECONDS:
-            return False  # changed, but written less than a minute ago: next round
-        if self.store.update(f"machines/{self.machine}", {"seenAt": _iso(now), "avatar": state}):
+        fields = {"seenAt": _iso(now), "avatar": state}
+        if self.store.update(f"machines/{self.machine}", fields):
+            if self.also is not None:
+                try:
+                    if not self.also.update(f"machines/{self.machine}", fields):
+                        self.also.put_many({f"machines/{self.machine}": {"name": self.machine, **fields}})
+                except (Exception, SystemExit):
+                    pass  # the minute's backup carries it
             self.last, self.at = key, now
             self.writes += 1
             return True
