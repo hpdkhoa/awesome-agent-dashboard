@@ -39,6 +39,8 @@ export function forgetFilesUrl(): void {
 }
 
 export class BridgeDown extends Error {}
+// The bridge answers but has no data API: it still uses Firestore as its database (before the import, or DB=firestore).
+export class NoDataApi extends BridgeDown {}
 
 // One signed POST. Throws BridgeDown when the PC does not answer at all (off, no tunnel), Error on a refusal.
 export async function bridgePost<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
@@ -58,6 +60,7 @@ export async function bridgePost<T>(path: string, body: unknown, signal?: AbortS
   }
   if (r.status === 502 || r.status === 503 || r.status === 504 || r.status === 530) throw new BridgeDown("The PC does not answer: is the bridge running and the tunnel up?");
   const j = await r.json().catch(() => ({}));
+  if (r.status === 404 && path === "/data") throw new NoDataApi("The bridge keeps its data on Firestore.");
   if (!r.ok) throw new Error(j.error ?? `The bridge answered ${r.status}.`);
   return j as T;
 }

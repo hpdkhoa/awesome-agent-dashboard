@@ -7,6 +7,8 @@ import type { InboxItem } from "../web/src/data";
 
 const state = vi.hoisted(() => ({ db: null as unknown }));
 vi.mock("../web/src/firebase", () => ({ get db() { return state.db; } }));
+const fsShim = await import("../web/src/fs");
+fsShim.forceSource("firestore"); // the page's logic against the emulator; the bridge path has its own tests
 const { askBack, batchOf, saveDraft, sendBatch } = await import("../web/src/data");
 
 let env: RulesTestEnvironment;

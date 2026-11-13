@@ -6,10 +6,12 @@
 //   from one open "changes" call, and a listener asks again only when its collection changed. 0 Firestore reads.
 // - The PC is off (the owner's pick 1b): reads fall back to the Firestore backup, read-only; a write says so. Every 30 s
 //   the page tries the bridge again and moves back.
+// - The bridge has no data API (it still keeps its data on Firestore: before the import, or DB=firestore): the page
+//   reads and writes Firestore itself, as before the switch.
 // Money (moneyData.ts) stays on Firestore itself (the owner's pick 2b) and does not come through here.
 import * as fb from "firebase/firestore";
 import { useEffect, useState } from "react";
-import { BridgeDown, bridgePost } from "./bridge";
+import { BridgeDown, bridgePost, NoDataApi } from "./bridge";
 
 type Filter = [string, string, unknown];
 export type QueryConstraint =
@@ -42,10 +44,12 @@ export const query = (c: CollRef | Query, ...cons: QueryConstraint[]): Query =>
   c.kind === "coll" ? { kind: "query", name: c.name, cons } : { kind: "query", name: c.name, cons: [...c.cons, ...cons] };
 
 // where the data comes from now -------------------------------------------------------------------------------------
-export type Source = "bridge" | "backup";
+export type Source = "bridge" | "backup" | "firestore";
 let source: Source = "bridge";
+// tests, and nothing else: the page's logic against the Firestore emulator
+export const forceSource = (s: Source) => setSource(s);
 const sourceSeen = new Set<(s: Source) => void>();
-export const usingBackup = () => source === "backup";
+export const usingBackup = () => source !== "bridge"; // any read from Firestore itself, backup or not
 export function useSource(): Source {
   const [s, setS] = useState(source);
   useEffect(() => {
@@ -86,7 +90,8 @@ async function call<T>(body: unknown, signal?: AbortSignal): Promise<T> {
     if (source === "backup") setSource("bridge");
     return r;
   } catch (e) {
-    if (e instanceof BridgeDown && !signal?.aborted) setSource("backup");
+    if (e instanceof NoDataApi) setSource("firestore");
+    else if (e instanceof BridgeDown && !signal?.aborted) setSource("backup");
     throw e;
   }
 }
@@ -166,33 +171,46 @@ export async function getCountFromServer(c: CollRef) {
 }
 
 // writes: the bridge only; the backup is read-only -------------------------------------------------------------------
-async function write(body: unknown): Promise<void> {
+type W = { op: "set"; path: string; data: Data; merge: boolean } | { op: "update"; path: string; fields: Data } | { op: "delete"; path: string };
+const realRef = (path: string) => fb.doc(realDb, path.split("/")[0], path.split("/")[1]);
+async function realWrite(ws: W[]): Promise<void> {
+  if (ws.length === 1) {
+    const w = ws[0];
+    if (w.op === "set") await fb.setDoc(realRef(w.path), w.data, { merge: w.merge });
+    else if (w.op === "update") await fb.updateDoc(realRef(w.path), w.fields);
+    else await fb.deleteDoc(realRef(w.path));
+    return;
+  }
+  const b = fb.writeBatch(realDb);
+  for (const w of ws) {
+    if (w.op === "set") b.set(realRef(w.path), w.data, { merge: w.merge });
+    else if (w.op === "update") b.update(realRef(w.path), w.fields);
+    else b.delete(realRef(w.path));
+  }
+  await b.commit();
+}
+async function write(ws: W[]): Promise<void> {
+  if (source === "firestore") return realWrite(ws);
   if (source === "backup") throw new Error(READ_ONLY);
+  let r: { ok?: boolean };
   try {
-    await call(body);
+    r = await call<{ ok?: boolean }>(ws.length === 1 ? ws[0] : { op: "batch", writes: ws });
   } catch (e) {
+    if (e instanceof NoDataApi) return realWrite(ws);
     throw e instanceof BridgeDown ? new Error(READ_ONLY) : e;
   }
+  if (ws.length === 1 && ws[0].op === "update" && r.ok === false) throw Object.assign(new Error("No such record: it was deleted."), { code: "not-found" });
 }
-export const setDoc = (ref: DocRef, data: Data, opts?: { merge?: boolean }) => write({ op: "set", path: ref.path, data, merge: !!opts?.merge });
-export async function updateDoc(ref: DocRef, fields: Data): Promise<void> {
-  if (source === "backup") throw new Error(READ_ONLY);
-  let r: { ok: boolean };
-  try {
-    r = await call<{ ok: boolean }>({ op: "update", path: ref.path, fields });
-  } catch (e) {
-    throw e instanceof BridgeDown ? new Error(READ_ONLY) : e;
-  }
-  if (!r.ok) throw Object.assign(new Error("No such record: it was deleted."), { code: "not-found" });
-}
-export const deleteDoc = (ref: DocRef) => write({ op: "delete", path: ref.path });
+export const setDoc = (ref: DocRef, data: Data, opts?: { merge?: boolean }) => write([{ op: "set", path: ref.path, data, merge: !!opts?.merge }]);
+export const updateDoc = (ref: DocRef, fields: Data) => write([{ op: "update", path: ref.path, fields }]);
+export const deleteDoc = (ref: DocRef) => write([{ op: "delete", path: ref.path }]);
 export function writeBatch(_db: unknown) {
-  const writes: unknown[] = [];
+  const writes: W[] = [];
   return {
     set: (ref: DocRef, data: Data, opts?: { merge?: boolean }) => void writes.push({ op: "set", path: ref.path, data, merge: !!opts?.merge }),
     update: (ref: DocRef, fields: Data) => void writes.push({ op: "update", path: ref.path, fields }),
     delete: (ref: DocRef) => void writes.push({ op: "delete", path: ref.path }),
-    commit: () => write({ op: "batch", writes }),
+    commit: () => write(writes),
   };
 }
 

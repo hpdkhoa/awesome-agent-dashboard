@@ -6,6 +6,8 @@ import { doc, getDoc, setDoc } from "firebase/firestore";
 
 const state = vi.hoisted(() => ({ db: null as unknown }));
 vi.mock("../web/src/firebase", () => ({ get db() { return state.db; } }));
+const fsShim = await import("../web/src/fs");
+fsShim.forceSource("firestore"); // the page's logic against the emulator; the bridge path has its own tests
 const { deleteRecords, linkedRecords, stopRunning } = await import("../web/src/links");
 const { removeRows } = await import("../web/src/storeData");
 
