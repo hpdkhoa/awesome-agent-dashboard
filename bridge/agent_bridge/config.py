@@ -69,11 +69,49 @@ def root_refusal(name: str, folder: str, roots: list[tuple[str, str]], home: Pat
 
 
 def data_dir() -> Path:
-    """The bridge's own folder, outside the repo: %APPDATA% on Windows, ~/.config elsewhere."""
-    base = os.environ.get("APPDATA") or os.path.join(Path.home(), ".config")
-    d = Path(base) / "awesome-agent-dashboard"
+    """The bridge's own folder, outside the repo: the user folder's .awesome-agent-dashboard on Windows, ~/.config
+    elsewhere; AAD_DATA_DIR overrides. Not under AppData (the owner's words, 2026-11-13: "bridge files move"): a
+    process the Claude desktop app starts gets a private copy of AppData, so the bridge and a session's inbox server
+    would not see the same files there."""
+    over = os.environ.get("AAD_DATA_DIR")
+    if over:
+        d = Path(over)
+    elif os.name == "nt":
+        d = Path.home() / ".awesome-agent-dashboard"
+    else:
+        d = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "awesome-agent-dashboard"
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def move_old_data() -> list[str]:
+    """Once, on Windows: what the bridge kept under the old AppData folder moves to data_dir(). A name
+    that is already in the new folder is a duplicate: the old copy is removed ("if duplicated then remove"). Run by
+    the bridge at start, before it opens anything there. Returns one line per thing done."""
+    import shutil
+
+    if os.name != "nt" or os.environ.get("AAD_DATA_DIR") or not os.environ.get("APPDATA"):
+        return []
+    old, new = Path(os.environ["APPDATA"]) / "awesome-agent-dashboard", data_dir()
+    if not old.is_dir() or old.resolve() == new.resolve():
+        return []
+    out = []
+    for f in sorted(old.iterdir()):
+        try:
+            if (new / f.name).exists():
+                shutil.rmtree(f) if f.is_dir() else f.unlink()
+                out.append(f"removed the duplicate {f.name} from the old folder")
+            else:
+                shutil.move(str(f), str(new / f.name))
+                out.append(f"moved {f.name}")
+        except OSError as e:
+            out.append(f"could not move {f.name}: {e}")
+    try:
+        old.rmdir()
+        out.append(f"removed the empty old folder {old}")
+    except OSError:
+        pass
+    return out
 
 
 @dataclass

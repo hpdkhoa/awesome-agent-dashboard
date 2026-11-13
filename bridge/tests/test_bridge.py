@@ -133,7 +133,7 @@ def test_deleted_documents_are_not_written_again(tmp_path, monkeypatch):
     from agent_bridge.config import Config
     from test_inbox import FakeStore
 
-    monkeypatch.setenv("APPDATA", str(tmp_path / "app"))
+    monkeypatch.setenv("AAD_DATA_DIR", str(tmp_path / "app"))
     logs = tmp_path / "logs"
     write(logs / "proj" / "s1.jsonl", [human(T1, "hi"), assistant("m1", T2, "ok", sid="s1")])
     write(logs / "proj" / "s2.jsonl", [human(T1, "hi"), assistant("m2", T2, "ok", sid="s2")])
@@ -192,3 +192,26 @@ def test_a_refused_start_waits_and_tries_again():
     import pytest
     with pytest.raises(SystemExit, match="403"):
         patient("owner check", lambda: (_ for _ in ()).throw(SystemExit("Firestore refused (403): not the owner")), sleep=naps.append)
+
+
+def test_old_appdata_files_move_and_duplicates_go(tmp_path, monkeypatch):
+    import os
+
+    from agent_bridge import config
+
+    if os.name != "nt":
+        return
+    old, new = tmp_path / "Roaming" / "awesome-agent-dashboard", tmp_path / "home" / ".awesome-agent-dashboard"
+    (old / "runs").mkdir(parents=True)
+    (old / "runs" / "a.out").write_text("x")
+    (old / "bridge.log").write_text("old log")
+    (old / "budget.json").write_text("old")
+    new.mkdir(parents=True)
+    (new / "budget.json").write_text("new")
+    monkeypatch.delenv("AAD_DATA_DIR", raising=False)
+    monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
+    monkeypatch.setattr(config, "data_dir", lambda: new)
+    lines = config.move_old_data()
+    assert (new / "runs" / "a.out").read_text() == "x" and (new / "bridge.log").read_text() == "old log"
+    assert (new / "budget.json").read_text() == "new" and not old.exists()  # the duplicate went, the new one stays
+    assert any("duplicate budget.json" in x for x in lines) and config.move_old_data() == []

@@ -71,9 +71,16 @@ def _data_api(store):
 
 
 def main(argv: list[str] | None = None) -> None:
+    moved = []
+    if (argv if argv is not None else sys.argv[1:])[:1] == ["watch"]:
+        from .config import move_old_data
+
+        moved = move_old_data()  # before the log and the lock open in the new folder
     if sys.stdout is None:
         # Started without a console (pythonw, a scheduled task): write to a log file next to the bridge's state.
         sys.stdout = sys.stderr = open(data_dir() / "bridge.log", "a", encoding="utf-8", buffering=1)
+    for line in moved:
+        print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} data folder: {line}", flush=True)
     p = argparse.ArgumentParser(prog="agent-bridge")
     sub = p.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("signin", help="sign in once with your Google account")

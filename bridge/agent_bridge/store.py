@@ -22,7 +22,9 @@ def db_path() -> Path:
     """The local database's file: in the user's own folder, not under AppData. A process the Claude desktop app starts
     (a session's inbox server, a shell) gets a private copy of AppData, so a file there is not the one the bridge sees
     (found 2026-11-13: the import made a file the task-started bridge could not see). AAD_DB_FILE overrides."""
-    p = Path(os.environ.get("AAD_DB_FILE") or Path.home() / ".awesome-agent-dashboard" / DB_FILE)
+    from .config import data_dir
+
+    p = Path(os.environ.get("AAD_DB_FILE") or data_dir() / DB_FILE)
     p.parent.mkdir(parents=True, exist_ok=True)
     return p
 
