@@ -235,7 +235,8 @@ class RemoteStore:
         import urllib.request
 
         req = urllib.request.Request(self.url + "/data", data=json.dumps(body).encode(), method="POST",
-                                     headers={"Authorization": f"Bearer {self.s.token()}", "Content-Type": "application/json"})
+                                     headers={"Authorization": f"Bearer {self.s.token()}", "Content-Type": "application/json",
+                                              "User-Agent": "awesome-agent-dashboard-bridge"})  # Cloudflare refuses urllib's own (1010)
         try:
             with urllib.request.urlopen(req, timeout=60) as r:
                 return json.load(r)
