@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { forSession, QUOTE_EVENT, takeQuote } from "./quote";
 import {
-  addRoot, cancelMessage, checkSession, continueRun, forceMessage, setAutoContinue, planFromSession, PLAN_KINDS, searchRun, sendMessage, setRunMode, startRun, stopRun, useRunMode,
+  addRoot, newestFirst, PAGE, cancelMessage, checkSession, continueRun, forceMessage, setAutoContinue, planFromSession, PLAN_KINDS, searchRun, sendMessage, setRunMode, startRun, stopRun, useRunMode,
   EFFORTS, exactEffort, exactModel, FRESH_OVER, MODELS, setRunPrefs, useRunPrefs, type Fresh, type RunWith,
   type Machine, type Run, type Session,
 } from "./data";
@@ -432,11 +432,16 @@ function ContinueBar({ r }: { r: Run }) {
 const quoteTarget = (r: Run): Record<string, string> =>
   r.planId ? { "data-quote-plan": r.planId } : r.sessionId && !r.noSession ? { "data-quote-session": r.sessionId } : {};
 
-export function RunList({ runs, title = "Runs from the dashboard" }: { runs: Run[]; title?: string }) {
-  const shown = runs.filter((r) => r.action === "start" || r.action === "message" || r.action === "plan" || r.action === "search");
+// paged: the newest PAGE rows, the rest behind Show more, PAGE more a click (the owner's words, 2026-11-14: "I want to
+// see the messages newest and top 10, the rest show in show more"). The rows are already read, so Show more reads nothing.
+export function RunList({ runs, title = "Runs from the dashboard", paged = false }: { runs: Run[]; title?: string; paged?: boolean }) {
+  // newest first wherever a list of runs shows: the Runs tab, messages to a session, messages on a plan (2026-11-14)
+  const all = newestFirst(runs.filter((r) => r.action === "start" || r.action === "message" || r.action === "plan" || r.action === "search"), "createdAt");
+  const [count, setCount] = useState(PAGE);
+  const shown = paged ? all.slice(0, count) : all;
   return (
     <div>
-      <h2 className="label">{title}</h2>
+      <h2 className="label">{title}{paged && all.length > PAGE ? ` (${shown.length} of ${all.length})` : ""}</h2>
       {shown.length === 0 && <p className="muted small">None yet.</p>}
       {shown.map((r) => (
         <Section
@@ -503,6 +508,11 @@ export function RunList({ runs, title = "Runs from the dashboard" }: { runs: Run
           )}
         </Section>
       ))}
+      {shown.length < all.length && (
+        <button className="link small" onClick={() => setCount(count + PAGE)}>
+          Show more ({Math.min(PAGE, all.length - shown.length)} older of {all.length - shown.length} left)
+        </button>
+      )}
     </div>
   );
 }

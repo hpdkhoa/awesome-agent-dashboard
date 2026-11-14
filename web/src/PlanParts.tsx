@@ -8,7 +8,7 @@ import { isWaiting } from "./Inbox";
 import { openFile, PcText } from "./FileView";
 import { askAbout, forPlan, QUOTE_EVENT, quotePart, quoteStep, takeQuote } from "./quote";
 import { staleMark, staleness, versionAt } from "./planStale";
-import { usePlanGenerated } from "./data";
+import { newestFirst, PAGE, usePlanGenerated } from "./data";
 import { Md } from "./Markdown";
 import { Example } from "./Example";
 import { MoreMenu } from "./MoreMenu";
@@ -127,16 +127,18 @@ function PartActions({ k, name, lines }: { k: string; name: string; lines: strin
 
 // The messages asked on one step or part, with the session's reply read whole from the PC.
 function OnMessages({ runs, plan, where }: { runs: Run[]; plan: Plan; where: On }) {
-  const list = runs
-    .filter((r) => r.planId === plan.id && r.kind && (where.stepId ? r.stepId === where.stepId : r.part === where.part))
-    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  if (list.length === 0) return null;
+  // newest first, the newest open (the owner's words, 2026-11-14: "ordering from latest to older")
+  const all = newestFirst(runs.filter((r) => r.planId === plan.id && r.kind && (where.stepId ? r.stepId === where.stepId : r.part === where.part)), "createdAt");
+  // the newest 10, the rest behind Show more (the owner's words, 2026-11-14: "newest and top 10, the rest show in show more")
+  const [count, setCount] = useState(PAGE);
+  const list = all.slice(0, count);
+  if (all.length === 0) return null;
   return (
     <div className="on-msgs">
       {/* the owner's pick, 2026-11-12, "Both": each message folds to its header, the newest starts open, and its
           text and reply show 4 lines, then Show more */}
       {list.map((r, i) => (
-        <Section key={r.id} id={`plan.msg.${r.id}`} open={i === list.length - 1}
+        <Section key={r.id} id={`plan.msg.${r.id}`} open={i === 0}
           title={<>{KIND_NAME[r.kind!]} · {when(r.createdAt)} · <span className={"status " + r.status}>{r.status}</span></>}>
           <Clamp><Md text={r.ownerText ?? r.prompt ?? ""} cwd={plan.cwd} /></Clamp>
           {(r.status === "done" || r.status === "lost") && (
@@ -147,6 +149,11 @@ function OnMessages({ runs, plan, where }: { runs: Run[]; plan: Plan; where: On 
           )}
         </Section>
       ))}
+      {list.length < all.length && (
+        <button className="link small" onClick={() => setCount(count + PAGE)}>
+          Show more ({Math.min(PAGE, all.length - list.length)} older of {all.length - list.length} left)
+        </button>
+      )}
     </div>
   );
 }
@@ -525,7 +532,7 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
       <GeneratedSection plan={plan} v={v} stale={staleMark(stale, "generated")} />
 
       <PlanMessage plan={plan} />
-      {msgs.length > 0 && <RunList runs={msgs} title="Messages on this plan" />}
+      {msgs.length > 0 && <RunList runs={msgs} title="Messages on this plan" paged />}
 
       {plan.source && (
         <Section id="plan.source" title="Read from" extra={`session ${plan.source.sessionId.slice(0, 8)} · ${plan.source.pages.length} pages`} open={false}>

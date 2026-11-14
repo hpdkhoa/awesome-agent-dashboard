@@ -1,7 +1,7 @@
 import type { Phase } from "./phases";
 import { checkHash, itemHash, type HarnessItem, type HarnessTicks } from "./harness";
 import type { Kind } from "./planCheck";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { collection, doc, getDocs, limit, onSnapshot, orderBy, query, setDoc, startAfter, updateDoc, where, type QueryConstraint, type QueryDocumentSnapshot } from "./fs";
 import { db } from "./firebase";
 import { countReads, useActive } from "./pageReads";
@@ -212,9 +212,22 @@ function useCollection<T>(key: string, ...constraints: QueryConstraint[]): T[] |
 export const RECENT_DAYS = 1; // the owner's words, 2026-11-13: "session is 1 day display and the rest is hidden inside show more"
 export const PAGE = 10; // the first display and every Show more: 10 documents at most
 
+// Every list shows the newest first (the owner's words, 2026-11-14: "I want ordering from latest to older from every
+// where listing session or messages"). By time, not by text, so "...Z" and "...+00:00" dates compare right.
+const timeOf = (v: unknown) => (typeof v === "string" ? Date.parse(v) || 0 : typeof v === "number" ? v : 0);
+export const newestFirst = <T extends { id: string }>(rows: T[], field: keyof T & string): T[] =>
+  [...rows].sort((a, b) => timeOf(b[field]) - timeOf(a[field]) || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+const rowSnap = (name: string, row: { id: string }): QueryDocumentSnapshot =>
+  ({ id: row.id, data: () => row as unknown as Record<string, unknown>, exists: () => true, ref: doc(null, name, row.id) });
+
 // Older rows behind Show more: one-shot reads, PAGE at a time, never a listener (the owner's words, 2026-11-13).
 export type Pager<T> = { rows: T[]; more: () => void; loading: boolean; done: boolean; pages: number };
-export function usePager<T>(name: string, orderField: string, on = true, ...constraints: QueryConstraint[]): Pager<T> {
+// seed: the rows the live list shows now, when it has the same order (sessions by lastAt, plans by updatedAt). The first
+// Show more keeps them and reads after the last one, so it never repeats the newest rows and a row that later drops out
+// of the live list stays shown (the owner's pick, 2026-11-14: "All lists newest first").
+export function usePager<T extends { id: string }>(name: string, orderField: string, seed?: T[] | null, on = true, ...constraints: QueryConstraint[]): Pager<T> {
+  const seedNow = useRef(seed);
+  seedNow.current = seed;
   const [rows, setRows] = useState<T[]>([]);
   const [last, setLast] = useState<QueryDocumentSnapshot | null>(null);
   const [loading, setLoading] = useState(false);
@@ -223,11 +236,13 @@ export function usePager<T>(name: string, orderField: string, on = true, ...cons
   const more = () => {
     if (loading || done || !on) return;
     setLoading(true);
-    const q = query(collection(db, name), ...constraints, orderBy(orderField, "desc"), ...(last ? [startAfter(last)] : []), limit(PAGE));
+    const seeded = !last && pages === 0 ? newestFirst(seedNow.current ?? [], orderField as keyof T & string) : [];
+    const from = last ?? (seeded.length ? rowSnap(name, seeded[seeded.length - 1]) : null);
+    const q = query(collection(db, name), ...constraints, orderBy(orderField, "desc"), ...(from ? [startAfter(from)] : []), limit(PAGE));
     getDocs(q).then((s) => {
       countReads(s.docs.length, `${name} (older)`);
-      setRows((r) => [...r, ...s.docs.map((d) => d.data() as T)]);
-      setLast(s.docs[s.docs.length - 1] ?? last);
+      setRows((r) => [...r, ...seeded, ...s.docs.map((d) => d.data() as T)]);
+      setLast(s.docs[s.docs.length - 1] ?? from);
       setDone(s.docs.length < PAGE);
       setPages((p) => p + 1);
       setLoading(false);
@@ -287,7 +302,7 @@ export function usePlanVersions(planId: string | undefined): PlanVersion[] | nul
 }
 // only the items still open, answered or being delivered; the rest behind Show more (usePager)
 export const INBOX_LIVE = ["open", "answered", "delivering"];
-export const useInbox = () => useCollection<InboxItem>("inbox", where("status", "in", INBOX_LIVE), limit(PAGE));
+export const useInbox = () => useCollection<InboxItem>("inbox", where("status", "in", INBOX_LIVE), orderBy("createdAt", "desc"), limit(PAGE));
 
 // The owner's answer. The session picks it up live, or the bridge resumes the session if it has closed.
 export const answerItem = (id: string, choice: string, text: string) =>
@@ -340,7 +355,8 @@ export const isClosed = (p: Pick<Plan, "status">) => p.status !== "open";
 export const chooseVersion = (planId: string, n: number) => updateDoc(doc(db, "plans", planId), { chosen: n });
 // only the runs going now; the rest behind Show more (usePager)
 export const RUN_LIVE = ["new", "waiting", "running", "stopping", "paused"];
-export const useRuns = () => useCollection<Run>("commands", where("status", "in", RUN_LIVE), limit(PAGE));
+// newest first, so the 10 kept are the newest (before: no order, the oldest 10 came back)
+export const useRuns = () => useCollection<Run>("commands", where("status", "in", RUN_LIVE), orderBy("createdAt", "desc"), limit(PAGE));
 
 const newId = () => crypto.randomUUID().replace(/-/g, "").slice(0, 20);
 

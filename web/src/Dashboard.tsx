@@ -4,7 +4,7 @@ import { QUOTE_EVENT, type QuoteAsk } from "./quote";
 import { clampWidth, gridColumns, loadLayout, saveLayout, type Layout } from "./layout";
 import { signOut } from "firebase/auth";
 import { auth } from "./firebase";
-import { RECENT_DAYS, useInbox, useMachines, usePager, usePlanInbox, usePlanRuns, usePlans, useRuns, useSessions, useUsage, useWorkTypes, type InboxItem, type Pager, type Plan, type Run, type Session, type Tokens } from "./data";
+import { RECENT_DAYS, newestFirst, useInbox, useMachines, usePager, usePlanInbox, usePlanRuns, usePlans, useRuns, useSessions, useUsage, useWorkTypes, type InboxItem, type Pager, type Plan, type Run, type Session, type Tokens } from "./data";
 import { MessageBox, ModeSwitch, PlanFromSession, RunList, SearchBox, StartForm } from "./Runs";
 import { PlanBoard, PlanList, PlanView } from "./Plans";
 import { usePush, type PushState } from "./notify";
@@ -70,22 +70,26 @@ export function Dashboard() {
   const [older] = useState(false);
   const liveSessions = useSessions(older);
   // older rows behind Show more, 10 a page (the owner's words, 2026-11-13)
-  const moreSessions = usePager<Session>("sessions", "lastAt");
+  // sessions and plans: the live list has the same order, so Show more reads after its last row; runs and inbox: the
+  // live list is only the open ones, so Show more reads every row from the newest (the open ones are not shown twice)
+  const moreSessions = usePager<Session>("sessions", "lastAt", liveSessions);
   const moreRuns = usePager<Run>("commands", "createdAt");
   const moreInbox = usePager<InboxItem>("inbox", "createdAt");
-  const morePlans = usePager<Plan>("plans", "updatedAt");
-  const sessions = liveSessions ? dedupe([...liveSessions, ...moreSessions.rows]) : null;
+  const livePlans = usePlans();
+  const morePlans = usePager<Plan>("plans", "updatedAt", livePlans);
+  // every list newest first (the owner's words, 2026-11-14: "I want ordering from latest to older from every where
+  // listing session or messages")
+  const sessions = liveSessions ? newestFirst(dedupe([...liveSessions, ...moreSessions.rows]), "lastAt") : null;
   const source = useSource(); // "bridge": the local database on the PC; "backup": Firestore, read-only, while the PC is off
   const [spendDays, setSpendDays] = useState(1); // the spend range: today by default (the owner's words, 2026-11-13)
   const usage = useUsage(spendDays);
   const workTypes = useWorkTypes();
   const machines = useMachines();
   const liveInbox = useInbox();
-  const inbox = liveInbox ? dedupe([...liveInbox, ...moreInbox.rows]) : null;
+  const inbox = liveInbox ? newestFirst(dedupe([...liveInbox, ...moreInbox.rows]), "createdAt") : null;
   const liveRuns = useRuns();
-  const runs = liveRuns ? dedupe([...liveRuns, ...moreRuns.rows]) : null;
-  const livePlans = usePlans();
-  const plans = livePlans ? dedupe([...livePlans, ...morePlans.rows]) : null;
+  const runs = liveRuns ? newestFirst(dedupe([...liveRuns, ...moreRuns.rows]), "createdAt") : null;
+  const plans = livePlans ? newestFirst(dedupe([...livePlans, ...morePlans.rows]), "updatedAt") : null;
   const [pickedPlan, setPickedPlan] = useState<string | null>(opened.get("plan"));
   const [wt, setWt] = useState<string>("all");
   const [picked, setPicked] = useState<string | null>(null);
@@ -300,15 +304,15 @@ export function Dashboard() {
             <SearchBox machines={machines ?? []} runs={runs ?? []} />
             <ModeSwitch />
             <RunList runs={liveRuns ?? []} title="Runs going now" />
-            {moreRuns.rows.length > 0 && <RunList runs={moreRuns.rows} title="Older runs" />}
+            {moreRuns.rows.length > 0 && <RunList runs={moreRuns.rows.filter((r) => !(liveRuns ?? []).some((x) => x.id === r.id))} title="Older runs" />}
             <ul className="list"><MoreRow pager={moreRuns} what="runs" /></ul>
           </>
         ) : tab === "plans" ? (
           plan ? (
             <>
               <PlanBoard plans={shownPlans} items={inbox} picked={plan.id} onPick={setPickedPlan} />
-              <PlanView key={plan.id} plan={plan} items={dedupe([...(inbox ?? []), ...planInbox])} session={sessions.find((s) => s.id === plan.sessionId)}
-                runs={dedupe([...(runs ?? []), ...planRuns])} onOpenItem={openItem} />
+              <PlanView key={plan.id} plan={plan} items={newestFirst(dedupe([...(inbox ?? []), ...planInbox]), "createdAt")} session={sessions.find((s) => s.id === plan.sessionId)}
+                runs={newestFirst(dedupe([...(runs ?? []), ...planRuns]), "createdAt")} onOpenItem={openItem} />
             </>
           ) : (
             <p className="muted">No plans yet.</p>
