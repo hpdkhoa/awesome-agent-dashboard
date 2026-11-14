@@ -4,6 +4,7 @@ import {
   type Asset, type Entry, type FxSnapshot, type GoldPrice, type SyncLine,
 } from "./moneyData";
 import { MoreMenu } from "./MoreMenu";
+import { dt } from "./fmt";
 
 const today = () => new Date().toLocaleDateString("en-CA");
 
@@ -128,7 +129,7 @@ export function MoneyView({ entries, fx, gold }: { entries: Entry[]; fx: FxSnaps
               <td className={x.qty < 0 ? "num bad" : "num"}>
                 {fmt(x.qty, 4)} {UNIT[x.asset]}
               </td>
-              <td className="num" title={x.val?.label ? `${x.val.label}, price time ${new Date(x.val.time).toLocaleString()}` : undefined}>
+              <td className="num" title={x.val?.label ? `${x.val.label}, price time ${dt(x.val.time)}` : undefined}>
                 {x.asset === "VND" ? "-" : x.val === null ? <span className="muted small">no rate saved</span> : (
                   <>
                     {fmt(x.val.rate, 0)}

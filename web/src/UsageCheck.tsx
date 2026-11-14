@@ -2,6 +2,7 @@ import { useState } from "react";
 import { bridgePost } from "./FileView";
 import { pageReads } from "./data";
 import { countAll } from "./storeData";
+import { dt, nf } from "./fmt";
 
 // Usage check, in the right spend panel as its own block (the owner's words, 2026-11-09: "I want the usage check for
 // my agent dashboard too, make it as a manual check button and render together in the spend zone"; the pick: "Both.
@@ -17,7 +18,7 @@ type FirestoreUsage = {
 };
 
 const tone = (pct: number) => (pct >= 80 ? "hot" : pct >= 50 ? "warm" : "ok");
-const when = (iso?: string | null) => (iso ? new Date(iso).toLocaleString() : "unknown");
+const when = (iso?: string | null) => (iso ? dt(iso) : "unknown");
 const left = (iso?: string | null) => {
   if (!iso) return "";
   const ms = new Date(iso).getTime() - Date.now();
@@ -122,11 +123,11 @@ function FirestoreBlock() {
                 key={k}
                 label={`${k} today`}
                 pct={(n / tier[k]) * 100}
-                value={`${n.toLocaleString()} of ${tier[k].toLocaleString()}`}
+                value={`${nf(n)} of ${nf(tier[k])}`}
                 means={
                   k === "reads"
-                    ? `bridge ${bridge.toLocaleString()} (its queries and listeners since ${when(t.since)}) + this page tab ${page.toLocaleString()} since it loaded · the free tier allows ${tier[k].toLocaleString()} document reads a day`
-                    : `by the bridge since ${when(t.since)} · the free tier allows ${tier[k].toLocaleString()} a day`
+                    ? `bridge ${nf(bridge)} (its queries and listeners since ${when(t.since)}) + this page tab ${nf(page)} since it loaded · the free tier allows ${nf(tier[k])} document reads a day`
+                    : `by the bridge since ${when(t.since)} · the free tier allows ${nf(tier[k])} a day`
                 }
               />
             );
@@ -134,8 +135,8 @@ function FirestoreBlock() {
           {LEGEND}
           {counts && (
             <p className="small muted">
-              stored: {docs.toLocaleString()} documents ·{" "}
-              {Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([n, c]) => `${n} ${c.toLocaleString()}`).join(" · ")} · counted with aggregation queries (one read per 1,000 documents)
+              stored: {nf(docs)} documents ·{" "}
+              {Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([n, c]) => `${n} ${nf(c)}`).join(" · ")} · counted with aggregation queries (one read per 1,000 documents)
             </p>
           )}
           <p className="small muted">

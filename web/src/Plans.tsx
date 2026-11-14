@@ -13,11 +13,14 @@ import { isWaiting } from "./Inbox";
 import { Md } from "./Markdown";
 import { PlanGraph } from "./PlanGraph";
 import { Section } from "./Section";
+import { dt } from "./fmt";
+import { useSettings } from "./prefs";
+import { usePhone } from "./phone";
 
 // Plans with rounds of questions (the owner's choice, 2026-11-01, "do 2"): each version, then the questions asked on it
 // and your answers, in order (List), or the tree of versions and choices with a summary of each step (Graph).
 
-const when = (iso: string) => new Date(iso).toLocaleString();
+const when = (iso: string) => dt(iso);
 const roundName = (n: number) => (n === 0 ? "Questions before v1" : `Questions on v${n}`);
 
 export function PlanList({ plans, items, picked, onPick }: { plans: Plan[]; items: InboxItem[]; picked?: string; onPick: (id: string) => void }) {
@@ -220,7 +223,11 @@ export function PlanView({ plan, items, session, runs = [], onOpenItem }: {
   plan: Plan; items: InboxItem[]; session?: Session; runs?: Run[]; onOpenItem: (id: string) => void;
 }) {
   const versions = usePlanVersions(plan.id);
-  const [view, setView] = useState<"parts" | "graph" | "list">(plan.kind === "parts" ? "parts" : "graph");
+  // Settings tab, Phone: "Plan graph Off" draws no graph on a phone; plans open as the plan or the list there
+  const [settings] = useSettings();
+  const noGraph = usePhone() && !settings.phoneGraph;
+  const [picked, setView] = useState<"parts" | "graph" | "list">(plan.kind === "parts" ? "parts" : "graph");
+  const view = noGraph && picked === "graph" ? (plan.kind === "parts" ? "parts" : "list") : picked;
   const asked = items.filter((i) => i.planId === plan.id).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   const rounds = Array.from({ length: plan.current + 1 }, (_, n) => n);
   return (
@@ -245,7 +252,7 @@ export function PlanView({ plan, items, session, runs = [], onOpenItem }: {
         )}
       </p>
       <div className="chips">
-        {(plan.kind === "parts" ? (["parts", "graph", "list"] as const) : (["graph", "list"] as const)).map((x) => (
+        {(plan.kind === "parts" ? (["parts", "graph", "list"] as const) : (["graph", "list"] as const)).filter((x) => !(noGraph && x === "graph")).map((x) => (
           <button key={x} className={view === x ? "chip on" : "chip"} onClick={() => setView(x)}>
             {x === "parts" ? "Plan" : x === "graph" ? "Graph" : "List"}
           </button>

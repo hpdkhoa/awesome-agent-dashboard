@@ -2,6 +2,7 @@ import { usePlanGenerated, type Plan, type PlanVersion } from "./data";
 import { LocalImg, openFile } from "./FileView";
 import { kindName, KINDS, type Kind } from "./planCheck";
 import { Section } from "./Section";
+import { dt } from "./fmt";
 
 // The plan's Generated section (the owner's words, 2026-11-04: "not new version because the generated just is the
 // artifact to visualize the plan, it is the supplement for the current version so make another section display (like
@@ -44,7 +45,7 @@ export function GeneratedSection({ plan, v, stale }: { plan: Plan; v: PlanVersio
                 {PIC.test(f.file) && <LocalImg src={f.file} alt={f.file} cwd={plan.cwd} />}
                 <figcaption className="small">
                   <code className="file-link" role="button" onClick={() => openFile(f.file, plan.cwd)}>{f.file.split("/").pop()}</code>
-                  <span className="muted"> · approved {new Date(f.at).toLocaleString()}</span>
+                  <span className="muted"> · approved {dt(f.at)}</span>
                 </figcaption>
               </figure>
             ))}

@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { getSettings } from "./prefs";
 
 const KEY = "aad.sections";
 
@@ -29,7 +30,8 @@ export function Section({
   stale?: string; // the plan's update check: why this section is behind the current version (planStale.ts)
   children: ReactNode;
 }) {
-  const [isOpen, setOpen] = useState<boolean>(() => remembered()[id] ?? open);
+  // a section this browser never folded or opened starts as the Settings tab says (Sections start: Open or Folded)
+  const [isOpen, setOpen] = useState<boolean>(() => remembered()[id] ?? (getSettings().foldDefault ? false : open));
 
   function toggle() {
     const next = !isOpen;

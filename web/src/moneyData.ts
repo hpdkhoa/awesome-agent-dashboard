@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { collection, deleteDoc, doc, limit, onSnapshot, orderBy, query, setDoc, type QueryConstraint } from "firebase/firestore";
 import { db } from "./firebase";
 import { countReads, useActive } from "./pageReads";
+import { dt } from "./fmt";
 
 // Money flow in five assets (the owner's list, 2026-11-01: "usd eur vnd gold bar and gold ring"). Rates come only from
 // what this page synced (Vietcombank, HSBC, three gold sources) or the owner typed (gold).
@@ -118,10 +119,10 @@ async function syncFx(src: (typeof FX_SOURCES)[number], latest: FxSnapshot | und
   if (wait) return wait;
   const body = await ask(src.path, src.label);
   // The feed's time moves on every few minutes even when no rate changed, so compare the rates themselves.
-  if (latest && same(latest.rates, body.rates)) return `no rate changed since ${new Date(latest.sourceTime).toLocaleString()}.`;
+  if (latest && same(latest.rates, body.rates)) return `no rate changed since ${dt(latest.sourceTime)}.`;
   const id = newId();
   await setDoc(doc(db, "fxRates", id), { ...body, sourceId: src.id, id, savedAt: now() });
-  return `saved ${Object.keys(body.rates).length} rates from ${new Date(body.sourceTime).toLocaleString()}.`;
+  return `saved ${Object.keys(body.rates).length} rates from ${dt(body.sourceTime)}.`;
 }
 
 async function syncGold(src: (typeof GOLD_SOURCES)[number], latest: GoldPrice | undefined): Promise<string> {
@@ -129,11 +130,11 @@ async function syncGold(src: (typeof GOLD_SOURCES)[number], latest: GoldPrice | 
   if (wait) return wait;
   const q = await ask(src.path, src.label);
   if (latest && latest.buy === q.buy && latest.sell === q.sell && same(latest.ring ?? null, q.ring))
-    return `prices unchanged since ${new Date(latest.sourceTime ?? latest.enteredAt).toLocaleString()}.`;
+    return `prices unchanged since ${dt(latest.sourceTime ?? latest.enteredAt)}.`;
   const id = newId();
   await setDoc(doc(db, "goldPrices", id), { ...q, id, date: q.sourceTime.slice(0, 10), note: "", enteredAt: now() });
   const ring = q.ring ? `, ring ${fmt(q.ring.buy, 0)} / ${fmt(q.ring.sell, 0)}` : " (no ring price on the page)";
-  return `saved SJC bar ${fmt(q.buy, 0)} / ${fmt(q.sell, 0)}${ring} đ per lượng, buy / sell (${new Date(q.sourceTime).toLocaleString()}).`;
+  return `saved SJC bar ${fmt(q.buy, 0)} / ${fmt(q.sell, 0)}${ring} đ per lượng, buy / sell (${dt(q.sourceTime)}).`;
 }
 
 // At most one sync every 5 minutes from this browser, for the Sync button and every Save together (the owner's rule,

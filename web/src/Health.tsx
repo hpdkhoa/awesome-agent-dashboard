@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { auth } from "./firebase";
 import { filesUrl } from "./FileView";
+import { dt, tm } from "./fmt";
 
 // The health panel (plan 4672cf3d step i10). The owner's choices, 2026-11-12: "Ping through the tunnel" (this page asks
 // the bridge's signed POST /health every 20 s while it is open: no answer is red, 0 Firestore writes); "Task watchdog"
@@ -123,7 +124,7 @@ export function HealthPanel({ st, restart }: { st: HealthState; restart: (why: "
   const h = st.kind === "ok" ? st.h : st.kind === "down" ? st.last : undefined;
   const go = (why: "restart" | "update") =>
     restart(why).then(
-      (at) => setMsg(`${why} asked at ${new Date(at).toLocaleTimeString()}; waiting for the bridge to answer again`),
+      (at) => setMsg(`${why} asked at ${tm(at)}; waiting for the bridge to answer again`),
       (e) => setMsg(String(e.message ?? e)),
     );
   return (
@@ -133,7 +134,7 @@ export function HealthPanel({ st, restart }: { st: HealthState; restart: (why: "
         {st.kind === "ok"
           ? `Answering · checked ${ago(new Date(st.at).toISOString())}`
           : st.kind === "down"
-            ? `Down since ${new Date(st.since).toLocaleTimeString()}: ${st.why}. The task watchdog starts it within 1 min.`
+            ? `Down since ${tm(st.since)}: ${st.why}. The task watchdog starts it within 1 min.`
             : "Checking"}
       </p>
       {h && (
@@ -155,7 +156,7 @@ export function HealthPanel({ st, restart }: { st: HealthState; restart: (why: "
         <ul className="small muted">
           {h.errors.last.map((e, i) => (
             <li key={i}>
-              {new Date(e.at).toLocaleString()}: {e.line}
+              {dt(e.at)}: {e.line}
             </li>
           ))}
         </ul>

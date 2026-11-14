@@ -7,6 +7,7 @@ import { Md } from "./Markdown";
 import { MoreMenu } from "./MoreMenu";
 import { openFile } from "./FileView";
 import { Section } from "./Section";
+import { tm, ago } from "./fmt";
 
 const KIND = { question: "Question", suggestion: "Suggestion", result: "Result to review", approval: "Approval" };
 const STATUS = {
@@ -19,13 +20,6 @@ const STATUS = {
 
 export const isWaiting = (i: InboxItem) => i.status === "open";
 
-function ago(iso: string) {
-  const s = (Date.now() - Date.parse(iso)) / 1000;
-  if (s < 60) return "now";
-  if (s < 3600) return Math.floor(s / 60) + "m ago";
-  if (s < 86400) return Math.floor(s / 3600) + "h ago";
-  return Math.floor(s / 86400) + "d ago";
-}
 
 export function InboxList({ items, picked, onPick }: { items: InboxItem[]; picked?: string; onPick: (id: string) => void }) {
   // one row per batch: its first question stands for it
@@ -292,7 +286,7 @@ export function InboxView({ item, session, plan, onOpenPlan, items = [], phone =
         {item.via === "hook" && open && (
           <>
             <br />
-            from the session's question box: answer within 10 minutes of {new Date(item.createdAt).toLocaleTimeString()}, or the
+            from the session's question box: answer within 10 minutes of {tm(item.createdAt)}, or the
             session asks there instead
           </>
         )}

@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { bridgePostAny } from "./bridge";
 export { bridgePost, filesUrl } from "./bridge";
 import { Md } from "./Markdown";
+import { dt, nf } from "./fmt";
+import { getSettings } from "./prefs";
 
 // The file viewer (the owner's idea, 2026-11-01: "just move binary to render it on the page using my local instance").
 // A tap on a file path asks the bridge on the owner's PC, through the owner's Cloudflare Tunnel, for a 10-minute
@@ -62,7 +64,7 @@ export function LiveText({ run, cwd }: { run: string; cwd: string }) {
   return (
     <div className="live-text">
       <p className="small muted">
-        live from the PC · {got.chars.toLocaleString()} chars · {got.tools} tool {got.tools === 1 ? "call" : "calls"}
+        live from the PC · {nf(got.chars)} chars · {got.tools} tool {got.tools === 1 ? "call" : "calls"}
         {got.cut ? " · the last 8,000 chars" : ""}
       </p>
       {got.text ? <Md text={got.text} cwd={cwd} /> : <p className="muted small">thinking</p>}
@@ -88,14 +90,14 @@ export function PcText({ session, run, reply, cwd }: { session?: string; run?: s
           <button disabled={got.n <= 1} onClick={() => setTurn(got.n! - 1)} aria-label="earlier turn">
             ‹
           </button>{" "}
-          turn {got.n} of {total} · {got.at ? new Date(got.at).toLocaleString() : ""} · {got.chars.toLocaleString()} chars{" "}
+          turn {got.n} of {total} · {got.at ? dt(got.at) : ""} · {nf(got.chars)} chars{" "}
           <button disabled={got.n >= total} onClick={() => setTurn(got.n! + 1)} aria-label="later turn">
             ›
           </button>
           {got.prompt && <> · asked: {got.prompt}</>}
         </p>
       )}
-      {run && <p className="small muted">{got.chars.toLocaleString()} chars, whole, from the PC</p>}
+      {run && <p className="small muted">{nf(got.chars)} chars, whole, from the PC</p>}
       <Md text={got.text} cwd={cwd} />
     </div>
   );
@@ -115,11 +117,21 @@ const size = (n: number) => (n >= 1 << 20 ? (n / (1 << 20)).toFixed(1) + " MB" :
 // An image a session put in markdown with a local path.
 export function LocalImg({ src, alt, cwd }: { src: string; alt?: string; cwd: string }) {
   const [t, setT] = useState<Ticket | string | null>(null);
+  // Settings tab, Speed: "When in view" asks the PC for the picture only once it scrolls near the screen
+  const lazy = getSettings().lazyImages && typeof IntersectionObserver !== "undefined";
+  const [seen, setSeen] = useState(!lazy);
+  const holder = useRef<HTMLSpanElement>(null);
   useEffect(() => {
-    ticket(src, cwd).then(setT, (e) => setT(String(e.message ?? e)));
-  }, [src, cwd]);
+    if (seen || !holder.current) return;
+    const io = new IntersectionObserver((es) => es.some((e) => e.isIntersecting) && (setSeen(true), io.disconnect()), { rootMargin: "400px" });
+    io.observe(holder.current);
+    return () => io.disconnect();
+  }, [seen]);
+  useEffect(() => {
+    if (seen) ticket(src, cwd).then(setT, (e) => setT(String(e.message ?? e)));
+  }, [src, cwd, seen]);
   if (typeof t === "string") return <span className="muted small">[{alt || src}: {t}]</span>;
-  if (!t) return <span className="muted small">[{alt || src}: loading]</span>;
+  if (!t) return <span ref={holder} className="muted small">[{alt || src}: {seen ? "loading" : "shows when in view"}]</span>;
   return <img className="md-img" src={t.url} alt={alt} onClick={() => openFile(src, cwd)} />;
 }
 

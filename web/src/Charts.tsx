@@ -2,12 +2,13 @@ import { useState } from "react";
 import { colorOf, seriesStats, shares, stackStats, type Point } from "./chartStats";
 import type { Usage } from "./data";
 import { num, usd } from "./Dashboard";
+import { dt, dd } from "./fmt";
 
 // Every chart here shows its points, a legend and its stats, each with its meaning (the owner's words, 2026-11-08:
 // "whatever has a graph or chart to display something then the points, the legend and the stats must be visible and
 // display the meaning of these thing").
 
-const day = (iso: string) => new Date(iso).toLocaleDateString();
+const day = (iso: string) => dd(iso);
 const short = (d: string) => d.slice(5); // "2026-11-08" -> "11-08"
 
 function Stats({ rows }: { rows: { label: string; value: string; means: string }[] }) {
@@ -58,7 +59,7 @@ export function LineChart({ label, unit, points, digits = 0 }: { label: string; 
         <polyline fill="none" stroke={color} strokeWidth="2" points={points.map((p, i) => `${x(i)},${y(p.v)}`).join(" ")} />
         {points.map((p, i) => (
           <circle key={i} cx={x(i)} cy={y(p.v)} r="3.5" fill={color} className="pt">
-            <title>{`${new Date(p.t).toLocaleString()}: ${f(p.v)}`}</title>
+            <title>{`${dt(p.t)}: ${f(p.v)}`}</title>
           </circle>
         ))}
       </svg>

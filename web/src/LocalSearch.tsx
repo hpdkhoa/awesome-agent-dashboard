@@ -2,6 +2,7 @@ import { useState } from "react";
 import { bridgePost } from "./FileView";
 import { Md } from "./Markdown";
 import { Section } from "./Section";
+import { dd } from "./fmt";
 
 // Step i6 (the plan: "Ollama index of session logs; search box; daily digest"; the owner's choice, 2026-11-12: "Ollama
 // on this PC"): the bridge searches every prompt of every session log with a local embedding model and keeps a digest
@@ -43,7 +44,7 @@ export function LocalSearch({ onPick, known }: { onPick: (id: string) => void; k
               <div className="grow">
                 <div className="title">{h.prompt.split("\n")[0].slice(0, 120)}</div>
                 <div className="muted small">
-                  {h.project} · turn {h.turn} of {h.turns} · {h.at ? new Date(h.at).toLocaleDateString() : ""} · {h.exact ? "word for word" : `meaning ${h.meaning.toFixed(2)}`}
+                  {h.project} · turn {h.turn} of {h.turns} · {h.at ? dd(h.at) : ""} · {h.exact ? "word for word" : `meaning ${h.meaning.toFixed(2)}`}
                   {!known.has(h.session) && <> · {h.session.slice(0, 8)}</>}
                 </div>
               </div>

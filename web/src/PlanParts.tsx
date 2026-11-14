@@ -23,6 +23,7 @@ import { Section } from "./Section";
 import { Clamp } from "./Clamp";
 import { EvidenceSection } from "./EvidenceView";
 import { useStepEvidence } from "./data";
+import { dt, tm } from "./fmt";
 
 // A plan with six parts (plan from a session; the owner's words, 2026-11-03, in cc/dashboard/SESSION_PLAN.md).
 // Plan versions change only with the plan's data; each step shows its own versions, the last reply like a message.
@@ -35,7 +36,7 @@ const HINT: Record<PlanKind, string> = {
   rule: "Add, edit or remove a rule. Steps that break it are marked. A new plan version.",
   lesson: "Which lesson to check, and what you doubt. The session answers with proof.",
 };
-const when = (iso: string) => new Date(iso).toLocaleString();
+const when = (iso: string) => dt(iso);
 const PART_LABEL: Record<string, string> = { ...Object.fromEntries(PART_NAMES), cite: "Cite" };
 type On = { stepId?: string; part?: string };
 
@@ -260,7 +261,7 @@ function DecisionsSection({ plan, versions, asked, onOpenItem }: {
                 <p>
                   <button className="link" onClick={() => onOpenItem(q.id)}>{q.title}</button>{" "}
                   {q.answer
-                    ? <span className="status done">{q.answer.choice}{made ? ` · made v${made}` : ""} · {new Date(q.answer.at).toLocaleString()}</span>
+                    ? <span className="status done">{q.answer.choice}{made ? ` · made v${made}` : ""} · {dt(q.answer.at)}</span>
                     : <span className="status waiting">waiting for you</span>}
                 </p>
                 {q.answer?.text && <p className="small">Your note: {q.answer.text}</p>}
@@ -308,8 +309,8 @@ function KeptExample({ q, o, cwd }: { q: InboxItem; o: InboxItem["options"][numb
       {!q.snapshot && q.answer && <p className="small wait-fg">Not kept yet: shows the file as it is now (the bridge keeps a copy when it sees the answer).</p>}
       {changed.length > 0 && <p className="small bad">⚠ Written after your answer, so this copy may not be the picture you decided on: {changed.join(", ")}</p>}
       {missing.length > 0 && <p className="small bad">⚠ Missing on the PC at the answer: {missing.join(", ")}</p>}
-      {q.snapshot?.pointed && <p className="small muted">✓ Pointed to {q.snapshot.pointed.to.split(/[\\/]/).pop()} on your word ({new Date(q.snapshot.pointed.at).toLocaleString()})</p>}
-      {kept && !q.snapshot?.pointed && !changed.length && !missing.length && <p className="small muted">✓ Kept as at your answer ({new Date(q.snapshot!.at).toLocaleString()})</p>}
+      {q.snapshot?.pointed && <p className="small muted">✓ Pointed to {q.snapshot.pointed.to.split(/[\\/]/).pop()} on your word ({dt(q.snapshot.pointed.at)})</p>}
+      {kept && !q.snapshot?.pointed && !changed.length && !missing.length && <p className="small muted">✓ Kept as at your answer ({dt(q.snapshot!.at)})</p>}
     </>
   );
 }
@@ -427,7 +428,7 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
         {parent?.parts && (
           <button className={diff ? "chip on" : "chip"} onClick={() => setDiff(!diff)}>Changes from v{parent.n}</button>
         )}
-        <button className="chip primary" onClick={() => setChecked(new Date().toLocaleTimeString())} title="Does every section follow the current version?">
+        <button className="chip primary" onClick={() => setChecked(tm(Date.now()))} title="Does every section follow the current version?">
           Check plan{behind ? ` · ${behind} behind` : ""}
         </button>
       </div>
@@ -597,7 +598,7 @@ function StepCheckBox({ plan, stepId, c, done }: { plan: Plan; stepId: string; c
           <span className={r.exit === 0 ? "check-chip pass" : "check-chip fail"}>
             {r.timedOut ? "stopped at 10 min" : `exit ${r.exit}`}
           </span>{" "}
-          <span className="small muted">{r.seconds} s · on {r.trigger === "done" ? "the done report" : "Run check"} · {new Date(r.endedAt).toLocaleString()}</span>
+          <span className="small muted">{r.seconds} s · on {r.trigger === "done" ? "the done report" : "Run check"} · {dt(r.endedAt)}</span>
           {r.command !== c?.command && <span className="small muted"> · ran: <code>{r.command}</code></span>}
           <Clamp><pre className="mono check-out">{r.tail || "(no output)"}</pre></Clamp>
         </div>

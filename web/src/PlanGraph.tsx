@@ -4,6 +4,7 @@ import { Md } from "./Markdown";
 import { chip, chosenLine, layout, lineDiff, parentOf, steps, type Step } from "./planTree";
 import { phaseName, phaseOf, phaseStarts } from "./phases";
 import { Section } from "./Section";
+import { dt } from "./fmt";
 
 // The graph version of a plan (approved 2026-11-01): step cards with your answers (the session's work on hover), the
 // tree of versions and question rounds, and a panel for the node you click.
@@ -188,7 +189,7 @@ function Panel({ plan, versions, asked, pick, onOpenItem }: {
   const diff = lineDiff(parent?.text ?? "", v.text).filter((l) => l.op !== "same");
   const chosen = chosenLine(plan, versions).has(v.n);
   return (
-    <Section id="plan.panel" title={`v${v.n}${parent ? ` (parent v${parent.n})` : ""} · ${v.note || "no note"}`} extra={new Date(v.createdAt).toLocaleString()}>
+    <Section id="plan.panel" title={`v${v.n}${parent ? ` (parent v${parent.n})` : ""} · ${v.note || "no note"}`} extra={dt(v.createdAt)}>
       {v.madeBy?.length ? (
         <p className="small">Made by: {v.madeBy.map((d) => `${d.title} = ${chip(d)}`).join(" · ")}</p>
       ) : (

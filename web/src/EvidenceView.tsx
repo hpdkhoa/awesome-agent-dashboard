@@ -2,6 +2,7 @@ import { useState } from "react";
 import { askEvidence, type EvidenceSet, type Plan, type PlanStep, type PlanVersion, type StepEvidence } from "./data";
 import { LocalImg } from "./FileView";
 import { Section } from "./Section";
+import { dt } from "./fmt";
 
 // 8. Evidence, after 7. Results (the owner's words, 2026-11-12: "I need the plan when done will have an evidence section
 // after result section, which capture the evidence of done for each step, this section will have two flows: first is
@@ -10,7 +11,7 @@ import { Section } from "./Section";
 // see the feature, the visual, the evidence"; picks: "Attach, else picture run", "Fresh one-off run", "Mark only").
 // One fold per step: its newest pictures as a gallery, each with the LLM mark on it; older sets folded.
 
-const when = (iso: string) => new Date(iso).toLocaleString();
+const when = (iso: string) => dt(iso);
 const name = (p: string) => p.split(/[\\/]/).pop() ?? p;
 const source = (s: EvidenceSet) =>
   s.by === "report" ? "attached by the done report" : s.trigger === "done" ? "picture run after the done report" : "picture run (Generate evidence)";

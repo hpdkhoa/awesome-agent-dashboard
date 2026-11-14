@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { LineChart } from "./Charts";
 import { addGold, fmt, parseAmount, FX_SOURCES, fxSource, GOLD_SOURCES, goldSource, syncAll, type FxSnapshot, type GoldPrice, type SyncLine } from "./moneyData";
+import { dt } from "./fmt";
 
 const today = () => new Date().toLocaleDateString("en-CA");
 
@@ -96,8 +97,8 @@ function FxTable({ label, list }: { label: string; list: FxSnapshot[] }) {
   return (
     <>
       <h2>
-        {label}, {new Date(latest.sourceTime).toLocaleString()}
-        {prev && <span className="muted"> · change since {new Date(prev.sourceTime).toLocaleString()}</span>}
+        {label}, {dt(latest.sourceTime)}
+        {prev && <span className="muted"> · change since {dt(prev.sourceTime)}</span>}
       </h2>
       <table>
         <thead>
@@ -182,7 +183,7 @@ export function RatesReport({ fx, gold }: { fx: FxSnapshot[]; gold: GoldPrice[] 
                   <td className="small">{g.product}</td>
                   <td className="num">{fmt(g.buy, 0)}</td>
                   <td className="num">{fmt(g.sell, 0)}</td>
-                  <td className="small">{new Date(t).toLocaleString()}</td>
+                  <td className="small">{dt(t)}</td>
                 </tr>
               ));
             })}

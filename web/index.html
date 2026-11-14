@@ -10,6 +10,33 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <title>Agent dashboard</title>
+    <script>
+      // This browser's settings (web/src/prefs.ts), put on <html> before the first paint. The one place that turns
+      // settings into CSS variables and classes; the Settings tab calls it again on a change.
+      (function () {
+        var FONTS = { tahoma: "Tahoma, Verdana, system-ui, sans-serif", verdana: "Verdana, Tahoma, system-ui, sans-serif", georgia: "Georgia, 'Times New Roman', serif" };
+        var MONOS = { consolas: "Consolas, ui-monospace, monospace", cascadia: "'Cascadia Code', 'Cascadia Mono', Consolas, monospace" };
+        window.aadApplySettings = function (s) {
+          var r = document.documentElement, st = r.style, c = r.classList;
+          var put = function (k, v) { v ? st.setProperty(k, v) : st.removeProperty(k); };
+          put("--root", s.size && s.size !== 16 ? s.size + "px" : "");
+          put("--root-phone", s.phoneSize && s.phoneSize !== 16 ? s.phoneSize + "px" : "");
+          put("--lh", s.lineHeight && s.lineHeight !== 1.5 ? String(s.lineHeight) : "");
+          put("--font", s.font === "custom" ? (s.fontCustom ? s.fontCustom + ", system-ui, sans-serif" : "") : FONTS[s.font] || "");
+          put("--mono", s.mono === "custom" ? (s.monoCustom ? s.monoCustom + ", ui-monospace, monospace" : "") : MONOS[s.mono] || "");
+          put("--code-scale", s.codeScale && s.codeScale !== 1 ? String(s.codeScale) : "");
+          put("--accent", s.accent || "");
+          put("--accent-bg", s.accent ? "color-mix(in srgb, " + s.accent + " 22%, var(--bg))" : "");
+          if (s.theme === "light" || s.theme === "dark") r.setAttribute("data-theme", s.theme); else r.removeAttribute("data-theme");
+          var cls = { hc: s.contrast === "high", rm: !!s.reduceMotion, tnum: !!s.tabular,
+            "d-compact": s.density === "compact", "d-roomy": s.density === "roomy",
+            "p-compact": s.phoneDensity === "compact", "p-roomy": s.phoneDensity === "roomy",
+            "w-wide": s.width === "wide", "w-narrow": s.width === "narrow" };
+          for (var k in cls) c.toggle(k, cls[k]);
+        };
+        try { window.aadApplySettings(JSON.parse(localStorage.getItem("aad.settings") || "{}")); } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

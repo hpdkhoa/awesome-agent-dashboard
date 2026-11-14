@@ -10,17 +10,10 @@ import { Md } from "./Markdown";
 import { LiveText, PcText } from "./FileView";
 import { MoreMenu } from "./MoreMenu";
 import { Section } from "./Section";
+import { dt, tm, ago } from "./fmt";
 
 const LIVE = new Set(["new", "waiting", "running", "stopping"]);
 
-function ago(iso?: string) {
-  if (!iso) return "";
-  const s = (Date.now() - Date.parse(iso)) / 1000;
-  if (s < 60) return "now";
-  if (s < 3600) return Math.floor(s / 60) + "m ago";
-  if (s < 86400) return Math.floor(s / 3600) + "h ago";
-  return Math.floor(s / 86400) + "d ago";
-}
 
 // The prompt behind "Start a plan" (the owner's choice, 2026-11-02: "Do 1"): one session runs the whole plan. Pictures
 // come when the owner asks (2026-11-04: "when almost good or whenever I need I will ask to generate the images,
@@ -246,7 +239,7 @@ function StatusLine({ check }: { check?: Run }) {
   if (c.open === null) return <span>Status: the PC could not read its process list ({when}).</span>;
   const turn = c.turn ? "a turn is running" : "no turn running";
   const open = c.open
-    ? `open in ${c.openIn === "app" ? "the app" : "a terminal"} since ${new Date(c.openSince!).toLocaleTimeString()}: messages wait`
+    ? `open in ${c.openIn === "app" ? "the app" : "a terminal"} since ${tm(c.openSince!)}: messages wait`
     : "closed: messages go now";
   return <span>Status: {open}, {turn} ({when}).</span>;
 }
@@ -402,7 +395,7 @@ function ContinueBar({ r }: { r: Run }) {
   if (r.continuedBy) return <p className="muted small">Continued as run {r.continuedBy}.</p>;
   const paused = r.status === "paused";
   if (!paused && !(r.action === "plan" && r.status === "failed")) return null;
-  const at = r.pausedUntilAt ? new Date(r.pausedUntilAt).toLocaleString() : "";
+  const at = r.pausedUntilAt ? dt(r.pausedUntilAt) : "";
   const fail = (e: unknown) => (setSent(""), setError(String((e as { code?: string }).code ?? e)));
   return (
     <div className="actions">

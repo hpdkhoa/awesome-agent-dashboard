@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { nf } from "./fmt";
 import type { QueryDocumentSnapshot } from "./fs";
 import { MoreMenu } from "./MoreMenu";
 import { COLLECTIONS, countAll, listPage, removeRows, type Row } from "./storeData";
@@ -25,7 +26,7 @@ export function StorageSide({ picked, onPick }: { picked: string; onPick: (name:
             <div className="grow">
               <div className="title">{c.label}</div>
               <div className="muted small">
-                {c.name} · {counts ? counts[c.name].toLocaleString() + " docs" : "counting"}
+                {c.name} · {counts ? nf(counts[c.name]) + " docs" : "counting"}
                 {c.bridge && " · stays deleted"}
               </div>
             </div>

@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { SelectAsk } from "./SelectAsk";
 import { QUOTE_EVENT, type QuoteAsk } from "./quote";
-import { clampWidth, gridColumns, loadLayout, saveLayout, type Layout } from "./layout";
+import { DEFAULT_LAYOUT, clampWidth, gridColumns, loadLayout, saveLayout, type Layout } from "./layout";
+import { SettingsSide, SettingsView } from "./Settings";
+import { useSettings, type TabId } from "./prefs";
 import { signOut } from "firebase/auth";
 import { auth } from "./firebase";
 import { RECENT_DAYS, newestFirst, useInbox, useMachines, usePager, usePlanInbox, usePlanRuns, usePlans, useRuns, useSessions, useUsage, useWorkTypes, type InboxItem, type Pager, type Plan, type Run, type Session, type Tokens } from "./data";
@@ -37,20 +39,14 @@ import { useEntries, useFx, useGold } from "./moneyData";
 import { EntryForm, MoneyView } from "./Money";
 import { RatesReport, RatesSide } from "./Rates";
 import { StorageSide, StorageView } from "./Storage";
+import { dt, nf, ago } from "./fmt";
 
 const ACTIVE_MS = 5 * 60 * 1000;
 
 export const num = (n: number) =>
   n >= 1e9 ? (n / 1e9).toFixed(2) + "B" : n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? (n / 1e3).toFixed(1) + "k" : String(n);
-export const usd = (n: number) => "$" + n.toLocaleString(undefined, { maximumFractionDigits: n < 10 ? 2 : 0 });
+export const usd = (n: number) => "$" + nf(n, { maximumFractionDigits: n < 10 ? 2 : 0 });
 
-function ago(iso: string) {
-  const s = (Date.now() - Date.parse(iso)) / 1000;
-  if (s < 60) return "now";
-  if (s < 3600) return Math.floor(s / 60) + "m ago";
-  if (s < 86400) return Math.floor(s / 3600) + "h ago";
-  return Math.floor(s / 86400) + "d ago";
-}
 
 const isActive = (s: Session) => Date.now() - Date.parse(s.lastAt) < ACTIVE_MS;
 const today = () => new Date().toLocaleDateString("en-CA");
@@ -93,7 +89,11 @@ export function Dashboard() {
   const [pickedPlan, setPickedPlan] = useState<string | null>(opened.get("plan"));
   const [wt, setWt] = useState<string>("all");
   const [picked, setPicked] = useState<string | null>(null);
-  const [tab, setTab] = useState<"inbox" | "plans" | "sessions" | "runs" | "money" | "rates" | "storage">(opened.get("run") ? "runs" : opened.get("plan") ? "plans" : "inbox");
+  // the tab this browser opens on and the tabs it shows (Settings tab, this browser only); a link still opens its own tab
+  const [settings] = useSettings();
+  const [tab, setTab] = useState<TabId>(opened.get("run") ? "runs" : opened.get("plan") ? "plans" : opened.get("item") ? "inbox" : settings.startTab);
+  const shownTab = (t: TabId) => !settings.hiddenTabs.includes(t);
+  useEffect(() => { if (!shownTab(tab)) setTab("inbox"); }, [settings.hiddenTabs]);
   // "Ask about this" on words of a plan, a session or a run (SelectAsk.tsx): open the plan or the session whose message
   // box takes the quote, if it is not on screen (the owner's words, 2026-11-10: "when in sessions and run then the cite
   // will direct to the message box")
@@ -119,6 +119,7 @@ export function Dashboard() {
   // the left and right panels: drag to resize, hide and show each (layout.ts), remembered in this browser
   const [layout, setLayout] = useState<Layout>(loadLayout);
   useEffect(() => saveLayout(layout), [layout]);
+  const resetLayout = () => setLayout({ ...DEFAULT_LAYOUT });
   const drag = (side: "left" | "right") => (e: React.PointerEvent<HTMLDivElement>) => {
     e.preventDefault();
     const startX = e.clientX, start = layout[side];
@@ -232,17 +233,28 @@ export function Dashboard() {
           <button className={tab === "runs" ? "tab on" : "tab"} onClick={() => setTab("runs")}>
             Runs {(runs ?? []).some((r) => r.status === "running") && <span className="dot live inline" />}
           </button>
+          {shownTab("money") && (
           <button className={tab === "money" ? "tab on" : "tab"} onClick={() => setTab("money")}>
             Money
           </button>
+          )}
+          {shownTab("rates") && (
           <button className={tab === "rates" ? "tab on" : "tab"} onClick={() => setTab("rates")}>
             Rates
           </button>
+          )}
+          {shownTab("storage") && (
           <button className={tab === "storage" ? "tab on" : "tab"} onClick={() => setTab("storage")}>
             Storage
           </button>
+          )}
+          <button className={tab === "settings" ? "tab on" : "tab"} onClick={() => setTab("settings")} title="Font, size, theme and layout: this browser only">
+            Settings
+          </button>
         </div>
-        {tab === "storage" ? (
+        {tab === "settings" ? (
+          <SettingsSide onResetLayout={resetLayout} />
+        ) : tab === "storage" ? (
           <StorageSide picked={store} onPick={setStore} />
         ) : tab === "money" ? (
           <EntryForm fx={fx} gold={gold} />
@@ -293,7 +305,9 @@ export function Dashboard() {
 
       <main className="main" ref={mainRef}>
         <SelectAsk root={mainRef} />
-        {tab === "storage" ? (
+        {tab === "settings" ? (
+          <SettingsView onResetLayout={resetLayout} />
+        ) : tab === "storage" ? (
           <StorageView name={store} />
         ) : tab === "money" ? (
           entries && fx && gold ? <MoneyView entries={entries} fx={fx} gold={gold} /> : <p className="muted">Loading</p>
@@ -382,13 +396,13 @@ function TokenTable({ t }: { t: Tokens }) {
         {rows.map(([k, v]) => (
           <tr key={k}>
             <td>{k}</td>
-            <td className="num">{v.toLocaleString()}</td>
+            <td className="num">{nf(v)}</td>
           </tr>
         ))}
         <tr className="sum">
           <td>Total</td>
           <td className="num">
-            {t.total.toLocaleString()} · {usd(t.costUsd)} est.
+            {nf(t.total)} · {usd(t.costUsd)} est.
           </td>
         </tr>
       </tbody>
@@ -403,7 +417,7 @@ function SessionView({ s, runs }: { s: Session; runs: Run[] }) {
       <p className="meta">
         {s.workType} · {s.machine} · {s.cwd}
         <br />
-        started {new Date(s.startedAt).toLocaleString()} · last {ago(s.lastAt)} · {s.prompts} prompts · {s.messages} replies ·{" "}
+        started {dt(s.startedAt)} · last {ago(s.lastAt)} · {s.prompts} prompts · {s.messages} replies ·{" "}
         {s.subagents} subagents · {Object.keys(s.models).join(", ")}
       </p>
       <MessageBox key={s.id} s={s} runs={runs} />
