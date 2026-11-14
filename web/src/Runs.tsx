@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { forSession, QUOTE_EVENT, takeQuote } from "./quote";
 import {
-  addRoot, cancelMessage, checkSession, continueRun, forceMessage, setAutoContinue, planFromSession, PLAN_KINDS, sendMessage, setRunMode, startRun, stopRun, useRunMode,
+  addRoot, cancelMessage, checkSession, continueRun, forceMessage, setAutoContinue, planFromSession, PLAN_KINDS, searchRun, sendMessage, setRunMode, startRun, stopRun, useRunMode,
   EFFORTS, exactEffort, exactModel, FRESH_OVER, MODELS, setRunPrefs, useRunPrefs, type Fresh, type RunWith,
   type Machine, type Run, type Session,
 } from "./data";
@@ -121,6 +121,57 @@ export function StartForm({ machines, plan = false }: { machines: Machine[]; pla
         Start
       </button>
       {!plan && <AddFolder machines={machines} />}
+    </Section>
+  );
+}
+
+// s9 (plan c5cb9485, the owner's pick "A: top of the Runs tab"): ask the web through a machine's bridge (Gemini Flash +
+// Google Search, bridge search.py). The answer streams in under the box; the search is also a run in the list below.
+const secs = (ms?: number | null) => (ms == null ? "" : `${(ms / 1000).toFixed(1)} s`);
+export function SearchBox({ machines, runs }: { machines: Machine[]; runs: Run[] }) {
+  const [box, setBox] = useState("");
+  const [q, setQ] = useState("");
+  const [mine, setMine] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const name = box || machines[0]?.name || "";
+  const r = runs.find((x) => x.id === mine);
+  async function go() {
+    if (!name) return setError("No machine yet: start a bridge first.");
+    if (!q.trim()) return setError("Write a question first.");
+    setError("");
+    try {
+      setMine(await searchRun(name, q.trim()));
+    } catch (e) {
+      setError(String((e as { code?: string }).code ?? e));
+    }
+  }
+  return (
+    <Section id="runs.search" title="Search the web (Gemini Flash + Google Search)" extra={r ? r.status : ""}>
+      <div className="search-row">
+        <select value={name} onChange={(e) => setBox(e.target.value)}>
+          {machines.map((m) => <option key={m.name} value={m.name}>{m.name}</option>)}
+        </select>
+        <input value={q} placeholder="ask the web..." onChange={(e) => (setQ(e.target.value), setError(""))}
+          onKeyDown={(e) => e.key === "Enter" && go()} />
+        <button className="primary" disabled={!!r && LIVE.has(r.status)} onClick={go}>Search</button>
+      </div>
+      {error && <p className="bad small">{error}</p>}
+      <p className="muted small">Runs on that machine's bridge with the Gemini key in its .env; the question goes to Google. Each search is a run.</p>
+      {mine && !r && <p className="muted small">sent…</p>}
+      {r && (
+        <div className="search-answer">
+          <p className="small">
+            <span className={"status " + r.status}>{r.status}</span>
+            {r.model && <> · {r.model}</>}
+            {r.firstTokenMs != null && <> · first token {secs(r.firstTokenMs)}</>}
+            {r.totalMs != null && <> · total {secs(r.totalMs)}</>}
+            {r.sources && <> · {r.sources.length} sources</>}
+          </p>
+          {r.status === "running" && <LiveText run={r.id} cwd="" />}
+          {(r.status === "done" || r.status === "stopped") && <PcText run={r.id} cwd="" />}
+          {r.error && <p className="bad small">{r.error}</p>}
+        </div>
+      )}
     </Section>
   );
 }
@@ -382,7 +433,7 @@ const quoteTarget = (r: Run): Record<string, string> =>
   r.planId ? { "data-quote-plan": r.planId } : r.sessionId && !r.noSession ? { "data-quote-session": r.sessionId } : {};
 
 export function RunList({ runs, title = "Runs from the dashboard" }: { runs: Run[]; title?: string }) {
-  const shown = runs.filter((r) => r.action === "start" || r.action === "message" || r.action === "plan");
+  const shown = runs.filter((r) => r.action === "start" || r.action === "message" || r.action === "plan" || r.action === "search");
   return (
     <div>
       <h2 className="label">{title}</h2>
@@ -402,7 +453,8 @@ export function RunList({ runs, title = "Runs from the dashboard" }: { runs: Run
           extra={
             <>
               {r.action === "message" ? (r.kind ? `plan message: ${KIND_NAME[r.kind]}` : "message")
-                : r.action === "plan" ? `plan from session${r.status === "running" && r.stage ? ": " + r.stage : ""}` : "new session"}
+                : r.action === "plan" ? `plan from session${r.status === "running" && r.stage ? ": " + r.stage : ""}`
+                : r.action === "search" ? `search${r.firstTokenMs != null ? " · first token " + secs(r.firstTokenMs) : ""}${r.sources ? ` · ${r.sources.length} sources` : ""}` : "new session"}
               {r.archive ? ` · ${ARCHIVE_LABEL[r.archive] ?? r.archive}${r.archiveNote ? ": " + r.archiveNote : ""}` : ""}
               {r.quotes ? ` · quotes ${r.quotes.checked} checked, ${r.quotes.marked} marked` : ""}{" "}
               · {r.workType ?? ""} · {r.machine} ·{" "}

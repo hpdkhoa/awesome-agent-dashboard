@@ -1,0 +1,11 @@
+# s6: whisper.cpp on x86-64 PCs: AVX2/FMA/F16C on (GGML_NATIVE does not detect them with MSVC; ggml applies these
+# only on x86, so the Mac build is unchanged). Every x86 PC since 2013-2015 has them (this one: i5-10400).
+[env]
+GGML_AVX = "ON"
+GGML_AVX2 = "ON"
+GGML_FMA = "ON"
+GGML_F16C = "ON"
+# cmake-rs (Visual Studio generator) writes CMAKE_C_FLAGS_RELEASE with no optimization flag, so whisper.cpp built with
+# /Od (measured: 14 s for 3.5 s of speech). cl.exe reads its CL variable on every call: /O2 for the C/C++ parts on
+# Windows; no effect on the Mac (no cl.exe there).
+CL = "/O2 /Ob2"

@@ -150,7 +150,9 @@ export type Run = {
   target?: string;
   cwd?: string;
   status: "new" | "waiting" | "running" | "stopping" | "done" | "stopped" | "failed" | "lost" | "cancelled" | "paused";
-  action: "start" | "stop" | "message" | "check" | "plan" | "approve_generated" | "continue" | "auto_continue" | "add_root";
+  action: "start" | "stop" | "message" | "check" | "plan" | "approve_generated" | "continue" | "auto_continue" | "add_root" | "search";
+  // s9 search (bridge search.py): Gemini Flash + Google Search; the time to the first streamed text, the source links
+  engine?: string; firstTokenMs?: number | null; totalMs?: number | null; sources?: { title: string; url: string }[];
   pausedUntilAt?: string | null; // a run paused by the usage limit: the reset time the bridge read from claude's message
   autoContinue?: boolean; // continues by itself at the reset (bridge runs.py _pause, _auto_continue)
   autoBy?: "last" | "owner" | null; // the run that paused last, or the owner's pick
@@ -349,6 +351,14 @@ export const startRun = (machine: string, folder: string, prompt: string, w?: Ru
   return setDoc(doc(db, "commands", id), {
     id, action: "start", machine, folder, prompt, status: "new", createdAt: new Date().toISOString(), ...withRun(w), ...(keep ? {} : { noSession: true }),
   });
+};
+// s9 (plan c5cb9485; the owner's words, 2026-11-14: "Search box go to both send box and dashboard and count as a run"):
+// a question to Gemini Flash with Google Search, run by that machine's bridge with the key in its .env; a run like the
+// others. Returns the run's id so the box can show it.
+export const searchRun = async (machine: string, prompt: string) => {
+  const id = newId();
+  await setDoc(doc(db, "commands", id), { id, action: "search", machine, prompt, status: "new", createdAt: new Date().toISOString() });
+  return id;
 };
 // A work folder added on the page (step i4, the owner's choice, 2026-11-12: "Bridge checks"): the bridge on that
 // machine checks it (exists; not a drive root, the user folder, AppData or .ssh), then adds it with no restart.

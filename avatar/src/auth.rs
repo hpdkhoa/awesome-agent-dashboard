@@ -104,9 +104,9 @@ pub fn clear() {
 
 fn page(cfg: &Value, code: &str) -> String {
     format!(
-        r#"<!doctype html><meta charset="utf-8"><title>Agent Avatar sign-in</title>
+        r#"<!doctype html><meta charset="utf-8"><title>hayaku sign-in</title>
 <body style="font:16px system-ui;max-width:420px;margin:15vh auto">
-<h1 style="font-size:20px;font-weight:500">Agent Avatar sign-in</h1><p id="s">Click to sign in with your Google account.</p>
+<h1 style="font-size:20px;font-weight:500">hayaku sign-in</h1><p id="s">Click to sign in with your Google account.</p>
 <button id="b">Sign in with Google</button>
 <script type="module">
 import {{ initializeApp }} from "{js}/firebase-app.js";

@@ -20,5 +20,5 @@ $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoi
 $Principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited
 
 Register-ScheduledTask -TaskName $Name -Action $Action -Trigger $Trigger -Settings $Settings -Principal $Principal `
-    -Description "awesome-agent-dashboard desktop avatar: status box (read-only)" -Force | Out-Null
+    -Description "hayaku, the awesome-agent-dashboard desktop avatar: status box (read-only)" -Force | Out-Null
 Write-Output "Installed task $Name (starts at sign-in)."

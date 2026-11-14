@@ -173,6 +173,10 @@ textarea { width: 100%; font: inherit; padding: 8px 10px; border-radius: 8px; bo
 .mode-switch { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 14px; }
 .run-with { display: inline-flex; gap: 6px; margin: 6px 0; vertical-align: middle; }
 .keep-session { display: block; margin: 4px 0; }
+/* s9 search box (Runs tab): machine, question, Search on one line; the answer under it */
+.search-row { display: flex; gap: 6px; align-items: center; }
+.search-row input { flex: 1; min-width: 0; }
+.search-answer { margin-top: 6px; }
 .run-with select { font-size: 13px; padding: 3px 6px; }
 .run-with.compact { margin: 0 0 0 6px; }
 .run-with.compact select { font-size: 11px; padding: 0 4px; }

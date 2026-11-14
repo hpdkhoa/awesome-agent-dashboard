@@ -5,7 +5,7 @@ import { clampWidth, gridColumns, loadLayout, saveLayout, type Layout } from "./
 import { signOut } from "firebase/auth";
 import { auth } from "./firebase";
 import { RECENT_DAYS, useInbox, useMachines, usePager, usePlanInbox, usePlanRuns, usePlans, useRuns, useSessions, useUsage, useWorkTypes, type InboxItem, type Pager, type Plan, type Run, type Session, type Tokens } from "./data";
-import { MessageBox, ModeSwitch, PlanFromSession, RunList, StartForm } from "./Runs";
+import { MessageBox, ModeSwitch, PlanFromSession, RunList, SearchBox, StartForm } from "./Runs";
 import { PlanBoard, PlanList, PlanView } from "./Plans";
 import { usePush, type PushState } from "./notify";
 import { FileViewer, PcText } from "./FileView";
@@ -297,6 +297,7 @@ export function Dashboard() {
           fx && gold ? <RatesReport fx={fx} gold={gold} /> : <p className="muted">Loading</p>
         ) : tab === "runs" ? (
           <>
+            <SearchBox machines={machines ?? []} runs={runs ?? []} />
             <ModeSwitch />
             <RunList runs={liveRuns ?? []} title="Runs going now" />
             {moreRuns.rows.length > 0 && <RunList runs={moreRuns.rows} title="Older runs" />}

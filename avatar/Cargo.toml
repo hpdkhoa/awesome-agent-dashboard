@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+cpal = "0.18"
+hound = "3.5"
 keyring = { version = "3", features = ["windows-native", "apple-native"] }
 notify = "8.2.2"
 nvml-wrapper = "0.13.0"
@@ -11,9 +13,11 @@ serde_json = "1.0.154"
 sysinfo = "0.40.1"
 tauri = { version = "2.12.5", features = ["tray-icon", "protocol-asset", "macos-private-api"] } # p12: macos-private-api = see-through window on macOS (no-op elsewhere)
 tauri-plugin-dialog = "2.8.4"
+tauri-plugin-global-shortcut = "2"
 tauri-plugin-single-instance = "2.5.5"
 tauri-plugin-window-state = "2.5.0"
 ureq = "3" # p15: the RATES box asks the dashboard Worker (rustls, blocking, small)
+whisper-rs = "0.16"
 
 [build-dependencies]
 tauri-build = "2.7.4"
@@ -27,3 +31,8 @@ opt-level = "s"
 lto = true
 codegen-units = 1
 strip = true
+
+# s6: whisper.cpp (C/C++) gets full optimization; with the size profile above its build had no /O2 at all (measured:
+# 14 s for 3.5 s of speech)
+[profile.release.package.whisper-rs-sys]
+opt-level = 3

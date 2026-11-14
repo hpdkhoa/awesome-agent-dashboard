@@ -92,7 +92,7 @@ async function start(cfg, user, onUser, onMachines, onError) {
     });
   });
 }
-async function stop() { ratesClose(); if (unsub) unsub(); unsub = null; if (auth) await signOut(auth); }
+async function stop() { ratesClose(); needsClose(); if (unsub) unsub(); unsub = null; if (auth) await signOut(auth); }
 
 // p15 RATES box: the newest saved rates, the same records the dashboard's Rates tab saves and reads (web/src/moneyData.ts:
 // fxRates by savedAt, goldPrices by enteredAt). Listened to only while the box is open (box closed = no reads). The
@@ -136,6 +136,119 @@ async function saveGold(q) {
   await setDoc(doc(db, "goldPrices", id), { ...q, id, date: q.sourceTime.slice(0, 10), note: "", enteredAt: new Date().toISOString() });
   window.FB.writes += 1;
 }
+// plan c5cb9485 s1: the SEND box's CONTINUE list: one box's sessions, newest first, asked once per open or box change.
+// A registered box answers through its own data API; else Firestore (newest 100 by lastAt, this box's kept).
+const SESSIONS = 30;
+async function sessions(name) {
+  const box = boxes.find((b) => b.name === name);
+  if (box) {
+    const r = await ask(box, { op: "find", coll: "sessions", filters: [["machine", "==", name]], order: "lastAt", desc: true, limit: SESSIONS });
+    window.FB.boxAsks += 1;
+    return r.docs.map((d) => ({ id: d.id, ...d.data }));
+  }
+  const q = await getDocs(query(collection(db, "sessions"), orderBy("lastAt", "desc"), limit(100)));
+  window.FB.reads += Math.max(1, q.size);
+  return q.docs.map((d) => ({ id: d.id, ...d.data() })).filter((d) => d.machine === name).slice(0, SESSIONS);
+}
+// plan c5cb9485 s2: one command to one box: its data API when the box is registered, else Firestore. Returns the way.
+async function send(name, c) {
+  const box = boxes.find((b) => b.name === name);
+  if (box) {
+    const r = await ask(box, { op: "set", path: `commands/${c.id}`, data: c });
+    if (!r || r.ok !== true) throw new Error((r && r.error) || "the box refused the command");
+    window.FB.boxAsks += 1;
+    return "box";
+  }
+  await setDoc(doc(db, "commands", c.id), c);
+  window.FB.writes += 1;
+  return "firestore";
+}
+// plan c5cb9485 s3: a sent command's record and its reply text, asked only while the SEND box is open.
+// The record: the box's data API (one get), else Firestore (one read). The text: the box's /text route ({run} when
+// ended, {live} while running), never stored; a box with no address has no text (null).
+import { getDoc } from "firebase/firestore";
+async function runState(name, id) {
+  const box = boxes.find((b) => b.name === name);
+  if (box) { window.FB.boxAsks += 1; return (await ask(box, { op: "get", path: `commands/${id}` })).doc; }
+  const d = await getDoc(doc(db, "commands", id));
+  window.FB.reads += 1;
+  return d.exists() ? d.data() : null;
+}
+async function runText(name, id, live) {
+  const box = boxes.find((b) => b.name === name);
+  if (!box) return null;
+  const token = await auth.currentUser.getIdToken();
+  window.FB.boxAsks += 1;
+  return JSON.parse(await invoke("box_text", { url: box.url, token, body: JSON.stringify(live ? { live: id } : { run: id }) }));
+}
+// plan c5cb9485 s4: the NEEDS YOU deck. The owner's open asks from every box (inbox status "open"), read only while the
+// deck is open: each registered box answers through its data API, then one open "changes" call per box re-reads its
+// inbox only when the inbox changed there (deck closed = nothing asked). No registered box: one Firestore listen.
+import { updateDoc } from "firebase/firestore";
+let nStop = true, nUnsub = null;
+const nWait = (ms) => new Promise((r) => setTimeout(r, ms));
+function needsOpen(onItems, onError) {
+  needsClose();
+  nStop = false;
+  const got = new Map(), push = () => onItems([...got.values()].flat());
+  if (!boxes.length) {
+    nUnsub = onSnapshot(query(collection(db, "inbox"), where("status", "==", "open")),
+      (q) => { window.FB.reads += Math.max(1, q.docChanges().length); got.set("", q.docs.map((d) => ({ id: d.id, ...d.data(), _box: "" }))); push(); },
+      (e) => onError(e.code || e.message));
+    return;
+  }
+  for (const box of boxes.slice()) (async () => {
+    let seq = -1;
+    while (!nStop && boxes.includes(box)) {
+      try {
+        if (seq < 0) seq = (await ask(box, { op: "seq" })).seq;
+        const r = await ask(box, { op: "find", coll: "inbox", filters: [["status", "==", "open"]] });
+        window.FB.boxAsks += 1; window.FB.needAsks += 1;
+        if (nStop) return;
+        got.set(box.name, r.docs.map((d) => ({ id: d.id, ...d.data, _box: box.name }))); push();
+        for (;;) {   // up to 25 s a call; the inbox is read again only when it changed on this box
+          const c = await ask(box, { op: "changes", since: seq, wait: 25 });
+          seq = c.seq;
+          if (nStop) return;
+          if (c.reset || (c.changes || []).some((x) => x.coll === "inbox")) break;
+        }
+      } catch (e) {
+        onError(`${box.name}: ${String(e.message || e).slice(0, 60)}`);
+        seq = -1; await nWait(15000);
+      }
+    }
+  })();
+}
+function needsClose() { nStop = true; if (nUnsub) nUnsub(); nUnsub = null; }
+// one answer write on one inbox record, on the box that holds it (the fields the page writes: data.ts answerItem, saveDraft)
+async function needsWrite(name, id, fields) {
+  const box = boxes.find((b) => b.name === name);
+  if (box) {
+    const r = await ask(box, { op: "update", path: `inbox/${id}`, fields });
+    if (!r || r.ok !== true) throw new Error((r && r.error) || "the box refused the answer");
+    window.FB.boxAsks += 1;
+    return "box";
+  }
+  await updateDoc(doc(db, "inbox", id), fields);
+  window.FB.writes += 1;
+  return "firestore";
+}
+// a plan's title for the deck's line (one get per plan while the deck is open)
+async function planTitle(name, id) {
+  const box = boxes.find((b) => b.name === name);
+  if (box) { window.FB.boxAsks += 1; const d = (await ask(box, { op: "get", path: `plans/${id}` })).doc; return d ? d.title : ""; }
+  const d = await getDoc(doc(db, "plans", id));
+  window.FB.reads += 1;
+  return d.exists() ? d.data().title : "";
+}
+// a picture of an ask, from the box that asked (main.rs box_picture: its /ticket, then the bytes as a data URL)
+async function picture(name, path, cwd) {
+  const box = boxes.find((b) => b.name === name);
+  if (!box) throw new Error("no box address to load it from");
+  const token = await auth.currentUser.getIdToken();
+  window.FB.boxAsks += 1; window.FB.pics += 1;
+  return invoke("box_picture", { url: box.url, token, path, cwd });
+}
 // reads/writes: Firestore bills one read per changed record delivered (at least one per answer); counted for the checks
-window.FB = { start, stop, ratesOpen, ratesClose, saveFx, saveGold, signedIn: () => !!(auth && auth.currentUser), reads: 0, writes: 0,
+window.FB = { start, stop, sessions, send, runState, runText, needsOpen, needsClose, needsWrite, planTitle, picture, needAsks: 0, pics: 0, ratesOpen, ratesClose, saveFx, saveGold, signedIn: () => !!(auth && auth.currentUser), reads: 0, writes: 0,
   boxAsks: 0, boxes: () => boxes.map((b) => b.name) };

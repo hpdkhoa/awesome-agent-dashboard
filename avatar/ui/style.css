@@ -108,3 +108,116 @@ html,body{margin:0;background:transparent;overflow:hidden;font-family:Tahoma,Ver
 .rfoot{display:flex;justify-content:space-between;align-items:center;margin-top:8px;font-size:11px;color:#9ab}
 #rsync{font:12px Tahoma;letter-spacing:1px;color:var(--green);background:transparent;border:1px solid var(--green);padding:3px 14px;cursor:pointer}
 #rsync:disabled{color:#6a7a80;border-color:#4a5a60;cursor:default}
+/* plan c5cb9485 s1: button 3 SEND and the SEND box (approved preview cc/dashboard/avatar/n3/after-cont.png): pink ring, pink box */
+.btn.pink{border-color:var(--pink);color:var(--pink);box-shadow:0 0 10px var(--pink)}
+.btn.pink .send{font:bold 11px Tahoma;letter-spacing:.5px}
+#b3:hover,#b3.on{border-color:var(--pink);color:var(--pink);box-shadow:0 0 16px var(--pink),0 0 4px var(--pink) inset;background:#1a0216}
+#b3 .tag{background:var(--pink)}
+#b3:hover .tag{opacity:1}
+.sendopen #b3 .tag{display:none}
+.link.pink{background:linear-gradient(90deg,var(--pink),transparent);box-shadow:0 0 6px var(--pink)}
+.sendopen #link3{display:block}
+#swrap{display:none}.sendopen #swrap{display:block}
+.wrap.send{--c:var(--pink)}
+#sbox{width:316px;cursor:move}
+.stabs{display:flex;margin:6px 0 8px}
+.stabs button{flex:1;font:12px Tahoma;letter-spacing:1px;background:transparent;color:#6a7a80;border:1px solid #3a4a50;padding:3px;cursor:pointer}
+.stabs button.on{color:var(--blue);border-color:var(--blue);background:#021a20;box-shadow:0 0 6px var(--blue) inset}
+.sgrid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px}
+.sgrid.one{grid-template-columns:1fr}   /* s9 SEARCH tab: only BOX */
+.pk{display:block;border:1px solid #1f6a30;padding:1px 5px 2px;cursor:default}
+.pk b{display:block;font:normal 9px Tahoma;color:#6a7a80;letter-spacing:1px}
+.pk select{width:100%;background:#000;color:var(--green);border:0;font:12px Tahoma;outline:none;cursor:pointer;padding:0}
+.pk select option{background:#05080a;color:#cfe}
+.pk.wide{margin-bottom:6px}
+#smsg{width:100%;resize:none;background:#03070a;color:#dfe;border:1px solid #3a4a50;font:12px Tahoma;padding:4px 6px;outline:none;user-select:text}
+#smsg:focus{border-color:var(--pink)}
+.sfoot{display:flex;justify-content:space-between;align-items:center;margin-top:6px;font-size:10px;color:#7a8a90;gap:8px}
+#ssend{font:12px Tahoma;letter-spacing:1px;color:var(--green);background:transparent;border:1px solid var(--green);padding:3px 14px;cursor:pointer}
+#ssend:disabled{color:#6a7a80;border-color:#4a5a60;cursor:default}
+.pk[hidden]{display:none}   /* s1: the tab hides FOLDER or SESSION; .pk display:block must not beat [hidden] */
+/* s3: the sent message's state + reply head (approved preview after-cont.png) */
+.sstate{border-top:1px solid #2a3a44;margin-top:7px;padding-top:5px;font-size:11px;line-height:1.5;color:#cfe;white-space:normal;word-break:break-word}
+.sstate[hidden]{display:none}
+.sstate .rk{color:var(--blue)}
+#srep{max-height:70px;overflow:hidden}   /* 3 reply lines + s9 sources line */
+#sopen{color:var(--blue);text-decoration:none;cursor:pointer}
+#sopen:hover{text-decoration:underline}
+/* plan c5cb9485 s4: button 4 NEED and the NEEDS YOU deck (approved preview cc/dashboard/avatar/n3/after-n4-v2.png): orange
+   ring and box, each ask like the dashboard inbox */
+.btn.red{border-color:var(--orange);color:var(--orange);box-shadow:0 0 10px var(--orange)}
+.btn.red .need{font:bold 10px Tahoma;letter-spacing:.5px}
+.btn.red .cnt{position:absolute;right:-6px;top:-6px;background:#ff2a2a;color:#fff;border-radius:9px;font:bold 11px Tahoma;padding:1px 5px;box-shadow:0 0 6px #ff2a2a}
+.btn.red .cnt[hidden]{display:none}
+#b4:hover,#b4.on{border-color:var(--orange);color:var(--orange);box-shadow:0 0 16px var(--orange),0 0 4px var(--orange) inset;background:#1a0c00}
+#b4 .tag{background:var(--orange)}
+#b4:hover .tag{opacity:1}
+.needopen #b4 .tag{display:none}
+.link.red{background:linear-gradient(90deg,var(--orange),transparent);box-shadow:0 0 6px var(--orange)}
+.needopen #link4{display:block}
+#nwrap{display:none}.needopen #nwrap{display:block}
+.wrap.need{--c:var(--orange)}
+#nbox{width:510px;cursor:move;color:#cfe;font-size:12px;line-height:1.45}
+#nbox .title span:first-child{background:none;-webkit-background-clip:border-box;color:var(--orange)}
+.npg{color:#ccc;letter-spacing:0;font-size:12px}
+.npg b{border:1px solid #555;padding:0 6px;margin:0 3px;color:#fff;cursor:pointer;font-weight:normal}
+.npg b.off{color:#555;cursor:default}
+.nmeta{color:var(--orange);font-size:12px;margin-top:4px}
+.nq{color:#fff;font-size:13px;margin:3px 0 5px;white-space:normal;word-break:break-word}
+.nctx{color:#9ab;font-size:11px;border-left:2px solid #444;padding-left:6px;margin-bottom:6px;white-space:pre-wrap;word-break:break-word;max-height:84px;overflow:auto;user-select:text;cursor:text}
+.nctx.call{font-family:Consolas,monospace;font-size:10px;color:#cfc}
+.ndots{display:flex;gap:4px;margin:0 0 6px}
+.ndots i{width:9px;height:9px;border-radius:50%;background:#3a4a50;cursor:pointer}
+.ndots i.saved{background:var(--green)}.ndots i.now{background:var(--blue);box-shadow:0 0 5px var(--blue)}
+.ncards{max-height:300px;overflow:auto}
+.ncard{border:1px solid #333;padding:5px 7px;margin-bottom:5px;display:flex;gap:8px;align-items:center;cursor:pointer}
+.ncard:hover{border-color:#555}
+.ncard.sel{border-color:var(--green);box-shadow:0 0 6px var(--green) inset}
+.ncard.dis{cursor:default}
+.ncard .rad{width:12px;height:12px;border-radius:50%;border:1px solid #888;flex:none}
+.ncard.multi .rad{border-radius:2px}
+.ncard.sel .rad{background:var(--blue);border-color:var(--blue);box-shadow:0 0 0 2px #000 inset}
+.ncard .tx{flex:1;min-width:0;white-space:normal}
+.ncard .l{color:#fff}
+.ncard .d{color:#9ab;font-size:11px}.ncard .df{color:#c77dff;font-size:11px}
+.rec{background:var(--green);color:#000;font-size:10px;padding:0 4px;margin-left:5px}
+.npair{display:flex;gap:3px;flex:none}
+.npair figure{margin:0;text-align:center;font-size:9px;color:#888}
+.npair img,.npair .ph{width:92px;height:63px;border:1px solid #444;display:block;object-fit:cover;object-position:top left;cursor:zoom-in;background:#05080a}
+.npair .ph{cursor:default;font-size:9px;color:#777;padding:3px;white-space:normal;overflow:hidden}
+.nvis{width:150px;height:63px;border:1px solid #444;object-fit:contain;background:#05080a;cursor:zoom-in;flex:none}
+.ndraft{width:186px;height:63px;border:1px solid #444;font-family:Consolas,monospace;font-size:10px;color:#cfc;padding:3px;white-space:pre-wrap;overflow:hidden;flex:none;cursor:zoom-in}
+.ndraft .add{color:var(--green)}.ndraft .del{color:var(--pink)}
+#nnote{width:100%;resize:none;background:#03070a;color:#dfe;border:1px solid #444;font:12px Tahoma;padding:4px 6px;outline:none;user-select:text;margin:4px 0 6px}
+#nnote:focus{border-color:var(--orange)}
+.nact{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.nact button{font:12px Tahoma;letter-spacing:1px;background:transparent;color:var(--green);border:1px solid var(--green);padding:2px 12px;cursor:pointer}
+.nact button.o{border-color:#888;color:#aaa}
+.nact button.no{border-color:var(--pink);color:var(--pink)}
+.nact button:disabled{color:#6a7a80;border-color:#4a5a60;cursor:default}
+.nsay{font-size:11px;color:#9ab;margin-top:5px;white-space:normal}
+.nsay.bad{color:var(--orange)}
+.nfoot{color:#777;font-size:10px;margin-top:6px;white-space:normal}
+.nempty{color:#9ab;margin:10px 0 4px}
+.nfull{position:absolute;inset:0;background:#000e;z-index:3;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px;cursor:zoom-out}
+.nfull[hidden]{display:none}
+.nfull img{max-width:100%;max-height:calc(100% - 24px);object-fit:contain;border:1px solid #444}
+.nfull pre{max-width:100%;max-height:calc(100% - 24px);overflow:auto;margin:0;font:11px Consolas,monospace;color:#cfc;white-space:pre-wrap;user-select:text}
+.nfull span{color:#aaa;font-size:11px;margin-top:4px}
+/* plan c5cb9485 s5: the hotkey box (right click > Hotkey) */
+#kwrap{display:none}.keyopen #kwrap{display:block}
+.wrap.key{--c:var(--pink)}
+#kbox{width:280px;cursor:move}
+.krow{margin-top:6px;color:#cfe}.krow b{color:var(--green);font-weight:normal}
+.kcap{margin:6px 0;border:1px dashed var(--pink);padding:8px;text-align:center;font-size:15px;color:#fff;letter-spacing:1px;min-height:38px}
+.kcap.ok{border-color:var(--green);color:var(--green)}.kcap.bad{border-color:var(--orange);color:var(--orange)}
+.ksay{font-size:11px;color:#9ab;white-space:normal;line-height:1.4}.ksay.bad{color:var(--orange)}.ksay.ok{color:var(--green)}
+.kfoot{display:flex;gap:6px;justify-content:flex-end;margin-top:8px}
+.kfoot button{font:12px Tahoma;letter-spacing:1px;background:transparent;color:#aaa;border:1px solid #888;padding:2px 12px;cursor:pointer}
+/* plan c5cb9485 s6: the voice toggle (MIC button + its line) */
+#smic{font:12px Tahoma;letter-spacing:1px;color:#aaa;background:transparent;border:1px solid #888;padding:3px 10px;cursor:pointer;margin-left:auto}
+#smic.on{color:#000;background:var(--orange);border-color:var(--orange);box-shadow:0 0 8px var(--orange);animation:micp 1.2s ease-in-out infinite}
+@keyframes micp{50%{box-shadow:0 0 2px var(--orange)}}
+.svoice{font-size:11px;color:var(--orange);margin-top:4px;white-space:normal}
+.svoice[hidden]{display:none}
+.svoice.bad{color:var(--pink)}

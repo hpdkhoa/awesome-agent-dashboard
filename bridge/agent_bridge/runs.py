@@ -1,7 +1,9 @@
 """Starts, messages and stops Claude Code runs the owner asks for on the dashboard (P3 and the message box).
 
 The page writes commands/<id> with action "start" (a registered folder and a prompt), "message" (a message to an
-existing session), "plan" (a plan from a session's real record, planfrom.py) or "stop" (a run to end). The bridge on the named machine runs the owner's own `claude` CLI:
+existing session), "plan" (a plan from a session's real record, planfrom.py), "search" (a fast question to Gemini
+Flash with Google Search, search.py; plan c5cb9485 s9, the owner's words, 2026-11-14: "Search box go to both send box
+and dashboard and count as a run") or "stop" (a run to end). The bridge on the named machine runs the owner's own `claude` CLI:
 
     start:    claude -p <prompt> <STREAM> --session-id <new id> --permission-prompt-tool <inbox approve>
     message:  claude -p <message> <STREAM> --resume <session> --permission-prompt-tool <inbox approve>
@@ -12,7 +14,9 @@ STREAM is `--output-format stream-json --verbose --include-partial-messages` (st
 
 Both add `--permission-mode auto` when the owner's one setting, meta/runs permissionMode, says "auto" (the owner's
 choice, 2026-11-02: "do 1 but it is one setting use for all kinds not set every run"). It covers every kind of run:
-starts, plan starts, messages and delivered answers. Auto lets Claude Code's safety check decide most approvals; the
+starts, plan starts, messages and delivered answers. A command may carry its own mode, "auto" or "manual", which wins
+for that run (the owner's pick, 2026-11-13, plan c5cb9485 s2: "Mode per message"; "I want to update the rule because
+later in each step I will need to pick the model, the effort and local or claude to use in each step"). Auto lets Claude Code's safety check decide most approvals; the
 inbox stays the fallback when the check pauses or an ask rule applies. Any other value is Manual: every approval goes to
 the inbox. There is no bypass mode.
 
@@ -71,6 +75,7 @@ from .stepcheck import StepChecks
 from .evidence import Evidence
 from .planfrom import NO_EDITS, mark_quotes, note_command, plan_prompt, scoped, system_args
 from .redact import redact
+from .search import NO_KEY, SearchRun, settings as search_settings
 
 APPROVAL_TOOL = "mcp__agent-inbox__inbox_approve"
 STREAM = ["--output-format", "stream-json", "--verbose", "--include-partial-messages"]
@@ -479,6 +484,9 @@ def folder_ok(folder: str, roots: list[tuple[str, str]]) -> str | None:
 
 
 def _kill_tree(p: subprocess.Popen) -> None:
+    if isinstance(p, SearchRun):  # a search is a thread, not a process
+        p.kill()
+        return
     if os.name == "nt":
         subprocess.run(["taskkill", "/PID", str(p.pid), "/T", "/F"], capture_output=True)
     else:
@@ -571,8 +579,12 @@ class Runs:
             return dict(rows[0]) if rows else {}
         return self.store.get("meta/runs") or {}
 
-    def mode(self) -> str:
-        """The owner's one setting for every run, read when a run starts: "auto" or "manual"."""
+    def mode(self, c: dict | None = None) -> str:
+        """The run's mode, read when a run starts: the command's own "auto" or "manual" (s2, "Mode per message"), else
+        the owner's setting in meta/runs. Anything else is Manual; bypass is never passed."""
+        own = (c or {}).get("mode")
+        if own in ("auto", "manual"):
+            return own
         return "auto" if self.prefs().get("permissionMode") == "auto" else "manual"
 
     def run_with(self, c: dict) -> tuple[str, str]:
@@ -608,6 +620,7 @@ class Runs:
                     else self.checks.start(c) if action == "step_check"
                     else self.evidence.start(c) if action == "evidence"
                     else self._add_root(c) if action == "add_root"
+                    else self._search(c) if action == "search"
                     else self._continue(c) if action == "continue" else self._auto_continue(c) if action == "auto_continue"
                     else self._unknown(c))
             if line:
@@ -751,6 +764,22 @@ class Runs:
         self.store.update(path, {"status": "done", "endedAt": now_iso(), "workType": name, "folder": full})
         return f"{c['id']}: work folder {name} = {full} added, no restart"
 
+    def _search(self, c: dict) -> str:
+        """s9: a question to Gemini Flash with Google Search, kept as a run (search.py). The key is read from the .env
+        now; no key: the run fails at once with the Config line, and no call leaves the PC."""
+        path, prompt = f"commands/{c['id']}", str(c.get("prompt") or "").strip()
+        if not prompt:
+            self.store.update(path, {"status": "failed", "endedAt": now_iso(), "error": "Empty question."})
+            return f"{c['id']}: refused, empty question"
+        key, model = search_settings(self.env_path)
+        if not key:
+            self.store.update(path, {"status": "failed", "endedAt": now_iso(), "error": NO_KEY, "engine": "gemini", "model": model})
+            return f"{c['id']}: search refused, no Gemini key"
+        self.store.update(path, {"status": "running", "startedAt": now_iso(), "engine": "gemini", "model": model,
+                                 "workType": "search"})
+        self.procs[c["id"]] = SearchRun(c["id"], prompt, self.out_dir / f"{c['id']}.out", key, model)
+        return f"{c['id']}: search sent to {model}"
+
     def _unknown(self, c: dict) -> str:
         self.store.update(f"commands/{c['id']}", {"status": "failed", "error": "Unknown action."})
         return f"{c['id']}: refused, unknown action"
@@ -779,7 +808,7 @@ class Runs:
         if not self.claude:
             self.store.update(path, {"status": "failed", "error": NO_CLI})
             return f"{c['id']}: no claude CLI"
-        sid, mode = str(uuid.uuid4()), self.mode()
+        sid, mode = str(uuid.uuid4()), self.mode(c)
         model, effort = self.run_with(c)
         keep = not c.get("noSession")
         p = self._spawn(c["id"], start_command(self.claude, prompt, sid, mode, model, effort, keep), c["folder"])
@@ -879,7 +908,7 @@ class Runs:
             if why == "app" and self._push_close(c, sid):
                 return f"{c['id']}: waited 3 minutes for session {sid}, the owner is pushed to close it in the app"
             return None
-        mode, kind = self.mode(), c.get("kind") if c.get("kind") in KINDS else ""
+        mode, kind = self.mode(c), c.get("kind") if c.get("kind") in KINDS else ""
         if c.get("generate"):
             try:
                 ensure_plan_data_ignored(cwd)
@@ -923,7 +952,7 @@ class Runs:
         new_sid = str(uuid.uuid4())
         plan_id = str(c.get("planId") or "")
         prompt = handoff_prompt(sid, str(path or ""), turns, text, plan_id, context)
-        mode, kind = self.mode(), c.get("kind") if c.get("kind") in KINDS else ""
+        mode, kind = self.mode(c), c.get("kind") if c.get("kind") in KINDS else ""
         model, effort = self.run_with(c)
         cmd = start_command(self.claude, prompt, new_sid, mode, model, effort, kind=kind, step=str(c.get("stepId") or "")[:20])
         p = self._spawn(c["id"], cmd, cwd)
@@ -1164,7 +1193,7 @@ class Runs:
                 return
             sid = str(uuid.uuid4())
             prompt = plan_prompt(c.get("sourceSessionId", ""), folder, len(pages), cid, str(c.get("goal") or "")[:2000])
-            cmd = start_command(self.claude, prompt, sid, self.mode(), *self.run_with(c)) + ["--add-dir", str(folder), "--disallowedTools", NO_EDITS]
+            cmd = start_command(self.claude, prompt, sid, self.mode(c), *self.run_with(c)) + ["--add-dir", str(folder), "--disallowedTools", NO_EDITS]
             p = self._spawn(cid, cmd, c.get("cwd", ""))
             self.store.update(path, {"sessionId": sid, "pid": p.pid, "stage": "Writing the plan", "prompt": prompt, "budget": g})
         except Exception as e:  # a failed page run or an unreadable log ends this plan, never the bridge
@@ -1236,6 +1265,9 @@ class Runs:
         r = parse_result(out)
         done_at = datetime.fromtimestamp((self.out_dir / f"{cid}.out").stat().st_mtime, timezone.utc).isoformat()
         fields.update(run_cost(self.logs, r, self.store.get(f"commands/{cid}") or {}, fields["endedAt"], done_at))
+        if r.get("engine") == "gemini":  # s9: a search's first-token time and source links, from its result line
+            fields.update({"firstTokenMs": r.get("firstTokenMs"), "totalMs": r.get("duration_ms"),
+                           "sources": r.get("sources") or []})
         if not stopped and r.get("api_error") == "usage_limit_reached":
             # paused, not failed: Continue (or the auto continue at the reset) does the leftover work; an answer's
             # inbox item stays as it is until then

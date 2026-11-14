@@ -35,6 +35,6 @@ jobs:
           args: --target universal-apple-darwin --bundles dmg
       - uses: actions/upload-artifact@v4
         with:
-          name: agent-avatar-mac
+          name: hayaku-mac
           path: avatar/target/universal-apple-darwin/release/bundle/dmg/*.dmg
           if-no-files-found: error

@@ -1,13 +1,16 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><title>Agent Avatar</title><link rel="stylesheet" href="style.css"></head>
+<html><head><meta charset="utf-8"><title>hayaku</title><link rel="stylesheet" href="style.css"></head>
 <body><div id="stage">
  <!-- layer 1: the bridge badge -->
  <div class="badge done" id="badge"><div class="face" id="face"></div><span class="inbox" id="binbox" hidden></span></div>
  <!-- the arc menu: button 1 opens the status box, button 2 the rate box (p15); the dashed slots wait for later buttons -->
  <div class="btn" id="b1" data-i="0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16"/><path d="M3 9h18M8 13h8M8 16h5"/></svg><span class="tag">STATUS</span></div>
  <div class="btn gold" id="b2" data-i="1"><span class="dong">₫</span><span class="tag">RATES</span></div>
- <div class="btn empty" data-i="2"></div><div class="btn empty" data-i="3"></div>
- <div class="link" id="link"></div><div class="link gold" id="link2"></div>
+ <!-- button 3: the SEND box (plan c5cb9485 s1, approved preview cc/dashboard/avatar/n3/after-cont.png) -->
+ <div class="btn pink" id="b3" data-i="2"><span class="send">SEND</span><span class="tag">SEND</span></div>
+ <!-- button 4: the NEEDS YOU deck (plan c5cb9485 s4, approved preview cc/dashboard/avatar/n3/after-n4-v2.png) -->
+ <div class="btn red" id="b4" data-i="3"><span class="need">NEED</span><span class="cnt" id="b4n" hidden></span><span class="tag">NEEDS YOU</span></div>
+ <div class="link" id="link"></div><div class="link gold" id="link2"></div><div class="link pink" id="link3"></div><div class="link red" id="link4"></div>
  <!-- layer 2: the status box -->
  <div class="wrap" id="wrap"><div class="glow"><i></i></div><div class="glow2"><i></i></div><div class="box" id="box">
   <div class="title"><span>AGENT//BOX</span><span id="clock"></span></div>
@@ -26,6 +29,43 @@
   <div class="title"><span>RATE//BOARD</span><span id="rclock"></span></div>
   <div id="rrows"></div>
   <div class="rfoot"><span id="rlast"></span><button id="rsync" type="button">SYNC</button></div>
+ </div></div>
+ <!-- layer 2: the SEND box (s1): tabs NEW / CONTINUE / SEARCH (s9), pickers box, model, effort, mode, folder or session, message -->
+ <div class="wrap send" id="swrap"><div class="glow"><i></i></div><div class="glow2"><i></i></div><div class="box" id="sbox">
+  <div class="title"><span>SEND//BOX</span><span id="sclock"></span></div>
+  <div class="stabs"><button type="button" id="snew" data-tab="new">NEW</button><button type="button" id="scont" data-tab="cont">CONTINUE</button><button type="button" id="ssearch" data-tab="search">SEARCH</button></div>
+  <div class="sgrid">
+   <label class="pk"><b>BOX</b><select id="sbx"></select></label>
+   <label class="pk" id="smodelk"><b>MODEL</b><select id="smodel"></select></label>
+   <label class="pk" id="seffortk"><b>EFFORT</b><select id="seffort"></select></label>
+   <label class="pk" id="smodek"><b>MODE</b><select id="smode"></select></label>
+  </div>
+  <label class="pk wide" id="sfolderk"><b>FOLDER</b><select id="sfolder"></select></label>
+  <label class="pk wide" id="ssessk"><b>SESSION</b><select id="ssess"></select></label>
+  <textarea id="smsg" rows="3" placeholder="message to the picked box..."></textarea>
+  <div class="sfoot"><span id="snote"></span><button type="button" id="smic" title="Mic on or off (the hotkey turns it on)">MIC</button><button type="button" id="ssend" disabled>SEND</button></div>
+  <!-- s6: the voice toggle's line: mic on, engine, time; text fills the message after each pause -->
+  <div class="svoice" id="svoice" hidden></div>
+  <!-- s3: the sent message: its state, the first 3 lines of the reply, Open on dashboard -->
+  <div class="sstate" id="sstate" hidden><div id="sst"></div><div id="srep"></div><a id="sopen" href="#">[Open on dashboard]</a></div>
+ </div></div>
+ <!-- layer 2: the hotkey box (s5): right click > Hotkey; press a combo, it is set at once, or refused when taken -->
+ <div class="wrap key" id="kwrap"><div class="glow"><i></i></div><div class="glow2"><i></i></div><div class="box" id="kbox">
+  <div class="title"><span>HOT//KEY</span><span>opens SEND</span></div>
+  <div class="krow"><span class="k">now</span> <b id="know">none</b></div>
+  <div class="kcap" id="kcap">press the keys...</div>
+  <div class="ksay" id="ksay">Ctrl, Alt, Shift or Win + a key · Esc closes</div>
+  <div class="kfoot"><button type="button" id="kclear">CLEAR</button><button type="button" id="kclose">CLOSE</button></div>
+ </div></div>
+ <!-- layer 2: the NEEDS YOU deck (s4): each waiting ask like the dashboard inbox, oldest first, all boxes -->
+ <div class="wrap need" id="nwrap"><div class="glow"><i></i></div><div class="glow2"><i></i></div><div class="box" id="nbox">
+  <div class="title"><span>NEEDS//YOU</span><span class="npg" id="npg"></span></div>
+  <div id="nbody"></div>
+  <textarea id="nnote" rows="2" placeholder="note (optional)..." hidden></textarea>
+  <div class="nact" id="nact"></div>
+  <div class="nsay" id="nsay"></div>
+  <div class="nfoot" id="nfoot"></div>
+  <div class="nfull" id="nfull" hidden></div>
  </div></div>
 </div>
 <script src="fb.js"></script><script src="robot.js"></script><script src="app.js"></script></body></html>

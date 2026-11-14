@@ -28,6 +28,9 @@ function render(s, offline) {
   const ib = $("binbox"), n = offline ? 0 : s.inbox;
   if (ib.hidden !== !n) ib.hidden = !n;
   setText(ib, String(n || ""));
+  const b4n = $("b4n");   // s4: button 4 carries the same count as the badge
+  if (b4n.hidden !== !n) b4n.hidden = !n;
+  setText(b4n, String(n || ""));
   setText($("state"), offline || (s.anyOffline && !s.bridges.some((b) => b.online)) ? "OFFLINE"
     : (s.status === "in progress" ? "IN PROGRESS" : "DONE") + (s.anyOffline ? " · 1+ OFFLINE" : ""));
   setText($("clock"), offline ? (lastAt ? "last " + hhmmss(lastAt) : "") : hhmmss(new Date()));
@@ -46,6 +49,7 @@ function render(s, offline) {
         b.online ? `● ${st || "online"}` : `✕ ${b.seenAgoS == null ? "none" : "seen " + Math.round(b.seenAgoS / 60) + "m ago"}`);
     }
     if (authError) h += row("sign-in", "bad", esc(authError));
+    if (keyErr) h += row("hotkey", "bad", esc(keyErr));   // s5: the saved key was taken at start
     for (const x of s.hosts || []) {
       const both = x.ssh && x.ollama;
       const txt = x.ssh || x.ollama ? `${x.ssh ? "●" : "✕"} ssh ${x.ollama ? "●" : "✕"} ollama` : "✕ no link";
@@ -72,7 +76,7 @@ function render(s, offline) {
 // window grows and moves around it so every layer fits.
 const R = 92, ANG = [-78, -28, 22, 72], GLOW = 14;
 const BOX_X = Math.max(...ANG.map((a) => R * Math.cos(a * Math.PI / 180))) + 26 + 18;  // right of every button
-let layer = "closed";      // closed | menu | box | rates (p15)
+let layer = "closed";      // closed | menu | box | rates (p15) | send (plan c5cb9485 s1) | need (s4)
 let shown = "closed";      // the layer the window is sized for (it stays big while buttons fly back)
 let badgeAt = null;        // the badge centre in window CSS px (unzoomed), from the last layout
 let badgePx = null;        // the same in device px (zoom and Windows text size applied)
@@ -88,9 +92,13 @@ function rects(state) {
   if (state === "menu") {
     r.push([b1[0] + 30, b1[1] - 14, b1[0] + 130, b1[1] + 14]);  // the STATUS label on hover
     r.push([b2[0] + 30, b2[1] - 14, b2[0] + 120, b2[1] + 14]);  // the RATES label on hover (p15)
+    const b3 = [R * Math.cos(ANG[2] * Math.PI / 180), R * Math.sin(ANG[2] * Math.PI / 180)];
+    r.push([b3[0] + 30, b3[1] - 14, b3[0] + 120, b3[1] + 14]);  // the SEND label on hover (s1)
+    const b4 = [R * Math.cos(ANG[3] * Math.PI / 180), R * Math.sin(ANG[3] * Math.PI / 180)];
+    r.push([b4[0] + 30, b4[1] - 14, b4[0] + 150, b4[1] + 14]);  // the NEEDS YOU label on hover (s4)
   }
-  if (state === "box" || state === "rates") {
-    const w = $(state === "box" ? "wrap" : "rwrap").getBoundingClientRect(), z = zoom || 1;
+  if (state === "box" || state === "rates" || state === "send" || state === "need" || state === "key") {
+    const w = $({ box: "wrap", rates: "rwrap", send: "swrap", need: "nwrap", key: "kwrap" }[state]).getBoundingClientRect(), z = zoom || 1;
     const x0 = BOX_X, y0 = b1[1] - 26 - 14;
     r.push([x0, y0, x0 + w.width / z, y0 + w.height / z]);
   }
@@ -116,6 +124,15 @@ async function fit() {
   const b2x = R * Math.cos(ANG[1] * Math.PI / 180), b2y = R * Math.sin(ANG[1] * Math.PI / 180);
   place($("rwrap"), cx + BOX_X, cy + b1y - 26 - 14);
   place($("link2"), cx + b2x + 26, cy + b2y - 1); $("link2").style.width = `${BOX_X - b2x - 26 + 18}px`;
+  // s1: the SEND box opens in the same place, its link from button 3
+  const b3x = R * Math.cos(ANG[2] * Math.PI / 180), b3y = R * Math.sin(ANG[2] * Math.PI / 180);
+  place($("swrap"), cx + BOX_X, cy + b1y - 26 - 14);
+  place($("link3"), cx + b3x + 26, cy + b3y - 1); $("link3").style.width = `${BOX_X - b3x - 26 + 18}px`;
+  // s4: the NEEDS YOU deck opens in the same place, its link from button 4
+  const b4x = R * Math.cos(ANG[3] * Math.PI / 180), b4y = R * Math.sin(ANG[3] * Math.PI / 180);
+  place($("nwrap"), cx + BOX_X, cy + b1y - 26 - 14);
+  place($("kwrap"), cx + BOX_X, cy + b1y - 26 - 14);   // s5: the hotkey box
+  place($("link4"), cx + b4x + 26, cy + b4y - 1); $("link4").style.width = `${BOX_X - b4x - 26 + 18}px`;
   setFly(layer !== "closed", true);
   const dpr = window.devicePixelRatio || 1, z = zoom || 1;
   // the badge's place in the window in device px; the window moves by its change, so the badge stays still on
@@ -151,6 +168,13 @@ async function go(next) {
   document.body.classList.toggle("ratesopen", next === "rates");
   $("b1").classList.toggle("on", next === "box");
   $("b2").classList.toggle("on", next === "rates");
+  document.body.classList.toggle("sendopen", next === "send");
+  $("b3").classList.toggle("on", next === "send");
+  if (next === "send") sendOn(); else if (was === "send") sendOff();
+  document.body.classList.toggle("needopen", next === "need");
+  $("b4").classList.toggle("on", next === "need");
+  if (next === "need") needOn(); else if (was === "need") needOff();
+  document.body.classList.toggle("keyopen", next === "key");
   if (next === "box") load();
   if (next === "rates") ratesOn(); else if (was === "rates") ratesOff();
   if (next === "closed") {           // fly back first, then shrink
@@ -179,6 +203,7 @@ async function poll() {
 
 // p11: every bridge from Firestore (the owner's picks "C: bridges publish, avatar listens", "All, merged + picker")
 const MACHINE_LIVE_S = 420;           // the bridge's keepalive (5 min) + 2 rounds: status.py MACHINE_LIVE_SECONDS
+let keyErr = "";   // s5
 let machines = null, signed = false, authError = "", localName = null, localSeen = false, localOk = false;
 let follow = localStorage.getItem("follow") || "all";
 function merged() {
@@ -206,6 +231,8 @@ function show() {
   if (machines) render(merged(), false);
   else if (failedSince) render(null, true);
   else if (last) render(last, false);
+  if (layer === "send") renderSend();   // s1: a box going online or offline shows in the BOX picker
+  if (layer === "need") renderNeed();   // s4: the badge's count shows beside the deck's
 }
 async function startFirebase() {
   try {
@@ -278,6 +305,7 @@ window.addEventListener("wheel", (e) => {
 let press = null;
 document.addEventListener("mousedown", (e) => {
   if (e.button !== 0 || e.target === grip || e.target.closest(".btn.empty")) return;
+  if (e.target.closest("select, textarea, option")) return;   // s1: the pickers and the message take the mouse, no drag
   press = { x: e.screenX, y: e.screenY, t: e.target };
 });
 document.addEventListener("mousemove", (e) => {
@@ -296,6 +324,15 @@ document.addEventListener("mouseup", (e) => {
   else if (t.closest("#b1")) go(layer === "box" ? "menu" : "box");
   else if (t.closest("#rsync")) sync();
   else if (t.closest("#b2")) go(layer === "rates" ? "menu" : "rates");
+  else if (t.closest("#b3")) go(layer === "send" ? "menu" : "send");
+  else if (t.closest(".stabs button")) sendTab(t.closest(".stabs button").dataset.tab);
+  else if (t.closest("#ssend")) sendVoice();
+  else if (t.closest("#smic")) (vOn ? voiceOff(false) : voiceOn());
+  else if (t.closest("#sopen")) { if (sRun) invoke("open_run", { id: sRun.id }).catch(() => {}); }
+  else if (t.closest("#b4")) go(layer === "need" ? "menu" : "need");
+  else if (t.closest("#kclear")) keySet("");
+  else if (t.closest("#kclose")) go("menu");
+  else if (t.closest("#nbox [data-act]")) needAct(t.closest("[data-act]"));
 });
 document.addEventListener("contextmenu", (e) => {
   e.preventDefault();
@@ -465,3 +502,486 @@ function sortKeys(v) {
   if (!v || typeof v !== "object" || Array.isArray(v)) return v;
   return Object.fromEntries(Object.keys(v).sort().map((k) => [k, sortKeys(v[k])]));
 }
+
+// Button 3: the SEND box (plan c5cb9485 s1). The owner's words (2026-11-13): "the third node will be the interaction
+// place where I can send the message through the avatar, choose the target, the models, the session belong to targeted
+// box". Picks: "Two tabs" (NEW = a folder of the box, CONTINUE = a session of the box), "+ effort + mode", layout
+// "Approve, CONTINUE first" (it opens on the last used tab and session). Models and efforts are the bridge's exact lists
+// (runs.py MODELS, EFFORTS; the owner's rule "I want exact option"; opus-5-5 + medium when nothing was picked before).
+// The box's sessions are asked once when the box opens or the picked box changes (box closed = nothing read). Send
+// writes the command to the picked box (s2, below).
+const MODELS = ["claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"];
+const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+const MODES = [["manual", "Manual"], ["auto", "Auto"]];
+let sp = Object.assign({ tab: "cont", box: "", model: "claude-opus-5-5", effort: "medium", mode: "manual", folder: "", session: "" },
+  JSON.parse(localStorage.getItem("send") || "{}"));
+let sSessions = null, sSessErr = "", sSessFor = "", sTick = null;
+const saveSp = () => localStorage.setItem("send", JSON.stringify(sp));
+const opt = (v, label, on) => `<option value="${esc(v)}"${on ? " selected" : ""}>${esc(label)}</option>`;
+function setOpts(el, html) { if (el.innerHTML !== html) el.innerHTML = html; }
+const ago = (iso) => {
+  const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
+  return !iso ? "" : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} d ago`;
+};
+const base = (p) => String(p || "").replace(/[\\/]+$/, "").split(/[\\/]/).pop();
+function sendBoxes() {
+  const now = Date.now();
+  return (machines || []).map((m) => {
+    const age = m.seenAt ? (now - Date.parse(m.seenAt)) / 1000 : null;
+    const self = !!localName && m.name === localName;
+    return { name: m.name, online: self && localSeen ? localOk : age != null && age < MACHINE_LIVE_S, folders: m.folders || [] };
+  });
+}
+function renderSend() {
+  if (layer !== "send") return;
+  const bs = sendBoxes();
+  if (!bs.some((b) => b.name === sp.box) && bs.length) { sp.box = (bs.find((b) => b.online) || bs[0]).name; saveSp(); }
+  const box = bs.find((b) => b.name === sp.box);
+  setOpts($("sbx"), bs.length ? bs.map((b) => opt(b.name, `${b.name} (${b.online ? "online" : "offline"})`, b.name === sp.box)).join("")
+    : opt("", !signed ? "not signed in" : machines === null ? "loading boxes..." : "no box yet", true));
+  setOpts($("smodel"), MODELS.map((m) => opt(m, m, m === sp.model)).join(""));
+  setOpts($("seffort"), EFFORTS.map((x) => opt(x, x, x === sp.effort)).join(""));
+  setOpts($("smode"), MODES.map(([v, l]) => opt(v, l, v === sp.mode)).join(""));
+  const fs = box ? box.folders : [];
+  // the folder's path is the value: two folders can share one name (engineering-reference twice on the PC)
+  if (fs.length && !fs.some((f) => f.path === sp.folder)) { sp.folder = fs[0].path; saveSp(); }
+  setOpts($("sfolder"), fs.length ? fs.map((f) => opt(f.path, `${f.workType} \u00b7 ${f.path}`, f.path === sp.folder)).join("")
+    : opt("", "no folder on this box", true));
+  let ss;
+  if (sSessErr) ss = opt("", sSessErr, true);
+  else if (!sSessions) ss = opt("", "loading sessions...", true);
+  else if (!sSessions.length) ss = opt("", "no session on this box", true);
+  else {
+    if (!sSessions.some((x) => x.id === sp.session)) { sp.session = sSessions[0].id; saveSp(); }
+    ss = sSessions.map((x) => opt(x.id, `${(x.title || x.firstPrompt || x.id).slice(0, 48)} \u00b7 ${base(x.cwd)} \u00b7 ${ago(x.lastAt)}`, x.id === sp.session)).join("");
+  }
+  setOpts($("ssess"), ss);
+  $("snew").classList.toggle("on", sp.tab === "new"); $("scont").classList.toggle("on", sp.tab === "cont");
+  $("ssearch").classList.toggle("on", sp.tab === "search");
+  $("sfolderk").hidden = sp.tab !== "new"; $("ssessk").hidden = sp.tab !== "cont";
+  // s9 SEARCH tab (the owner's pick "A: SEARCH tab"): Gemini needs only the box; model, effort and mode are hidden
+  const srch = sp.tab === "search";
+  for (const id of ["smodelk", "seffortk", "smodek"]) $(id).hidden = srch;
+  $("sbx").closest(".sgrid").classList.toggle("one", srch);
+  const ph = srch ? "ask the web (Gemini Flash + Google Search)..." : "message to the picked box...";
+  if ($("smsg").placeholder !== ph) $("smsg").placeholder = ph;
+  setText($("ssend"), srch ? "SEARCH" : "SEND");
+  sendReady();
+  setText($("sclock"), hhmmss(new Date()));
+}
+async function loadSessions() {
+  const name = sp.box; sSessFor = name; sSessions = null; sSessErr = ""; renderSend();
+  if (!name) return;
+  try {
+    if (!window.FB || !FB.signedIn()) throw new Error("not signed in: right click > Sign in with Google");
+    const rows = await FB.sessions(name);
+    if (sSessFor !== name) return;
+    sSessions = rows;
+  } catch (e) { if (sSessFor === name) sSessErr = String(e.message || e).slice(0, 80); }
+  renderSend(); if (shown === "send") fit();
+}
+function sendTab(t) { sp.tab = ["new", "search"].includes(t) ? t : "cont"; saveSp(); renderSend(); fit(); }
+function sendOn() { renderSend(); loadSessions(); sTick = setInterval(() => setText($("sclock"), hhmmss(new Date())), 1000); watchOn(); }
+function sendOff() { clearInterval(sTick); sTick = null; sSessions = null; sSessFor = ""; watchOff(); voiceOff(false); }
+$("sbx").addEventListener("change", (e) => { sp.box = e.target.value; saveSp(); loadSessions(); });
+for (const [id, k] of [["smodel", "model"], ["seffort", "effort"], ["smode", "mode"], ["sfolder", "folder"], ["ssess", "session"]])
+  $(id).addEventListener("change", (e) => { sp[k] = e.target.value; saveSp(); sNote = ""; sendReady(); });
+
+// s2: the send path. NEW writes a start command (machine, folder, prompt), CONTINUE a message command (machine,
+// sessionId, cwd, prompt), shaped as the dashboard writes them (web/src/data.ts startRun, sendMessage), with the picked
+// exact model and effort. The command goes to the picked box: through its data API when it is a registered box, else to
+// Firestore (FB.send). The box's bridge runs it as it runs the page's commands.
+let sSending = false, sLast = null, sNote = "";
+const newCmdId = () => crypto.randomUUID().replace(/-/g, "").slice(0, 20);
+function sendWhy() {
+  if (!window.FB || !FB.signedIn()) return "not signed in";
+  const box = sendBoxes().find((b) => b.name === sp.box);
+  if (!box) return "pick a box";
+  if (sp.tab === "new" && !box.folders.some((f) => f.path === sp.folder)) return "pick a folder";
+  if (sp.tab === "cont" && !(sSessions || []).some((x) => x.id === sp.session)) return "pick a session";
+  if (!$("smsg").value.trim()) return sp.tab === "search" ? "write a question" : "write a message";
+  return "";
+}
+function sendReady() {
+  const why = sSending ? "sending..." : sendWhy();
+  $("ssend").disabled = !!why;
+  setText($("snote"), sNote || why);
+}
+function sendCommand() {
+  const prompt = $("smsg").value.trim(), id = newCmdId(), at = new Date().toISOString();
+  // s9: a search (the owner's words, 2026-11-14: "Search box go to both send box and dashboard and count as a run"):
+  // the box's bridge asks Gemini Flash with Google Search (bridge search.py); no model, effort or mode
+  if (sp.tab === "search") return { id, action: "search", machine: sp.box, prompt, status: "new", createdAt: at };
+  const run = { model: sp.model, effort: sp.effort, mode: sp.mode };   // mode per message (the owner's pick, s2)
+  if (sp.tab === "new") return { id, action: "start", machine: sp.box, folder: sp.folder, prompt, status: "new", createdAt: at, ...run };
+  const x = sSessions.find((s) => s.id === sp.session);
+  return { id, action: "message", machine: sp.box, sessionId: x.id, cwd: x.cwd || "", prompt, status: "new", createdAt: at, ...run };
+}
+async function send() {
+  if (sSending || sendWhy()) return;
+  const c = sendCommand();
+  sSending = true; sNote = ""; sendReady();
+  try {
+    const via = await FB.send(sp.box, c);
+    sLast = { ...c, via }; $("smsg").value = "";
+    sRun = { id: c.id, box: c.machine, model: c.model || (c.action === "search" ? "gemini" : ""), sentAt: c.createdAt, status: "new" }; sRunText = ""; saveRun(); watchOn();
+    sNote = `sent to ${c.machine} (${via}) \u00b7 ${c.id}`;
+  } catch (e) { sNote = "not sent: " + String(e.message || e).slice(0, 70); }
+  sSending = false; sendReady();
+}
+$("smsg").addEventListener("input", () => { sNote = ""; sendReady(); });
+
+// s3: the sent message's state and the head of its reply (the owner's pick, round 1: "State + reply head": queued /
+// running / done, the first 3 lines of the reply, Open on dashboard). The last sent run is kept (localStorage), so the
+// box reopens on it. Asked every 3 s, and only while the box is open and the run has not ended (box closed = nothing
+// read); the reply is the box's own text of the run (/text: live while running, the result once ended).
+const ENDED = ["done", "failed", "stopped", "cancelled"];
+const STATE = { new: "QUEUED", waiting: "WAITING (session busy)", running: "RUNNING", done: "DONE", failed: "FAILED",
+  stopped: "STOPPED", cancelled: "CANCELLED", paused: "PAUSED", stopping: "STOPPING" };
+let sRun = JSON.parse(localStorage.getItem("sendRun") || "null"), sRunText = "", sWatch = null, sAsking = false;
+const saveRun = () => localStorage.setItem("sendRun", JSON.stringify(sRun));
+const mmss = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+function renderRun() {
+  const el = $("sstate");
+  if (!sRun) { if (!el.hidden) { el.hidden = true; fit(); } return; }
+  const st = sRun.status || "new", from = sRun.startedAt || sRun.sentAt, to = sRun.endedAt ? Date.parse(sRun.endedAt) : Date.now();
+  const cls = st === "done" ? "ok" : ENDED.includes(st) ? "bad" : st === "running" ? "v" : "o";
+  const h = `<span class="${cls}">\u25cf ${esc(STATE[st] || st.toUpperCase())}</span> \u00b7 ${esc(String(sRun.model || "").replace("claude-", ""))}`
+    + ` \u00b7 ${esc(sRun.box)}${from ? " \u00b7 " + mmss(Math.max(0, (to - Date.parse(from)) / 1000)) : ""}`
+    + (sRun.firstTokenMs != null ? ` \u00b7 first token ${(sRun.firstTokenMs / 1000).toFixed(1)} s` : "");
+  if ($("sst").innerHTML !== h) $("sst").innerHTML = h;
+  // s9: a search's reply leaves out its "Sources:" list; the links show on their own line, by site name; a failed
+  // run shows why (a search with no key: "No Gemini key: set GEMINI_API_KEY in Config ...")
+  const lines = String(sRunText || "").split(/\n\s*Sources:\s*\n/)[0].split(/\r?\n/).map((x) => x.trim()).filter(Boolean).slice(0, 3);
+  const srcs = (sRun.sources || []).map((x) => x.title);
+  let r = sRun.error && st === "failed" ? `<span class="rk">why:</span> <span class="bad">${esc(sRun.error.slice(0, 160))}</span>`
+    : lines.length ? `<span class="rk">reply:</span> ${lines.map(esc).join("<br>")}` : `<span class="rk">reply:</span> <span class="k">${st === "done" ? "none" : "\u2026"}</span>`;
+  if (srcs.length) r += `<br><span class="rk">sources:</span> ${srcs.slice(0, 2).map(esc).join(" \u00b7 ")}${srcs.length > 2 ? ` \u00b7 +${srcs.length - 2}` : ""}`;
+  if ($("srep").innerHTML !== r) $("srep").innerHTML = r;
+  if (el.hidden) { el.hidden = false; fit(); } else if (shown === "send") fit();
+}
+async function askRun() {
+  if (!sRun || sAsking || !window.FB || !FB.signedIn()) return;
+  sAsking = true;
+  try {
+    const c = await FB.runState(sRun.box, sRun.id);
+    if (c) Object.assign(sRun, { status: c.status, startedAt: c.startedAt || null, endedAt: c.endedAt || null, model: c.model || sRun.model,
+      firstTokenMs: c.firstTokenMs ?? null, sources: c.sources || null, error: c.error || "" });   // s9: first token, links, why it failed
+    const ended = ENDED.includes(sRun.status);
+    if (sRun.status === "running" || ended) {
+      const t = await FB.runText(sRun.box, sRun.id, !ended).catch(() => null);
+      if (t && typeof t.text === "string") sRunText = t.text;
+    }
+    saveRun();
+    if (ended) watchOff();
+  } catch (_) {}
+  sAsking = false;
+  if (layer === "send") renderRun();
+}
+function watchOn() {
+  renderRun();
+  if (!sRun || sWatch || layer !== "send") return;
+  askRun();
+  if (!ENDED.includes(sRun.status) || !sRunText) sWatch = setInterval(askRun, 3000);
+}
+function watchOff() { clearInterval(sWatch); sWatch = null; }
+
+// Button 4: the NEEDS YOU deck (plan c5cb9485 s4). The owner's words (2026-11-13): "Do a deep research for virtual
+// assistant to plan any new design for the 4th node"; round 2: "I want to see the preview like this inbox feature, can
+// you make it?"; round 3: "Approve v2" (after-n4-v2.png); batches "One at a time". Each waiting ask (inbox status open,
+// every box, oldest first) shows like the dashboard inbox (web/src/Inbox.tsx, Example.tsx): the question, its context,
+// option cards with their pictures, drawings, code or drafts, REC on the recommended one, a note, Answer and Open on
+// dashboard. A batch walks one question at a time: each answer is saved as the page saves it (draft + thread), and all
+// answers go together at the end (data.ts saveDraft, sendBatch). A tool ask from a run shows its call with Allow / Deny.
+// The answer is the same write the page makes, on the box that holds the ask. Read only while the deck is open.
+let nItems = null, nErr = "", nKey = "", nQ = {}, nSel = {}, nBusy = false, nSay = "", nSayBad = false;
+let nHtml = null, nActHtml = null, nPgHtml = null, nCur = null, nFull = [];
+const nPicSrc = new Map(), nPlans = new Map();
+const NKIND = { suggestion: "suggestion", result: "result to review", approval: "tool call from a run" };
+const nOpen = (q) => q.status === "open";
+const nKeyOf = (b) => `${b[0]._box}|${b[0].batchId || b[0].id}`;
+function nAsks() {
+  const g = new Map();
+  for (const i of nItems || []) { const k = `${i._box}|${i.batchId || i.id}`; if (!g.has(k)) g.set(k, []); g.get(k).push(i); }
+  return [...g.values()].map((b) => b.sort((a, c) => (a.batchIndex ?? 0) - (c.batchIndex ?? 0)))
+    .sort((a, b) => String(a[0].createdAt).localeCompare(String(b[0].createdAt)));   // oldest first
+}
+function nNow() {
+  const list = nAsks();
+  let i = list.findIndex((b) => nKeyOf(b) === nKey);
+  if (i < 0) { i = 0; nKey = list.length ? nKeyOf(list[0]) : ""; }
+  const b = list[i] || null;
+  if (!b) return { list, i, b: null, k: 0, q: null };
+  let k = nQ[nKey];
+  if (k == null || k >= b.length) { k = Math.max(0, b.findIndex((q) => !q.draft)); nQ[nKey] = k; }
+  return { list, i, b, k, q: b[k] };
+}
+const nSelOf = (q) => nSel[q.id] || (nSel[q.id] = { choice: (q.draft && q.draft.choice) || "", text: (q.draft && q.draft.text) || "" });
+const nAgo = (iso) => { const s = (Date.now() - Date.parse(iso)) / 1000; return s < 60 ? "now" : s < 3600 ? `${Math.floor(s / 60)}m ago` : s < 86400 ? `${Math.floor(s / 3600)}h ago` : `${Math.floor(s / 86400)}d ago`; };
+const NIMG = /\.(png|jpe?g|gif|webp|svg|avif|bmp)$/i;
+function nShot(q, path, label) {
+  if (!NIMG.test(path || "")) return `<figure><div class="ph">${esc(base(path) || "no file")}</div>${label}</figure>`;
+  const f = nFull.push({ pic: `${q._box}|${q.cwd}|${path}`, box: q._box, path, cwd: q.cwd, label }) - 1;
+  return `<figure><img data-act="full" data-f="${f}" data-pic="${f}" alt="${label}" title="${esc(path)}">${label}</figure>`;
+}
+function nExample(q, e) {
+  if (!e) return "";
+  const note = e.note ? ` title="${esc(e.note)}"` : "";
+  if (e.type === "visual") {
+    const src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(e.svg || "");   // an image: nothing in it can run
+    const f = nFull.push({ src, label: "drawing" }) - 1;
+    return `<img class="nvis" data-act="full" data-f="${f}" src="${esc(src)}" alt="drawing"${note}>`;
+  }
+  if (e.type === "image") return `<div class="npair"${note}>${nShot(q, e.before, "Before")}${nShot(q, e.after, "After")}</div>`;
+  if (e.type === "code") {
+    const bench = (e.bench || []).map((x) => `${x.name}: ${x.before} -> ${x.after} (${x.measured ? "measured" : "estimated"})`).join("\n");
+    const f = nFull.push({ text: `${e.diff || ""}\n\n${bench}`, label: "code change + benchmark" }) - 1;
+    const lines = String(e.diff || "").split("\n").slice(0, 6).map((l) =>
+      `<span class="${l.startsWith("+") && !l.startsWith("+++") ? "add" : l.startsWith("-") && !l.startsWith("---") ? "del" : ""}">${esc(l) || " "}</span>`).join("\n");
+    return `<div class="ndraft" data-act="full" data-f="${f}"${note}>${lines}</div>`;
+  }
+  if (e.type === "text") {
+    const f = nFull.push({ text: e.draft || "", label: "draft" }) - 1;
+    return `<div class="ndraft" data-act="full" data-f="${f}"${note}>${esc(e.draft || "")}</div>`;
+  }
+  return "";
+}
+function renderNeed() {
+  if (layer !== "need") return;
+  const { list, i, b, k, q } = nNow();
+  const pg = `<b data-act="prev" class="${i > 0 ? "" : "off"}">‹</b>${list.length ? i + 1 : 0} / ${list.length}<b data-act="next" class="${i < list.length - 1 ? "" : "off"}">›</b>`;
+  if (pg !== nPgHtml) $("npg").innerHTML = nPgHtml = pg;
+  nFull = [];
+  let h = "", act = "";
+  if (!window.FB || !FB.signedIn()) h = `<div class="nempty">Not signed in: right click > Sign in with Google to see what waits for you.</div>`;
+  else if (!nItems) h = `<div class="nempty">${esc(nErr || "loading the asks from your boxes...")}</div>`;
+  else if (!q) h = `<div class="nempty">Nothing waits for you.</div>`;
+  else {
+    const pk = `${q._box}|${q.planId}`, plan = q.planId ? nPlans.get(pk) : "";
+    if (q.planId && plan == null) {
+      nPlans.set(pk, "");
+      FB.planTitle(q._box, q.planId).then((t) => { nPlans.set(pk, t || ""); renderNeed(); }, () => {});
+    }
+    const meta = q.kind === "question"
+      ? [q.machine, plan || q.workType, q.planId ? `round ${q.round || 0}` : "", `question ${k + 1} of ${b.length}`, nAgo(q.createdAt)]
+      : [q.machine, q.workType, NKIND[q.kind] || q.kind, nAgo(q.createdAt)];
+    h += `<div class="nmeta">${esc(meta.filter(Boolean).join(" · "))}</div><div class="nq">${esc(q.title)}</div>`;
+    if (q.kind === "approval") h += `<div class="nctx call">${esc(q.text)}</div>`;
+    else if (q.text && q.text !== q.title) h += `<div class="nctx">${esc(q.text)}</div>`;
+    if (b.length > 1) h += `<div class="ndots">${b.map((x, n) => `<i data-act="q" data-i="${n}" class="${n === k ? "now" : x.draft ? "saved" : ""}" title="question ${n + 1}${x.draft ? ": saved" : ""}"></i>`).join("")}</div>`;
+    const sel = nSelOf(q), picks = sel.choice.split(", ");
+    const pickable = q.kind === "question" && nOpen(q);
+    if (q.kind !== "approval" && (q.options || []).length) {
+      h += `<div class="ncards">` + q.options.map((o, n) => {
+        const on = q.multi ? picks.includes(o.label) : sel.choice === o.label;
+        return `<div class="ncard${on ? " sel" : ""}${q.multi ? " multi" : ""}${pickable ? "" : " dis"}" data-act="pick" data-i="${n}"><span class="rad"></span>`
+          + `<div class="tx"><span class="l">(${String.fromCharCode(97 + n)}) ${esc(o.label)}</span>${q.recommended === n ? `<span class="rec">REC</span>` : ""}`
+          + `${o.detail ? `<div class="d">${esc(o.detail)}</div>` : ""}${o.differs ? `<div class="df">≠ ${esc(o.differs)}</div>` : ""}</div>`
+          + nExample(q, o.example) + `</div>`;
+      }).join("") + `</div>`;
+    }
+    const dash = `<button type="button" class="o" data-act="open">OPEN ON DASHBOARD</button>`;
+    if (q.kind === "approval") act = `<button type="button" data-act="allow">ALLOW</button><button type="button" class="no" data-act="deny">DENY</button>`;
+    else if (q.kind === "suggestion") act = `<button type="button" data-act="accept">ACCEPT</button><button type="button" class="no" data-act="decline">DECLINE</button>`;
+    else if (q.kind === "result") act = `<button type="button" data-act="reviewed">MARK REVIEWED</button>`;
+    else if (b.length === 1) act = `<button type="button" data-act="answer">ANSWER</button>`;
+    else {
+      const open = b.filter(nOpen), ready = open.length && open.every((x) => x.draft);
+      act = `<button type="button" data-act="save">${q.draft ? "CHANGE, NEXT" : "SAVE, NEXT"}</button>`
+        + (ready ? `<button type="button" data-act="sendall">SEND ${open.length} ANSWERS</button>` : "");
+    }
+    act += dash;
+  }
+  if (nBusy) act = act.replace(/<button /g, "<button disabled ");
+  let changed = false;
+  if (h !== nHtml) { $("nbody").innerHTML = nHtml = h; changed = true; nFill(); }
+  if (act !== nActHtml) { $("nact").innerHTML = nActHtml = act; changed = true; }
+  const note = $("nnote");
+  if (note.hidden !== !q) { note.hidden = !q; changed = true; }
+  if (q && nCur !== q.id) { nCur = q.id; note.value = nSelOf(q).text; }
+  const left = b && b.length > 1 ? b.filter((x) => nOpen(x) && !x.draft).length : 0;
+  const say = nSay || (b && b.length > 1 ? `${b.length - left} of ${b.length} saved · all ${b.length} go together after the last` : "");
+  setText($("nsay"), say);
+  const sc = nSayBad ? "nsay bad" : "nsay"; if ($("nsay").className !== sc) $("nsay").className = sc;
+  const boxesN = new Set((nItems || []).map((x) => x._box)).size;
+  setText($("nfoot"), `${(nItems || []).length} waiting on ${boxesN} box${boxesN === 1 ? "" : "es"} · oldest first · click a picture: full size · listens only while open`);
+  if (changed && shown === "need") fit();
+}
+// the pictures of the shown ask, from the box that asked (main.rs box_picture); kept only while the deck is open
+function nFill() {
+  for (const img of document.querySelectorAll("#nbody img[data-pic]")) {
+    const x = nFull[Number(img.dataset.pic)];
+    if (!x) continue;
+    const got = nPicSrc.get(x.pic);
+    if (typeof got === "string") { if (img.src !== got) img.src = got; continue; }
+    if (got && got.err) { img.replaceWith(Object.assign(document.createElement("div"), { className: "ph", textContent: `${base(x.path)}: ${got.err}` })); continue; }
+    if (got) continue;   // asked already
+    nPicSrc.set(x.pic, { asking: true });
+    FB.picture(x.box, x.path, x.cwd).then((src) => nPicSrc.set(x.pic, src), (e) => nPicSrc.set(x.pic, { err: String(e.message || e).slice(0, 60) }))
+      .then(() => { if (layer === "need") nFill(); });
+  }
+}
+function nShowFull(x) {
+  const el = $("nfull");
+  if (!x) { if (!el.hidden) { el.hidden = true; el.replaceChildren(); } return; }
+  el.replaceChildren();
+  if (x.text != null) el.append(Object.assign(document.createElement("pre"), { textContent: x.text }));
+  else {
+    const src = x.src || nPicSrc.get(x.pic);
+    if (typeof src !== "string") return;
+    el.append(Object.assign(document.createElement("img"), { src, alt: x.label }));
+  }
+  el.append(Object.assign(document.createElement("span"), { textContent: `${x.label}${x.path ? " · " + x.path : ""} · click to close` }));
+  el.dataset.act = "close"; el.hidden = false;
+}
+// the page's own writes (web/src/data.ts): answerItem, saveDraft, sendBatch, on the box that holds the ask
+const nAnswer = (q, choice, text) => FB.needsWrite(q._box, q.id, { status: "answered", answer: { choice, text, at: new Date().toISOString() }, error: null });
+async function nDraft(q, choice, text) {
+  const at = new Date().toISOString(), draft = { choice, text, at };
+  const thread = [...(q.thread || []), { who: "owner", kind: "answer", choice, text, at }];
+  await FB.needsWrite(q._box, q.id, { draft, thread });
+  q.draft = draft; q.thread = thread;   // shown at once; the next read of the box brings the same
+}
+async function nRun(f) {
+  nBusy = true; nSay = "sending..."; nSayBad = false; renderNeed();
+  try { await f(); nSay = ""; } catch (e) { nSay = "not sent: " + String(e.message || e).slice(0, 80); nSayBad = true; }
+  nBusy = false; renderNeed();
+}
+function needAct(el) {
+  const a = el.dataset.act, { list, i, b, k, q } = nNow();
+  if (a === "close") return nShowFull(null);
+  if (a === "full") return nShowFull(nFull[Number(el.dataset.f)]);
+  if (a === "prev" || a === "next") { const j = i + (a === "next" ? 1 : -1); if (list[j]) { nKey = nKeyOf(list[j]); nSay = ""; nShowFull(null); renderNeed(); } return; }
+  if (!q || nBusy) return;
+  if (a === "open") return void invoke("open_item", { id: q.id }).catch(() => {});
+  if (a === "q") { nQ[nKey] = Number(el.dataset.i); nSay = ""; return renderNeed(); }
+  const sel = nSelOf(q), text = sel.text.trim();
+  if (a === "pick") {
+    if (q.kind !== "question" || !nOpen(q)) return;
+    const o = q.options[Number(el.dataset.i)].label;
+    if (q.multi) {
+      const now = sel.choice.split(", ").filter(Boolean), next = now.includes(o) ? now.filter((l) => l !== o) : [...now, o];
+      sel.choice = q.options.map((x) => x.label).filter((l) => next.includes(l)).join(", ");   // in the offered order, as the page joins it
+    } else sel.choice = sel.choice === o ? "" : o;
+    nSay = ""; nSayBad = false; return renderNeed();
+  }
+  if (a === "allow" || a === "deny") return nRun(() => nAnswer(q, a === "allow" ? "Allow" : "Deny", text));
+  if (a === "accept" || a === "decline") return nRun(() => nAnswer(q, a === "accept" ? "Accept" : "Decline", text));
+  if (a === "reviewed") return nRun(() => nAnswer(q, text ? "Reviewed, see note" : "", text));
+  if (a === "answer" || a === "save") {
+    if (!sel.choice && !text) { nSay = "Pick an option or write an answer first."; nSayBad = true; return renderNeed(); }
+    if (a === "answer") return nRun(async () => { await nDraft(q, sel.choice, text); await nAnswer(q, sel.choice, text); });
+    return nRun(async () => {
+      await nDraft(q, sel.choice, text);
+      const n = b.findIndex((x, j) => j > k && nOpen(x) && !x.draft), m = b.findIndex((x) => nOpen(x) && !x.draft);
+      nQ[nKey] = n >= 0 ? n : m >= 0 ? m : k;   // the next question still to answer; the last one stays for Send
+    });
+  }
+  if (a === "sendall") {
+    const open = b.filter(nOpen);
+    if (open.some((x) => !x.draft)) { nSay = "Save an answer for every question first."; nSayBad = true; return renderNeed(); }
+    return nRun(async () => { for (const x of open) await nAnswer(x, x.draft.choice, x.draft.text); });
+  }
+}
+$("nnote").addEventListener("input", (e) => { const { q } = nNow(); if (q) nSelOf(q).text = e.target.value; nSay = ""; nSayBad = false; setText($("nsay"), ""); });
+function needOn() {
+  nItems = null; nErr = ""; nHtml = nActHtml = nPgHtml = null; nCur = null;
+  if (window.FB && FB.signedIn()) FB.needsOpen((items) => { nItems = items; nErr = ""; renderNeed(); }, (e) => { nErr = String(e); if (!nItems) renderNeed(); });
+  renderNeed();
+}
+function needOff() { if (window.FB) FB.needsClose(); nItems = null; nPicSrc.clear(); nPlans.clear(); nShowFull(null); }
+
+// (d) the hotkey composer (plan c5cb9485 s5). The owner's pick (round 2): "Set in menu": right click > Hotkey opens
+// this box; the keys pressed here are set at once (hotkey.rs registers them first, so a combo another app or the
+// system holds is refused and the old key stays). The key, pressed with any app in front, opens node 3 here.
+let keyOld = "";
+const KMOD = ["Control", "Shift", "Alt", "Meta", "AltGraph", "OS"];
+function keyName(e) {
+  // the key's place on the keyboard (e.code); a key with no place (some remote or injected input) by its name
+  const c = e.code || (e.key === " " ? "Space" : e.key && e.key.length === 1 ? (/[a-z]/i.test(e.key) ? "Key" + e.key.toUpperCase() : /\d/.test(e.key) ? "Digit" + e.key : "") : e.key || "");
+  const k = /^Key[A-Z]$/.test(c) ? c.slice(3) : /^Digit\d$/.test(c) ? c.slice(5) : c;
+  return [e.ctrlKey && "Ctrl", e.altKey && "Alt", e.shiftKey && "Shift", e.metaKey && "Super", k].filter(Boolean).join("+");
+}
+function keyShow(cap, cls, say, scls) {
+  setText($("kcap"), cap); $("kcap").className = "kcap" + (cls ? " " + cls : "");
+  setText($("ksay"), say); $("ksay").className = "ksay" + (scls ? " " + scls : "");
+}
+async function keySet(combo) {
+  try {
+    const got = await invoke("hotkey_set", { combo });
+    keyOld = got; keyErr = ""; setText($("know"), got || "none");
+    keyShow(got || "cleared", "ok", got ? `set: press ${got} with any app in front to open SEND` : "no key now", "ok");
+  } catch (e) { keyShow(combo, "bad", String(e), "bad"); }
+}
+T.event.listen("hotkey-capture", (e) => {
+  keyOld = String(e.payload || ""); setText($("know"), keyOld || "none");
+  keyShow("press the keys...", "", "Ctrl, Alt, Shift or Win + a key · Esc closes");
+  go("key"); window.focus();
+});
+window.addEventListener("keydown", (e) => {
+  if (layer !== "key") return;
+  e.preventDefault();
+  if (e.key === "Escape") return void go("menu");
+  if (KMOD.includes(e.key)) { keyShow(keyName(e) + "+...", "", "now the key"); return; }
+  const combo = keyName(e);
+  keyDown.add(e.code);
+  if (!(e.ctrlKey || e.altKey || e.shiftKey || e.metaKey)) return keyShow(combo, "bad", "add Ctrl, Alt, Shift or Win to the key", "bad");
+  keyShow(combo, "", "setting...");
+  keySet(combo);
+});
+T.event.listen("hotkey", () => {
+  if (layer !== "send") go("send");
+  setTimeout(() => $("smsg").focus(), 400);   // type at once
+  voiceOn();                                   // s6: "Hotkey = SEND + mic on"
+});
+T.event.listen("hotkey-error", (e) => { keyErr = String(e.payload); rowsHtml = null; show(); });
+// a combo another app holds never reaches this window as a key press (the system hands it to that app), only its
+// release does: a key let go that was never seen going down is a taken combo
+const keyDown = new Set();
+window.addEventListener("keyup", (e) => {
+  if (layer !== "key" || KMOD.includes(e.key)) return;
+  if (keyDown.delete(e.code)) return;
+  keyShow(keyName(e), "bad", `${keyName(e)} is taken by another app or the system: pick another`, "bad");
+});
+
+// (b) the voice toggle, English (plan c5cb9485 s6). The owner's words (2026-11-14): "no need to hold, use toggle just
+// click and mic on to use speech to text until I click send"; pick "Hotkey = SEND + mic on". The s5 key or the MIC
+// button turns the mic on (voice.rs); each piece of speech, cut at a pause, is written into the message as text. Send
+// turns the mic off, waits for the last piece, then sends; Esc or closing the box turns it off and drops the rest.
+let vOn = false, vEngine = "", vSrc = "", vAt = 0, vTick = null, vErr = "";
+function voiceLine() {
+  const el = $("svoice");
+  const t = vOn ? `● MIC ON · ${vEngine || "starting"} · ${mmss((Date.now() - vAt) / 1000)} · Send, Esc or close turns it off` : vErr;
+  setText(el, t); el.className = vErr && !vOn ? "svoice bad" : "svoice";
+  if (el.hidden !== !t) { el.hidden = !t; if (shown === "send") fit(); }
+  $("smic").classList.toggle("on", vOn); setText($("smic"), vOn ? "● MIC" : "MIC");
+}
+async function voiceOn() {
+  if (vOn) return;
+  vErr = ""; vOn = true; vEngine = ""; vAt = Date.now(); voiceLine();
+  try { vSrc = await invoke("voice_start"); }
+  catch (e) { vOn = false; vErr = "mic: " + String(e); voiceLine(); return; }
+  clearInterval(vTick); vTick = setInterval(voiceLine, 1000);
+}
+async function voiceOff(flush) {
+  if (!vOn) return;
+  if (!flush) vOn = false;   // Esc / close: text still on its way is dropped
+  clearInterval(vTick); vTick = null; voiceLine();
+  try { await invoke("voice_stop", { flush }); } catch (_) {}
+  vOn = false; voiceLine();
+}
+async function sendVoice() {
+  if (vOn) { setText($("snote"), "last words..."); await voiceOff(true); }
+  send();
+}
+T.event.listen("voice-state", (e) => { const p = e.payload || {}; if (p.on) { vEngine = p.engine + (p.why ? ` (${p.why})` : ""); voiceLine(); } });
+T.event.listen("voice-text", (e) => {
+  const p = e.payload || {};
+  if (!vOn) return;
+  if (p.error) { vErr = `voice: ${p.error}`; return; }
+  if (!p.text) return;
+  const m = $("smsg");
+  m.value = (m.value && !/\s$/.test(m.value) ? m.value + " " : m.value) + p.text;
+  sNote = ""; sendReady();
+});
+window.addEventListener("keydown", (e) => { if (e.key === "Escape" && layer === "send" && vOn) { e.preventDefault(); voiceOff(false); } });

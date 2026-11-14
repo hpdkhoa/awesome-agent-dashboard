@@ -718,3 +718,20 @@ def test_a_message_waiting_3_minutes_for_an_app_session_pushes_once(tmp_path, mo
     assert "Zombie Coop FPS" in runs.push.sent[0][1] and runs.push.sent[0][2] == "/?run=m1"
     OPEN.clear()  # the owner closed it in the app
     assert wait_done(runs, "m1", store)["status"] == "done" and len(runs.push.sent) == 2  # the second is the run's end
+
+
+def test_a_command_can_carry_its_own_mode(tmp_path, monkeypatch):
+    # plan c5cb9485 s2 (the owner's pick "Mode per message"): the command's mode wins for that run, else the setting
+    store, runs, work = setup(tmp_path, monkeypatch)
+    store.put_many({"meta/runs": {"permissionMode": "manual"}})
+    assert runs.mode({"mode": "auto"}) == "auto" and runs.mode({"mode": "manual"}) == "manual"
+    assert runs.mode({"mode": "bypassPermissions"}) == "manual" and runs.mode({}) == "manual" and runs.mode() == "manual"
+    store.put_many({"meta/runs": {"permissionMode": "auto"}})
+    assert runs.mode({"mode": "manual"}) == "manual" and runs.mode({"mode": "x"}) == "auto"
+    store.put_many({"meta/runs": {"permissionMode": "manual"}})
+    cmd(store, "c1", action="start", folder=str(work), prompt="hello", mode="auto")
+    runs.step()
+    assert store.get("commands/c1")["permissionMode"] == "auto"
+    cmd(store, "c2", action="start", folder=str(work), prompt="hello")
+    runs.step()
+    assert store.get("commands/c2")["permissionMode"] == "manual"
