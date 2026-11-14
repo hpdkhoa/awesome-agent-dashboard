@@ -24,12 +24,17 @@ def read_env(path: Path) -> dict[str, str]:
 def save_roots(roots: list[tuple[str, str]], env_path: Path | None = None) -> None:
     """Writes WORK_ROOTS in .env from roots (step i4: a folder added on the page). Only that line changes; every other
     line stays as it was. Written to a side file first, then swapped in, so a crash never leaves half a .env."""
+    save_env_line("WORK_ROOTS", ";".join(f"{n}={r}" for n, r in roots), env_path)
+
+
+def save_env_line(name: str, value: str, env_path: Path | None = None) -> None:
+    """Writes one NAME=value line in .env (save_roots; s10 the Config node). Only that line changes."""
     path = env_path or REPO / ".env"
-    line = "WORK_ROOTS=" + ";".join(f"{n}={r}" for n, r in roots)
+    line = f"{name}={value}"
     raw = path.read_bytes().decode("utf-8") if path.exists() else ""
     eol = "\r\n" if "\r\n" in raw else "\n"  # the file's own line ends and last line end are kept
     old = raw.splitlines()
-    hit = [i for i, x in enumerate(old) if x.strip().startswith("WORK_ROOTS=")]
+    hit = [i for i, x in enumerate(old) if x.strip().startswith(name + "=")]
     new = [line if hit and i == hit[-1] else x for i, x in enumerate(old) if i not in hit[:-1]]
     if not hit:
         new.append(line)

@@ -163,6 +163,22 @@ async function send(name, c) {
   window.FB.writes += 1;
   return "firestore";
 }
+// plan c5cb9485 s10: the CONFIG box. The allowed keys of a box's .env, masked (the last 4), and one key written there.
+// Only through a registered box's data API: a key never goes to Firestore.
+async function envKeys(name) {
+  const box = boxes.find((b) => b.name === name);
+  if (!box) throw new Error("this box has no data API: keys go only to a registered box");
+  window.FB.boxAsks += 1;
+  return (await ask(box, { op: "env_keys" })).keys;
+}
+async function envSet(name, key, value) {
+  const box = boxes.find((b) => b.name === name);
+  if (!box) throw new Error("this box has no data API: keys go only to a registered box");
+  const r = await ask(box, { op: "env_set", name: key, value });
+  if (!r || r.ok !== true) throw new Error((r && r.error) || "the box refused the key");
+  window.FB.boxAsks += 1;
+  return r;
+}
 // plan c5cb9485 s3: a sent command's record and its reply text, asked only while the SEND box is open.
 // The record: the box's data API (one get), else Firestore (one read). The text: the box's /text route ({run} when
 // ended, {live} while running), never stored; a box with no address has no text (null).
@@ -250,5 +266,5 @@ async function picture(name, path, cwd) {
   return invoke("box_picture", { url: box.url, token, path, cwd });
 }
 // reads/writes: Firestore bills one read per changed record delivered (at least one per answer); counted for the checks
-window.FB = { start, stop, sessions, send, runState, runText, needsOpen, needsClose, needsWrite, planTitle, picture, needAsks: 0, pics: 0, ratesOpen, ratesClose, saveFx, saveGold, signedIn: () => !!(auth && auth.currentUser), reads: 0, writes: 0,
+window.FB = { start, stop, sessions, send, envKeys, envSet, runState, runText, needsOpen, needsClose, needsWrite, planTitle, picture, needAsks: 0, pics: 0, ratesOpen, ratesClose, saveFx, saveGold, signedIn: () => !!(auth && auth.currentUser), reads: 0, writes: 0,
   boxAsks: 0, boxes: () => boxes.map((b) => b.name) };

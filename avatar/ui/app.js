@@ -74,8 +74,8 @@ function render(s, offline) {
 // avatar (later) now is a small bridge status, when click the menu appear ... the first button is the current table
 // box"; "drop from top to bottom and circle on the right around the main node"). The badge stays still on screen; the
 // window grows and moves around it so every layer fits.
-const R = 92, ANG = [-78, -28, 22, 72], GLOW = 14;
-const BOX_X = Math.max(...ANG.map((a) => R * Math.cos(a * Math.PI / 180))) + 26 + 18;  // right of every button
+const R = 92, ANG = [-78, -28, 22, 72, 122], GLOW = 14;   // s10: CONFIG at 122 (the owner's pick "A: 5th node below")
+const BOX_X = Math.max(...ANG.slice(0, 4).map((a) => R * Math.cos(a * Math.PI / 180))) + 26 + 18;  // right of every button (CONFIG sits left)
 let layer = "closed";      // closed | menu | box | rates (p15) | send (plan c5cb9485 s1) | need (s4)
 let shown = "closed";      // the layer the window is sized for (it stays big while buttons fly back)
 let badgeAt = null;        // the badge centre in window CSS px (unzoomed), from the last layout
@@ -97,8 +97,8 @@ function rects(state) {
     const b4 = [R * Math.cos(ANG[3] * Math.PI / 180), R * Math.sin(ANG[3] * Math.PI / 180)];
     r.push([b4[0] + 30, b4[1] - 14, b4[0] + 150, b4[1] + 14]);  // the NEEDS YOU label on hover (s4)
   }
-  if (state === "box" || state === "rates" || state === "send" || state === "need" || state === "key") {
-    const w = $({ box: "wrap", rates: "rwrap", send: "swrap", need: "nwrap", key: "kwrap" }[state]).getBoundingClientRect(), z = zoom || 1;
+  if (state === "box" || state === "rates" || state === "send" || state === "need" || state === "key" || state === "config") {
+    const w = $({ box: "wrap", rates: "rwrap", send: "swrap", need: "nwrap", key: "kwrap", config: "cwrap" }[state]).getBoundingClientRect(), z = zoom || 1;
     const x0 = BOX_X, y0 = b1[1] - 26 - 14;
     r.push([x0, y0, x0 + w.width / z, y0 + w.height / z]);
   }
@@ -133,6 +133,10 @@ async function fit() {
   place($("nwrap"), cx + BOX_X, cy + b1y - 26 - 14);
   place($("kwrap"), cx + BOX_X, cy + b1y - 26 - 14);   // s5: the hotkey box
   place($("link4"), cx + b4x + 26, cy + b4y - 1); $("link4").style.width = `${BOX_X - b4x - 26 + 18}px`;
+  // s10: the CONFIG box opens in the same place, its link from button 5
+  const b5x = R * Math.cos(ANG[4] * Math.PI / 180), b5y = R * Math.sin(ANG[4] * Math.PI / 180);
+  place($("cwrap"), cx + BOX_X, cy + b1y - 26 - 14);
+  place($("link5"), cx + b5x + 26, cy + b5y - 1); $("link5").style.width = `${BOX_X - b5x - 26 + 18}px`;
   setFly(layer !== "closed", true);
   const dpr = window.devicePixelRatio || 1, z = zoom || 1;
   // the badge's place in the window in device px; the window moves by its change, so the badge stays still on
@@ -175,6 +179,9 @@ async function go(next) {
   $("b4").classList.toggle("on", next === "need");
   if (next === "need") needOn(); else if (was === "need") needOff();
   document.body.classList.toggle("keyopen", next === "key");
+  document.body.classList.toggle("configopen", next === "config");
+  $("b5").classList.toggle("on", next === "config");
+  if (next === "config") cfgOn(); else if (was === "config") cfgOff();
   if (next === "box") load();
   if (next === "rates") ratesOn(); else if (was === "rates") ratesOff();
   if (next === "closed") {           // fly back first, then shrink
@@ -305,7 +312,7 @@ window.addEventListener("wheel", (e) => {
 let press = null;
 document.addEventListener("mousedown", (e) => {
   if (e.button !== 0 || e.target === grip || e.target.closest(".btn.empty")) return;
-  if (e.target.closest("select, textarea, option")) return;   // s1: the pickers and the message take the mouse, no drag
+  if (e.target.closest("select, textarea, option, input")) return;   // s1: the pickers and the message take the mouse, no drag (s10: the key field)
   press = { x: e.screenX, y: e.screenY, t: e.target };
 });
 document.addEventListener("mousemove", (e) => {
@@ -330,6 +337,8 @@ document.addEventListener("mouseup", (e) => {
   else if (t.closest("#smic")) (vOn ? voiceOff(false) : voiceOn());
   else if (t.closest("#sopen")) { if (sRun) invoke("open_run", { id: sRun.id }).catch(() => {}); }
   else if (t.closest("#b4")) go(layer === "need" ? "menu" : "need");
+  else if (t.closest("#b5")) go(layer === "config" ? "menu" : "config");
+  else if (t.closest("#csave")) cfgSave();
   else if (t.closest("#kclear")) keySet("");
   else if (t.closest("#kclose")) go("menu");
   else if (t.closest("#nbox [data-act]")) needAct(t.closest("[data-act]"));
@@ -985,3 +994,58 @@ T.event.listen("voice-text", (e) => {
   sNote = ""; sendReady();
 });
 window.addEventListener("keydown", (e) => { if (e.key === "Escape" && layer === "send" && vOn) { e.preventDefault(); voiceOff(false); } });
+
+// Button 5: the CONFIG box (plan c5cb9485 s10). The owner's words (2026-11-14): "another step to create config node that
+// do configuration inside the avatar so I can add the keys to bridge to add to its .env"; preview pick "A: 5th node
+// below". Pick a box; its allowed keys show with the value masked (the last 4 only, bridge dataapi env_keys); a key
+// pasted here goes to that box's bridge (env_set), which backs up its .env and writes the one line. The key lives in
+// this page only while it is typed: the field is cleared on SAVE, on close and on a box change, and nothing keeps it.
+let cBox = localStorage.getItem("cfgBox") || "", cKeys = null, cErr = "", cSay = "", cSayCls = "", cBusy = false, cTick = null;
+const CFG_KEY = "GEMINI_API_KEY", CFG_VALUE = /^[A-Za-z0-9_\-.]{8,200}$/;
+function cfgPick(bs) {   // the last picked box, else the first online one
+  if (!bs.some((b) => b.name === cBox) && bs.length) { cBox = (bs.find((b) => b.online) || bs[0]).name; localStorage.setItem("cfgBox", cBox); }
+}
+function cfgRender() {
+  if (layer !== "config") return;
+  const bs = sendBoxes();
+  cfgPick(bs);
+  setOpts($("cbx"), bs.length ? bs.map((b) => opt(b.name, `${b.name} (${b.online ? "online" : "offline"})`, b.name === cBox)).join("")
+    : opt("", !signed ? "not signed in" : machines === null ? "loading boxes..." : "no box yet", true));
+  const rows = cErr ? `<div class="ckey"><span class="no">${esc(cErr)}</span></div>`
+    : !cKeys ? `<div class="ckey"><span class="k">reading...</span></div>`
+    : cKeys.map((k) => `<div class="ckey"><span class="n">${esc(k.name)}</span>${k.set ? `<span class="yes">set \u00b7\u00b7\u00b7\u00b7${esc(k.last4)}</span>` : `<span class="no">not set</span>`}</div>`).join("");
+  if ($("ckeys").innerHTML !== rows) $("ckeys").innerHTML = rows;
+  const v = $("cval").value.trim();
+  const why = cBusy ? "saving..." : !cBox ? "pick a box" : !v ? "" : !CFG_VALUE.test(v) ? "a key is one token of 8 to 200 letters, digits, - _ or ." : "";
+  $("csave").disabled = !!why || !v || !!cErr || !cKeys;
+  const note = cSay || why || `Goes into ${cBox || "the box"}'s .env only (old .env backed up first). Never stored here, never shown again: last 4 only.`;
+  setText($("cnote"), note); $("cnote").className = "cnote" + (cSay ? " " + cSayCls : why && v ? " bad" : "");
+  setText($("cclock"), hhmmss(new Date()));
+}
+async function cfgLoad() {
+  cfgPick(sendBoxes());
+  const name = cBox; cKeys = null; cErr = ""; cfgRender();
+  try {
+    if (!window.FB || !FB.signedIn()) throw new Error("not signed in: right click > Sign in with Google");
+    const keys = await FB.envKeys(name);
+    if (name === cBox) cKeys = keys;
+  } catch (e) { if (name === cBox) cErr = String(e.message || e).slice(0, 80); }
+  cfgRender(); if (shown === "config") fit();
+}
+async function cfgSave() {
+  const v = $("cval").value.trim();
+  if (cBusy || !CFG_VALUE.test(v)) return;
+  cBusy = true; cSay = ""; cfgRender();
+  try {
+    const r = await FB.envSet(cBox, CFG_KEY, v);
+    $("cval").value = "";
+    cSay = `saved ${hhmmss(new Date()).slice(0, 5)} \u00b7 ${r.name} \u00b7\u00b7\u00b7\u00b7${r.last4}${r.backup ? " \u00b7 backup " + r.backup : ""} \u00b7 search can use it now`; cSayCls = "ok";
+    cBusy = false; await cfgLoad();
+  } catch (e) { cSay = "not saved: " + String(e.message || e).slice(0, 80); cSayCls = "bad"; cBusy = false; cfgRender(); }
+}
+function cfgOn() { cSay = ""; cfgLoad(); cTick = setInterval(() => setText($("cclock"), hhmmss(new Date())), 1000); }
+function cfgOff() { clearInterval(cTick); cTick = null; $("cval").value = ""; cKeys = null; cSay = ""; }
+$("cbx").addEventListener("change", (e) => { cBox = e.target.value; localStorage.setItem("cfgBox", cBox); $("cval").value = ""; cSay = ""; cfgLoad(); });
+$("cval").addEventListener("input", () => { cSay = ""; cfgRender(); });
+$("cval").addEventListener("keydown", (e) => { if (e.key === "Enter") cfgSave(); });
+window.addEventListener("keydown", (e) => { if (e.key === "Escape" && layer === "config") go("menu"); });

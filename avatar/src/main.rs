@@ -101,7 +101,7 @@ fn post_box(url: &str, token: &str, body: &str, route: &str) -> Result<String, S
         }
     } else {
         let op = v.get("op").and_then(|o| o.as_str()).unwrap_or("");
-        if !["find", "get", "count", "seq", "changes"].contains(&op) && !is_send(&v) && !is_answer(&v) {
+        if !["find", "get", "count", "seq", "changes", "env_keys"].contains(&op) && !is_send(&v) && !is_answer(&v) && !is_env_set(&v) {
             return Err(format!("{op} is not a read"));
         }
     }
@@ -136,6 +136,17 @@ fn is_send(v: &serde_json::Value) -> bool {
         && path == format!("commands/{id}")
         && s(d, "status").as_deref() == Some("new")
         && matches!(s(d, "action").as_deref(), Some("start") | Some("message") | Some("search"))
+}
+
+// plan c5cb9485 s10: the CONFIG box's one write: one allow-listed key into the box's .env ({op, name, value} and nothing
+// else); the bridge checks the value and backs up the old .env (dataapi.py env_set). env_keys (masked) is a read.
+const ENV_KEYS: [&str; 1] = ["GEMINI_API_KEY"];
+fn is_env_set(v: &serde_json::Value) -> bool {
+    let Some(o) = v.as_object() else { return false };
+    o.len() == 3
+        && o.get("op").and_then(|x| x.as_str()) == Some("env_set")
+        && o.get("name").and_then(|x| x.as_str()).is_some_and(|n| ENV_KEYS.contains(&n))
+        && o.get("value").and_then(|x| x.as_str()).is_some_and(|x| (8..=200).contains(&x.len()))
 }
 
 // plan c5cb9485 s4: the NEEDS YOU deck's one write: an update of one inbox record with the fields the page writes when
@@ -419,7 +430,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{b64, is_answer, is_run_text, is_send};
+    use super::{b64, is_answer, is_env_set, is_run_text, is_send};
     use serde_json::json;
     #[test]
     fn only_a_new_start_or_message_command_is_a_write() {
@@ -446,6 +457,19 @@ mod tests {
         for bad in [json!({"session": "s1"}), json!({"run": "../x"}), json!({"run": ""}), json!({"run": "a", "live": "b"}),
                     json!({"reply": {"session": "s"}}), json!({"run": 5})] {
             assert!(!is_run_text(&bad), "{bad}");
+        }
+    }
+    #[test]
+    fn only_one_allowed_key_goes_to_the_env() {
+        assert!(is_env_set(&json!({"op": "env_set", "name": "GEMINI_API_KEY", "value": "AIzaExample0123"})));
+        for bad in [
+            json!({"op": "env_set", "name": "WORK_ROOTS", "value": "C:/anything"}),
+            json!({"op": "env_set", "name": "GEMINI_API_KEY", "value": "short"}),
+            json!({"op": "env_set", "name": "GEMINI_API_KEY", "value": "AIzaExample0123", "path": "x/y"}),
+            json!({"op": "env_set", "name": "GEMINI_API_KEY", "value": 12345678901u64}),
+            json!({"op": "set", "name": "GEMINI_API_KEY", "value": "AIzaExample0123"}),
+        ] {
+            assert!(!is_env_set(&bad), "{bad}");
         }
     }
     #[test]

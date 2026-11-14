@@ -10,7 +10,18 @@
  <div class="btn pink" id="b3" data-i="2"><span class="send">SEND</span><span class="tag">SEND</span></div>
  <!-- button 4: the NEEDS YOU deck (plan c5cb9485 s4, approved preview cc/dashboard/avatar/n3/after-n4-v2.png) -->
  <div class="btn red" id="b4" data-i="3"><span class="need">NEED</span><span class="cnt" id="b4n" hidden></span><span class="tag">NEEDS YOU</span></div>
- <div class="link" id="link"></div><div class="link gold" id="link2"></div><div class="link pink" id="link3"></div><div class="link red" id="link4"></div>
+ <!-- button 5: the CONFIG box (plan c5cb9485 s10, the owner's pick "A: 5th node below"): keys into a box's .env -->
+ <div class="btn cfg" id="b5" data-i="4"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg><span class="tag">CONFIG</span></div>
+ <div class="link" id="link"></div><div class="link gold" id="link2"></div><div class="link pink" id="link3"></div><div class="link red" id="link4"></div><div class="link cfg" id="link5"></div>
+ <!-- layer 2: the CONFIG box (s10): box picker, the allowed keys (masked, last 4), one key field, SAVE -->
+ <div class="wrap cfg" id="cwrap"><div class="glow"><i></i></div><div class="glow2"><i></i></div><div class="box" id="cbox">
+  <div class="title"><span>CONFIG//BOX</span><span id="cclock"></span></div>
+  <label class="pk cpk"><b>BOX</b><select id="cbx"></select></label>
+  <div class="chead">KEYS IN THIS BOX'S .ENV</div>
+  <div id="ckeys"></div>
+  <div class="crow"><input type="password" id="cval" autocomplete="off" spellcheck="false" placeholder="paste the key..."><button type="button" id="csave" disabled>SAVE</button></div>
+  <div class="cnote" id="cnote"></div>
+ </div></div>
  <!-- layer 2: the status box -->
  <div class="wrap" id="wrap"><div class="glow"><i></i></div><div class="glow2"><i></i></div><div class="box" id="box">
   <div class="title"><span>AGENT//BOX</span><span id="clock"></span></div>

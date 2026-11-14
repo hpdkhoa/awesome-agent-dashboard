@@ -207,6 +207,19 @@ html,body{margin:0;background:transparent;overflow:hidden;font-family:Tahoma,Ver
 /* plan c5cb9485 s5: the hotkey box (right click > Hotkey) */
 #kwrap{display:none}.keyopen #kwrap{display:block}
 .wrap.key{--c:var(--pink)}
+/* s10: the CONFIG node and box (white) */
+.btn.cfg{border-color:#e8f0ff;color:#e8f0ff;box-shadow:0 0 10px #e8f0ff}.btn.cfg svg{width:24px}
+.configopen #b5 .tag{display:none}.configopen #link5{display:block}
+#cwrap{display:none}.configopen #cwrap{display:block}
+.wrap.cfg{--c:#e8f0ff}#cbox{width:300px}
+.cpk{margin:6px 0}.chead{font:9px Tahoma;color:#6a7a80;letter-spacing:1px;margin:8px 0 3px}
+.ckey{display:flex;justify-content:space-between;border:1px solid #1f6a30;padding:4px 6px;font:12px Tahoma;color:#cfe}
+.ckey .n{color:var(--green)}.ckey .no{color:var(--orange)}.ckey .yes{color:var(--green)}
+.crow{display:flex;gap:6px;margin-top:6px}
+.crow input{flex:1;min-width:0;background:#000;border:1px solid #3a4a50;color:#cfe;font:12px Tahoma;padding:3px 5px;outline:none}
+.crow button{font:12px Tahoma;color:var(--green);border:1px solid var(--green);background:transparent;padding:2px 10px;cursor:pointer}
+.crow button:disabled{color:#3a4a50;border-color:#3a4a50;cursor:default}
+.cnote{font-size:10px;color:#7a8a90;margin-top:6px;line-height:1.5}.cnote.ok{color:var(--green)}.cnote.bad{color:var(--orange)}
 #kbox{width:280px;cursor:move}
 .krow{margin-top:6px;color:#cfe}.krow b{color:var(--green);font-weight:normal}
 .kcap{margin:6px 0;border:1px dashed var(--pink);padding:8px;text-align:center;font-size:15px;color:#fff;letter-spacing:1px;min-height:38px}
