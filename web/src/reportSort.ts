@@ -56,38 +56,14 @@ export function sortCheck(reply: string): { lines: number; placed: number; numbe
   return { lines, placed, numbers: inReply.length, missing: [...new Set(inReply.filter((n) => !inCard.has(n)))] };
 }
 
-const cut = (t: string, n = 90) => (t.length > n ? t.slice(0, n) + "…" : t);
-const firstText = (items: Item[]) => {
-  for (const it of items) {
-    if (it.kind === "table") {
-      const row = it.rows.find((r, i) => i > 1 && !/^\s*\|[\s:|-]+\|\s*$/.test(r));
-      if (row) return row.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim()).join(" · ");
-      continue;
-    }
-    const t = it.text.replace(/^(Built|Done|Not done)[^:]{0,30}:\s*/i, "");
-    if (t.trim()) return t;
-  }
-  return "";
-};
-
-// One board row's cells: from the fields when the report has them, else the first line of each sorted field.
-export function boardCells(reply: string, report?: StepReport | null) {
-  if (report && (report.numbers?.length || report.tests?.length || report.built?.length)) {
-    const n = report.numbers?.[0];
-    const t = report.tests?.[0];
-    return {
-      exact: true,
-      built: cut(report.built?.[0] ?? ""),
-      number: n ? cut(`${n.metric}: ${n.before ? n.before + " → " : ""}${n.after}`) : "",
-      tested: t ? cut(`${t.method}: ${t.result}`) : "",
-      open: report.not_done?.length ?? 0,
-    };
-  }
-  const f = sortReply(reply).fields;
-  return {
-    exact: false, built: cut(firstText(f.built)), number: cut(firstText(f.numbers)), tested: cut(firstText(f.tests)),
-    open: f.notDone.filter((it) => !(it.kind === "line" && /^(not done|open)[^:]*:?$/i.test(it.text))).length,
-  };
+// A step's key number, short, for the board (the owner's words, 2026-11-16: "what is done what is important not read
+// papers"): the first measured number of its report fields; for a report made before the fields, the first "a of b" or
+// "a/b" count in its reply. Never cut: a number or nothing.
+export function keyNumber(reply: string, report?: StepReport | null): string {
+  const n = report?.numbers?.[0];
+  if (n) return n.metric.length <= 28 ? `${n.after} ${n.metric}` : n.after;
+  const m = reply.match(/(\d+)\s*(?:of|\/)\s*(\d+)(\s+(?:pass|checks?|lines|exact|tests?))?/i);
+  return m ? `${m[1]}/${m[2]}${m[3] ?? ""}` : "";
 }
 
 // What is not done, as lines: from the fields, or the sorted Not done lines without their bare "Not done:" header.

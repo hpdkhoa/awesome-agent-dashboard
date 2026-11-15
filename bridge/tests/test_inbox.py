@@ -353,3 +353,29 @@ def test_a_delivered_answer_keeps_its_plan_and_step_without_becoming_a_run_step(
     deliver(store, "PC", "claude")
     c2 = [x for x in store.where("commands", "action", "message") if x["inboxId"] == q2][0]
     assert "planId" not in c2 and "answerStep" not in c2
+
+
+# The board (the owner's pick, 2026-11-16, "Product board, new fields"): what for, idea, product features with steps.
+BOARD = {"what_for": "Run boxes from the avatar", "idea": ["SEND node"], "product": [{"feature": "Send", "steps": ["s1"]}]}
+
+
+def test_board_is_kept_checked_and_never_dropped():
+    import pytest
+    from agent_bridge.inbox import parts_markdown
+    store = FakeStore()
+    ib = make(store)
+    pid = ib.plan_start("Board", parts=PARTS)
+    with pytest.raises(ValueError, match="s9"):
+        ib.plan_version(pid, "", "bad step", parts={**PARTS, "board": {**BOARD, "product": [{"feature": "x", "steps": ["s9"]}]}})
+    with pytest.raises(ValueError, match="what_for"):
+        ib.plan_version(pid, "", "no what for", parts={**PARTS, "board": {"product": BOARD["product"]}})
+    n = ib.plan_version(pid, "", "board added", parts={**PARTS, "board": BOARD})
+    saved = store.docs[f"planVersions/{pid}_v{n}"]
+    assert saved["parts"]["board"] == {"whatFor": "Run boxes from the avatar", "idea": ["SEND node"],
+                                       "product": [{"feature": "Send", "steps": ["s1"]}]}
+    assert "## Board" in parts_markdown(saved["parts"]) and "Feature: Send (steps s1)" in parts_markdown(saved["parts"])
+    with pytest.raises(ValueError, match="board"):
+        ib.plan_version(pid, "", "dropped", parts=PARTS)
+    assert store.docs[f"plans/{pid}"]["current"] == n
+    # the stored camelCase board goes through again (a plain version or a resend of the read-back parts)
+    assert ib.plan_version(pid, "", "resend", parts=saved["parts"]) == n + 1

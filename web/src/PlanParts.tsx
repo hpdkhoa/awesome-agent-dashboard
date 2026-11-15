@@ -6,7 +6,7 @@ import {
   type InboxItem, type Parts, type Plan, type PlanGenerated, type PlanKind, type PlanStep, type PlanVersion, type Run,
 } from "./data";
 import { isWaiting } from "./Inbox";
-import { openFile, PcText } from "./FileView";
+import { LocalImg, openFile, PcText } from "./FileView";
 import { askAbout, forPlan, QUOTE_EVENT, quotePart, quoteStep, takeQuote } from "./quote";
 import { staleMark, staleness, versionAt } from "./planStale";
 import { newestFirst, PAGE, usePlanGenerated } from "./data";
@@ -23,7 +23,7 @@ import type { RunWith } from "./data";
 import { FoldAll, Section } from "./Section";
 import { Clamp } from "./Clamp";
 import { StepEvidenceCard } from "./EvidenceView";
-import { boardCells, openItems, sortCheck, sortReply, type Item, type Sorted } from "./reportSort";
+import { keyNumber, openItems, sortCheck, sortReply, type Item, type Sorted } from "./reportSort";
 import { useStepEvidence, type StepEvidence, type StepReport } from "./data";
 import { dt, tm } from "./fmt";
 
@@ -170,35 +170,89 @@ const stepOf = (r: Run) => (r.stepId && !r.kind ? r.stepId : r.answerStep) ?? ""
 const lastOf = (sv?: PlanStep) => sv?.versions[sv.versions.length - 1];
 const md = (t: string, plan: Plan) => <Md text={linkEntries(t, plan)} cwd={plan.cwd} />;
 
-function ReportBoard({ plan, v, steps, evidence }: { plan: Plan; v: PlanVersion; steps: PlanStep[]; evidence: StepEvidence[] }) {
+// The board, the plan's main look (the owner's words, 2026-11-16: "Make this report become the main look where I can
+// see what this plan used for (the meaning), the idea, what is the progress (means what is currently build and progress
+// compare with the final product of the plan). Not redunant what I can look at the steps section"; "what is done what
+// is important not read papers"; pick "Product board, new fields"). What for and Idea come from parts.board, written by
+// the session; each product feature is colored live from its steps' states and open items, so it never goes stale.
+type FeatureState = "built" | "open" | "doing" | "failed" | "next";
+const FEATURE: Record<FeatureState, string> = {
+  built: "built, no open item", open: "built, open item", doing: "being built", failed: "failed", next: "not built",
+};
+
+function featureOf(ids: string[], steps: PlanStep[]) {
+  const svs = ids.map((id) => steps.find((x) => x.stepId === id));
+  const lasts = svs.map((sv) => lastOf(sv)).filter((x): x is NonNullable<typeof x> => !!x);
+  const open = svs.reduce((n, sv) => { const l = lastOf(sv); return n + (l ? openItems(l.reply, l.report).length : 0); }, 0);
+  const st = svs.map((sv) => sv?.state ?? "next");
+  const state: FeatureState = !ids.length ? "next" : st.includes("failed") ? "failed"
+    : st.every((x) => x === "done") ? (open ? "open" : "built") : st.some((x) => x === "done" || x === "now") ? "doing" : "next";
+  const newest = [...lasts].sort((a, b) => b.at.localeCompare(a.at))[0];
+  return { state, open, key: newest ? keyNumber(newest.reply, newest.report) : "" };
+}
+
+function ReportBoard({ plan, v, steps, evidence, asked, onOpenItem }: {
+  plan: Plan; v: PlanVersion; steps: PlanStep[]; evidence: StepEvidence[]; asked: InboxItem[]; onOpenItem: (id: string) => void;
+}) {
+  const b = v.parts?.board;
   const rows = v.parts?.steps ?? [];
-  const done = rows.filter((st) => steps.find((x) => x.stepId === st.id)?.state === "done").length;
+  const feats = (b?.product ?? []).map((f) => ({ ...f, ...featureOf(f.steps, steps) }));
+  const count = (s: FeatureState) => feats.filter((f) => f.state === s).length;
+  const order: FeatureState[] = ["built", "open", "doing", "failed", "next"];
+  const pct = (n: number) => (feats.length ? Math.round((100 * n) / feats.length) : 0);
+  const failed = rows.filter((st) => steps.find((x) => x.stepId === st.id)?.state === "failed");
+  const waiting = asked.filter(isWaiting);
+  const openTotal = rows.reduce((n, st) => { const l = lastOf(steps.find((x) => x.stepId === st.id)); return n + (l ? openItems(l.reply, l.report).length : 0); }, 0);
+  const latest = steps.filter((x) => x.state === "done" || x.state === "failed")
+    .map((x) => ({ sv: x, last: lastOf(x)! })).filter((x) => x.last).sort((a, b) => b.last.at.localeCompare(a.last.at))[0];
+  const latestPic = latest && evidence.find((e) => e.stepId === latest.sv.stepId)?.sets?.[0]?.pictures[0];
+  const title = (id: string) => rows.find((st) => st.id === id)?.title ?? id;
   return (
-    <Section id="plan.part.board" title="Report board" extra={`${done} of ${rows.length} steps done · one row per step`}>
-      <table className="report-board">
-        <thead><tr><th>Step</th><th>State</th><th>Built</th><th>Key number</th><th>Tested by</th><th>Pics</th><th>Open</th></tr></thead>
-        <tbody>
-          {rows.map((st) => {
-            const sv = steps.find((x) => x.stepId === st.id);
-            const last = lastOf(sv);
-            const pics = evidence.find((e) => e.stepId === st.id)?.sets?.[0]?.pictures.length ?? 0;
-            if (!last) return <tr key={st.id}><td>{st.id} · {st.title}</td><td><span className="status next">next</span></td><td colSpan={5} className="muted small">not started</td></tr>;
-            const c = boardCells(last.reply, last.report);
-            return (
-              <tr key={st.id}>
-                <td>{st.id} · {st.title}{!c.exact && <span className="small muted" title="Read from the reply: the report has no fields"> *</span>}</td>
-                <td><span className={"status " + sv!.state}>{sv!.state}</span></td>
-                <td className="small">{c.built || <span className="muted">none</span>}</td>
-                <td className="small">{c.number || <span className="muted">none</span>}</td>
-                <td className="small">{c.tested || <span className="muted">none</span>}</td>
-                <td className="small">{pics}</td>
-                <td className="small">{c.open ? <span className="status waiting">{c.open}</span> : 0}</td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-      <p className="small muted">* read from the reply: a report made before the report fields; its card shows every line of it</p>
+    <Section id="plan.board" title="Report board" extra={b ? `${count("built") + count("open")} of ${feats.length} features built` : "no board yet"}>
+      {!b && <p className="small muted">This plan has no board yet: its session adds What for, Idea and the product list with the next plan version.</p>}
+      {b && (
+        <>
+          <div className="board-box"><p className="board-lab">What for</p><p>{b.whatFor}</p></div>
+          {b.idea.length > 0 && <div className="board-box"><p className="board-lab">The idea</p>{md(b.idea.map((x) => `- ${x}`).join("\n"), plan)}</div>}
+          <div className="board-box">
+            <p className="board-lab">Progress vs the final product</p>
+            <div className="board-bar" role="img" aria-label={order.map((s) => `${FEATURE[s]} ${count(s)}`).join(", ")}>
+              {order.map((s) => count(s) > 0 && <i key={s} className={"f-" + s} style={{ width: `${pct(count(s))}%` }} title={`${FEATURE[s]}: ${count(s)} of ${feats.length}`} />)}
+            </div>
+            <p className="board-legend small">
+              {order.filter((s) => count(s)).map((s) => <span key={s}><i className={"sw f-" + s} />{FEATURE[s]}: {count(s)} of {feats.length} ({pct(count(s))}%)</span>)}
+            </p>
+            <p className="small muted">each feature takes its color from its steps: all done and nothing open = built; done with open items = open item; any failed = failed</p>
+            <div className="board-feats">
+              {feats.map((f) => (
+                <div key={f.feature} className={"board-feat f-" + f.state} title={f.steps.map(title).join(" · ")}>
+                  <b>{f.feature}</b>
+                  <span className="board-key">{f.state === "next" ? FEATURE.next : f.key || FEATURE[f.state]}</span>
+                  <span className="small muted">{f.steps.join(" ") || "no step"}{f.open ? ` · ${f.open} open` : ""}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+      <div className="board-row">
+        <div className="board-box">
+          <p className="board-lab">Needs you ({failed.length + waiting.length + (openTotal ? 1 : 0)})</p>
+          {failed.length + waiting.length + openTotal === 0 && <p className="small muted">Nothing waits for you.</p>}
+          <ul className="board-need">
+            {failed.map((st) => <li key={st.id} className="bad">✖ {st.id} {st.title} failed</li>)}
+            {waiting.map((q) => <li key={q.id} className="wait-fg">? <button className="link" onClick={() => onOpenItem(q.id)}>{q.title}</button></li>)}
+            {openTotal > 0 && <li>○ {openTotal} open items: Leftover section</li>}
+          </ul>
+        </div>
+        {latest && (
+          <div className="board-box">
+            <p className="board-lab">Latest result · {latest.sv.stepId} {title(latest.sv.stepId)}</p>
+            <p className="small"><span className={"status " + latest.sv.state}>{latest.sv.state}</span> {keyNumber(latest.last.reply, latest.last.report)} <span className="muted">· {when(latest.last.at)}</span></p>
+            {latestPic ? <LocalImg src={latestPic} alt={latestPic.split(/[\/]/).pop()} cwd={plan.cwd} /> : <p className="small muted">no picture</p>}
+          </div>
+        )}
+      </div>
     </Section>
   );
 }
@@ -561,6 +615,8 @@ function Part({ k, parts, before, plan }: { k: keyof Parts; parts: Parts; before
   if (before) return <DiffBlock a={partLines(before, k)} b={partLines(parts, k)} />;
   const md = (t: string) => <Md text={linkEntries(t, plan)} cwd={plan.cwd} />;
   switch (k) {
+    case "board":
+      return md(partLines(parts, "board").map((x) => `- ${x}`).join("\n") || "none yet");
     case "goal":
     case "summary":
     case "cite":
@@ -658,7 +714,7 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
         {v.change ? `: ${v.change.message}` : v.note} <MoreMenu path={`planVersions/${plan.id}_v${v.n}`} />
       </p>
 
-      <ReportBoard plan={plan} v={v} steps={steps} evidence={evidence} />
+      <ReportBoard plan={plan} v={v} steps={steps} evidence={evidence} asked={asked} onOpenItem={onOpenItem} />
 
       <RunReports plan={plan} v={v} runs={runs} steps={steps} evidence={evidence} generated={generated} stale={staleMark(stale, "results")} />
 
@@ -725,7 +781,7 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
 
       {/* the plan text as the session reads it, at the end (the owner's words, 2026-11-15: "the 'Plan text folded,
           unchanged' should be show in the end so I still can see the raw data which LLM can see as its database") */}
-      <Section id="plan.part.raw" title="Plan text · raw, as the session reads it" extra={`v${v.n} · goal, summary, rules, lessons, leftover, steps`}>
+      <Section id="plan.part.raw" title="Plan text · raw, as the session reads it" extra={`v${v.n} · board, goal, summary, rules, lessons, leftover, steps`}>
 
       {PART_NAMES.map(([k, name]) => (
         <Section key={k} id={`plan.part.${k}`} title={name} stale={v.n === plan.current ? staleMark(stale, k) : undefined}

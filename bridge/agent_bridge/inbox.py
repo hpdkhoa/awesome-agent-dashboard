@@ -141,6 +141,7 @@ def parts_markdown(parts: dict) -> str:
         return [{**{x: y for x, y in st.items() if x != "new"}, "title": ("[new] " if st.get("new") else "") + str(st.get("title", ""))}
                 if isinstance(st, dict) else st for st in parts.get(k) or []]
     out = "\n\n".join(f"## {names[k]}\n\n{_lines(shown(k))}" for k in PARTS)
+    out = (f"## Board\n\n{board_markdown(parts['board'])}\n\n" if parts.get("board") else "") + out
     return out + (f"\n\n## Cite\n\n{parts['cite']}" if parts.get("cite") else "")
 
 
@@ -204,7 +205,47 @@ def clean_parts(parts: dict) -> dict:
                      "does": redact(str(st.get("does", "")), 1000), "check": redact(str(st.get("check", "")), 600),
                      **({"new": True} if st.get("new") else {})}
                     for i, st in enumerate(parts["steps"] or [], 1) if isinstance(st, dict)]
+    if parts.get("board"):
+        out["board"] = clean_board(parts["board"], [st["id"] for st in out["steps"]])
     return out
+
+
+# The plan's board (the owner's words, 2026-11-16: "Make this report become the main look where I can see what this
+# plan used for (the meaning), the idea, what is the progress (means what is currently build and progress compare with
+# the final product of the plan). Not redunant what I can look at the steps section"; pick "Product board, new
+# fields"): what the plan is for in one line, the idea in a few lines, and the final product as features, each naming
+# the steps that build it. The page colors each feature from its steps' states, so the board never goes stale.
+BOARD_SHAPE = ('{"what_for": one line, "idea": [short lines], "product": [{"feature": short name, '
+               '"steps": [the step ids that build it]}]}')
+
+
+def clean_board(board, step_ids: list[str]) -> dict:
+    if not isinstance(board, dict):
+        raise ValueError("board is " + BOARD_SHAPE)
+    what = redact(str(board.get("what_for", board.get("whatFor", "")) or "").strip(), 300)
+    idea = [redact(str(x).strip(), 300) for x in board.get("idea") or [] if str(x).strip()][:8]
+    product, bad = [], []
+    for f in board.get("product") or []:
+        if not isinstance(f, dict) or not str(f.get("feature", "")).strip():
+            continue
+        ids = [str(x) for x in f.get("steps") or []]
+        bad += [x for x in ids if x not in step_ids]
+        product.append({"feature": redact(str(f["feature"]).strip(), 120), "steps": ids[:20]})
+    if bad:
+        raise ValueError("board.product names steps the plan does not have: " + ", ".join(sorted(set(bad))))
+    if not what or not product:
+        raise ValueError("board needs what_for and product: " + BOARD_SHAPE)
+    return {"whatFor": what, "idea": idea, "product": product[:30]}
+
+
+NO_BOARD = (" This plan has no board yet: add parts.board (what_for, idea, product with step ids) in the next "
+            "version, so the page shows what the plan is for and its progress against the final product.")
+
+
+def board_markdown(b: dict) -> str:
+    lines = [f"- What for: {b['whatFor']}"] + [f"- Idea: {x}" for x in b.get("idea", [])]
+    lines += [f"- Feature: {f['feature']} (steps {', '.join(f['steps']) or 'none'})" for f in b.get("product", [])]
+    return "\n".join(lines)
 
 
 def now_iso() -> str:
@@ -349,6 +390,12 @@ class Inbox:
         checks = None
         if parts is not None:
             parts = clean_parts(parts)
+            # a version never loses the board its parent had (the owner's words, 2026-11-12: "I don't want to meet
+            # this kind of mistake and lost my progress")
+            had = ((self.store.get(f"planVersions/{plan_id}_v{parent}") or {}).get("parts") or {}).get("board") if current else None
+            if had and not parts.get("board"):
+                raise ValueError("The parent version has a board (what_for, idea, product); send it again in parts.board. "
+                                 "Nothing was saved.")
             # step s8: the parts of a plan read from a session are checked against its record; bad #n and quotes marked
             parts, checks = check_parts(parts, (plan.get("source") or {}).get("pagesDir", ""))
             text = text if text.strip() else parts_markdown(parts)
@@ -856,14 +903,17 @@ def server():
 
         parts: the six parts of a plan from a session, in this order: {"goal": markdown (quote the owner), "summary":
         markdown (cite log entries as #n), "rules": [{"rule", "source"}], "lessons": [{"lesson", "taught_by",
-        "applied_in"}], "leftover": [text], "steps": [{"id", "title", "does", "check", "new": true for work the record does not hold}]}. source: the command id the
-        dashboard gave you when it asked for a plan from a session."""
+        "applied_in"}], "leftover": [text], "steps": [{"id", "title", "does", "check", "new": true for work the record does not hold}],
+        "board": {"what_for": one line, what the plan is for, "idea": [short lines, how], "product": [{"feature": the
+        final product's feature, short, "steps": [the step ids that build it]}]}}. The board is the plan's main look:
+        the page colors each feature from its steps' states. source: the command id the dashboard gave you when it
+        asked for a plan from a session."""
         try:
             plan_id = await asyncio.to_thread(inbox.plan_start, title, text, note, parts, source, harness)
         except ValueError as e:
             return f"Not opened: {e}"
         plan = await asyncio.to_thread(inbox.store.get, f"plans/{plan_id}")
-        return f"Opened plan {plan_id} at version {plan.get('current', 0)}."
+        return f"Opened plan {plan_id} at version {plan.get('current', 0)}." + (NO_BOARD if parts and not parts.get("board") else "")
 
     @mcp.tool()
     async def plan_version(note: str, text: str = "", plan_id: str = "", parent: int = -1, parts: dict | None = None,
@@ -876,7 +926,8 @@ def server():
         orders a move, call this with phase and order (the owner's words), and leave text and parts out for a plain
         version that keeps the data. harness: the whole harness list, each {"id": "h1", "item", "kind": "tool" or
         "check"}: the tools and context each step needs, and each step's check; the owner approves every item on the
-        page. Left out, the list stays as it was."""
+        page. Left out, the list stays as it was. parts.board (see plan_start): send it with every parts version;
+        a version that drops the board its parent had is refused."""
         plan_id = plan_id or ((await asyncio.to_thread(inbox.open_plan)) or {}).get("id", "")
         if not plan_id:
             return "No plan in this session. Open one with plan_start."
@@ -886,7 +937,10 @@ def server():
         except ValueError as e:
             return str(e)
         out = f"Saved version {n} of plan {plan_id}. Questions asked from now on are round {n}."
-        split = ((await asyncio.to_thread(inbox.store.get, f"planVersions/{plan_id}_v{n}")) or {}).get("phaseMove", {}).get("harness")
+        saved = (await asyncio.to_thread(inbox.store.get, f"planVersions/{plan_id}_v{n}")) or {}
+        if saved.get("parts") and not saved["parts"].get("board"):
+            out += NO_BOARD
+        split = saved.get("phaseMove", {}).get("harness")
         if split:
             out += (" Build uses only the approved harness items: " + (", ".join(split["approved"]) or "none")
                     + ". Not approved, left out of Build: " + (", ".join(split["notApproved"]) or "none") + ".")

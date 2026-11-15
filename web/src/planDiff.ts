@@ -3,7 +3,7 @@
 import type { Parts, Plan } from "./data";
 
 export const PART_NAMES: [keyof Parts, string][] = [
-  ["goal", "1. Goal"], ["summary", "2. Summary"], ["rules", "3. Rules"], ["lessons", "4. Lessons"],
+  ["board", "Board"], ["goal", "1. Goal"], ["summary", "2. Summary"], ["rules", "3. Rules"], ["lessons", "4. Lessons"],
   ["leftover", "5. Leftover"], ["steps", "6. Steps"],
 ];
 
@@ -19,6 +19,11 @@ export function partLines(parts: Parts, k: keyof Parts): string[] {
       return parts.lessons.map((l) => `${l.lesson} · taught by ${l.taughtBy} · applied in ${l.appliedIn}`);
     case "leftover":
       return parts.leftover;
+    case "board":
+      return parts.board
+        ? [`What for: ${parts.board.whatFor}`, ...parts.board.idea.map((x) => `Idea: ${x}`),
+           ...parts.board.product.map((f) => `Feature: ${f.feature} (steps ${f.steps.join(", ") || "none"})`)]
+        : [];
     case "steps":
       return parts.steps.map((s) => `${s.id} ${s.new ? "[new] " : ""}${s.title}: ${s.does} · check: ${s.check}`);
   }

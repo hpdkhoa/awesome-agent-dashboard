@@ -168,9 +168,31 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
 @media (max-width: 560px) { .evidence-grid { grid-template-columns: minmax(0, 1fr); } }
 
 /* Run reports (2026-11-15, "A + exact report fields"): the board keeps its columns, a sorted reply line keeps its depth */
-.report-board { table-layout: fixed; width: 100%; }
-.report-board td, .report-board th { overflow-wrap: anywhere; vertical-align: top; }
-.report-board th:nth-child(2), .report-board th:nth-child(6), .report-board th:nth-child(7) { width: 5.5em; }
+/* the board, the plan's main look (2026-11-16, "Product board, new fields"); theme colors, light and dark */
+.board-box { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 0.6rem 0.9rem; margin: 0.6rem 0; }
+.board-box p { margin: 0.2rem 0; }
+.board-lab { color: var(--second); font-weight: bold; font-size: 0.8rem; letter-spacing: 0.04em; text-transform: uppercase; }
+.board-bar { display: flex; height: 0.7rem; background: var(--line); border-radius: 0.35rem; overflow: hidden; margin: 0.4rem 0; }
+.board-bar i { display: block; height: 100%; }
+.board-legend span { margin-right: 1rem; white-space: nowrap; display: inline-block; }
+.board-legend .sw { display: inline-block; width: 0.7rem; height: 0.7rem; border-radius: 3px; margin-right: 0.3rem; vertical-align: middle; }
+.board-feats { display: grid; grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr)); gap: 0.5rem; margin-top: 0.5rem; }
+.board-feat { display: flex; flex-direction: column; border-radius: 8px; padding: 0.4rem 0.6rem; line-height: 1.35; border: 2px solid var(--line); background: var(--bg); }
+.board-feat.f-built { border-color: var(--live); }
+.board-feat.f-open, .board-feat.f-doing { border: 2px dashed var(--wait-fg); background: var(--wait); }
+.board-feat.f-failed { border-color: var(--bad); background: var(--danger-bg); }
+.board-feat.f-next { border: 2px dashed var(--line); }
+.board-key { font-size: 0.88rem; font-weight: bold; }
+.f-built .board-key { color: var(--live); } .f-open .board-key, .f-doing .board-key { color: var(--wait-fg); }
+.f-failed .board-key { color: var(--bad); } .f-next .board-key { color: var(--muted); font-weight: normal; }
+.board-bar .f-built, .sw.f-built { background: var(--live); } .board-bar .f-open, .sw.f-open { background: var(--wait-fg); }
+.board-bar .f-doing, .sw.f-doing { background: var(--accent); } .board-bar .f-failed, .sw.f-failed { background: var(--bad); }
+.board-bar .f-next, .sw.f-next { background: var(--muted); }
+.board-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
+@media (max-width: 560px) { .board-row { grid-template-columns: 1fr; } }
+.board-need { list-style: none; padding-left: 0; margin: 0; }
+.board-need li { margin: 0.2rem 0; }
+.board-box img { max-width: 100%; border-radius: 6px; }
 .report-line.sub { margin-left: 1.4em; }
 .report-line p, .report-line ul { margin: 0; }
 .picks select { font-size: 0.6875rem; padding: 0 0.25rem; }

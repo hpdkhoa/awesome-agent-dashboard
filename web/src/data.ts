@@ -114,7 +114,9 @@ export type Parts = {
   leftover: string[];
   steps: { id: string; title: string; does: string; check: string; new?: boolean }[]; // new: work the record does not hold
   cite?: string; // the owner's words the plan reads, in log order (2026-11-05); part 1 says what the plan is for
+  board?: Board; // the plan's main look (bridge inbox.py clean_board; the owner's pick, 2026-11-16, "Product board, new fields")
 };
+export type Board = { whatFor: string; idea: string[]; product: { feature: string; steps: string[] }[] };
 // The message kinds on a plan: four change it (a new plan version), Q&A never does.
 export type PlanKind = "qa" | "goal" | "step" | "rule" | "lesson";
 export const PLAN_KINDS: [PlanKind, string][] = [
