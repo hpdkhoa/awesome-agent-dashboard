@@ -520,6 +520,25 @@ export const tickHarness = (planId: string, h: HarnessItem, ok: boolean, v: numb
   setDoc(doc(db, "planHarness", planId),
     { planId, items: { [h.id]: { ok, at: new Date().toISOString(), hash: itemHash(h), v } } }, { merge: true });
 
+// Per-step picks (the owner's pick, 2026-11-16: "Bar + per-step picks table"; the owner's words: "choosing what runner
+// and model and effort for each step when run"): one small record per plan, planPicks/<plan id>, never a plan version.
+// Run step and Run all (bridge chain.py) use each step's own pick; a step with no pick takes the Runs tab setting.
+// Runner: Claude only for now (the owner's pick, 2026-11-16: "Claude only now, local later"): a local run has no tools,
+// so it can't send a step's done report.
+export type StepPick = RunWith & { runner?: "claude" };
+export type PlanPicks = { planId: string; steps: Record<string, StepPick> };
+export function usePlanPicks(planId: string | undefined): PlanPicks | null {
+  const [p, setP] = useState<PlanPicks | null>(null);
+  const active = useActive();
+  useEffect(() => {
+    if (!planId || !active) return;
+    return onSnapshot(doc(db, "planPicks", planId), (s) => (countReads(1, "planPicks"), setP((s.data() as PlanPicks) ?? { planId, steps: {} })));
+  }, [planId, active]);
+  return p;
+}
+export const setStepPick = (planId: string, stepId: string, pick: StepPick) =>
+  setDoc(doc(db, "planPicks", planId), { planId, steps: { [stepId]: { ...pick, runner: "claude" } }, updatedAt: new Date().toISOString() }, { merge: true });
+
 // Step check runner (step i8; the owner's picks 2026-11-12: "Session proposes, you edit + tick", "On done + a Run check
 // button", "Step turns failed, chain stops", "PowerShell, plan folder, 10 min"): one record per step (bridge stepcheck.py).
 export type CheckRun = { at: string; endedAt: string; exit: number | null; seconds: number; trigger: "done" | "button";

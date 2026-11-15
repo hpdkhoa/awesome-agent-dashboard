@@ -173,3 +173,7 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
 .report-board th:nth-child(2), .report-board th:nth-child(6), .report-board th:nth-child(7) { width: 5.5em; }
 .report-line.sub { margin-left: 1.4em; }
 .report-line p, .report-line ul { margin: 0; }
+.picks select { font-size: 0.6875rem; padding: 0 0.25rem; }
+.picks td { vertical-align: middle; }
+.picks { width: 100%; }
+.picks select { width: 100%; min-width: 5.5rem; }

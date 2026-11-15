@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  PLAN_KINDS, runAllSteps, runStep, sendPlanMessage, stopChain, useHarness, usePlanChain, usePlanSteps,
+  PLAN_KINDS, runAllSteps, runStep, sendPlanMessage, setStepPick, stopChain, useHarness, usePlanChain, usePlanPicks, usePlanSteps,
+  EFFORTS, exactEffort, exactModel, MODELS, useRunPrefs, type Fresh, type PlanPicks, type StepPick,
   checkTicked, runCheck, saveCheckCommand, tickCheck, useStepChecks, type StepCheck,
   type InboxItem, type Parts, type Plan, type PlanGenerated, type PlanKind, type PlanStep, type PlanVersion, type Run,
 } from "./data";
@@ -343,22 +344,6 @@ function LeftoverSection({ plan, v, steps }: { plan: Plan; v: PlanVersion; steps
   );
 }
 
-function RunStep({ plan, step, runs, harness }: { plan: Plan; step: Parts["steps"][number]; runs: Run[]; harness: string }) {
-  const [error, setError] = useState("");
-  const [w, setW] = useState<RunWith>({});
-  const going = runs.some((r) => r.planId === plan.id && r.stepId === step.id && (r.status === "new" || r.status === "running"));
-  const explore = phaseOf(plan) === "explore"; // no step runs before the owner moves the plan to Build
-  return (
-    <>
-      <button className="chip primary" disabled={going || explore} title={explore ? "Off in Explore: move the plan to Build first" : undefined} onClick={() => runStep(plan, step, harness, w).catch((e) => setError(String(e?.code ?? e)))}>
-        {going ? "Running" : "Run step"}
-      </button>
-      {!explore && <RunWithPicker value={w} onChange={setW} compact fresh />}
-      {error && <span className="bad small"> {error}</span>}
-    </>
-  );
-}
-
 // 9. Decisions (the owner's words, 2026-11-10: "I see the missing in images and artifacts after I approved, no where to
 // found them so make approved section so something similar so I can see what decisions have been made"): every answered
 // question of the plan by round, the option picked with its drawing, image or draft, the owner's note, the version it
@@ -443,25 +428,48 @@ function KeptExample({ q, o, cwd }: { q: InboxItem; o: InboxItem["options"][numb
   );
 }
 
-// Run all steps: one press; the bridge runs the steps not done in order and stops on a fail (bridge chain.py).
-function RunAll({ plan, steps, total }: { plan: Plan; steps: PlanStep[]; total: number }) {
+// The Steps bar and the per-step picks (the owner's pick, 2026-11-16: "Bar + per-step picks table"; the owner's words:
+// "which can provide me the feature of choosing what runner and model and effort for each step when run?"). One bar on
+// top: the step, Run step, Run all (the bridge runs the steps not done in order and stops on a fail, chain.py). Each
+// step's runner, model, effort and handoff live in the folded table below, saved per plan (planPicks); Run step and
+// Run all both use the step's own row. Runner: Claude only now (the owner's pick: "Claude only now, local later").
+type StepRow = Parts["steps"][number];
+const pickOf = (picks: PlanPicks | null, id: string, prefs: { model?: string; effort?: string } | null) => {
+  const p = picks?.steps?.[id] ?? {};
+  return { model: p.model || exactModel(prefs?.model), effort: p.effort || exactEffort(prefs?.effort), fresh: (p.fresh ?? "auto") as Fresh };
+};
+
+function StepBar({ plan, rows, steps, runs, harness, picks }: {
+  plan: Plan; rows: StepRow[]; steps: PlanStep[]; runs: Run[]; harness: string; picks: PlanPicks | null;
+}) {
   const chain = usePlanChain(plan.id);
+  const prefs = useRunPrefs();
   const [error, setError] = useState("");
-  const [w, setW] = useState<RunWith>({});
-  if (phaseOf(plan) === "explore") return null;
+  const [pick, setPick] = useState("");
+  if (phaseOf(plan) === "explore") return <p className="small muted">Run step and Run all are off in Explore: move the plan to Build first.</p>;
+  const done = (id: string) => steps.find((x) => x.stepId === id)?.state === "done";
+  const first = rows.find((r) => !done(r.id))?.id ?? rows[0]?.id ?? "";
+  const id = rows.some((r) => r.id === pick) ? pick : first;
+  const step = rows.find((r) => r.id === id);
   const on = chain?.state === "on";
-  const done = steps.filter((x) => x.state === "done").length;
+  const going = runs.some((r) => r.planId === plan.id && r.stepId === id && (r.status === "new" || r.status === "running"));
+  const left = rows.filter((r) => !done(r.id)).length;
+  const w = step ? pickOf(picks, step.id, prefs) : null;
+  const fail = (e: { code?: string }) => setError(String(e?.code ?? e));
   return (
-    <div className="run-all">
+    <div className="run-all step-bar">
+      <select value={id} onChange={(e) => setPick(e.target.value)} aria-label="step">
+        {rows.map((r) => <option key={r.id} value={r.id}>{r.id} · {done(r.id) ? "done" : "not done"} · {r.title.slice(0, 40)}</option>)}
+      </select>
+      <button className="primary" disabled={!step || going}
+        onClick={() => step && w && runStep(plan, step, harness, w).catch(fail)}>{going ? `${id} running` : `Run step ${id}`}</button>
       {on ? (
-        <button className="danger" onClick={() => stopChain(plan.id).catch((e) => setError(String(e?.code ?? e)))}>Stop run all</button>
+        <button className="danger" onClick={() => stopChain(plan.id).catch(fail)}>Stop run all</button>
       ) : (
-        <button className="primary" disabled={done >= total} title={done >= total ? "Every step is done; rerun one by hand" : undefined}
-          onClick={() => runAllSteps(plan, w).catch((e) => setError(String(e?.code ?? e)))}>
-          Run all steps ({total - done} not done)
-        </button>
+        <button disabled={!left} title={left ? "Each step runs with its own row in Per-step picks" : "Every step is done; rerun one by hand"}
+          onClick={() => runAllSteps(plan).catch(fail)}>Run all steps ({left} not done)</button>
       )}
-      {!on && <RunWithPicker value={w} onChange={setW} compact fresh />}
+      {w && <span className="small muted">{id}: Claude · {w.model} · {w.effort} · handoff {w.fresh}</span>}
       {chain && (
         <span className={"status " + (on ? "running" : chain.state === "done" ? "done" : "failed")}>
           {on ? `running ${chain.stepId ?? "…"}${chain.left ? ` · ${chain.left} left` : ""}` : chain.state === "done" ? `all done · ${chain.reason ?? ""}` : `stopped · ${chain.reason ?? ""}`}
@@ -469,6 +477,57 @@ function RunAll({ plan, steps, total }: { plan: Plan; steps: PlanStep[]; total: 
       )}
       {error && <span className="bad small"> {error}</span>}
     </div>
+  );
+}
+
+function PicksTable({ plan, rows, picks }: { plan: Plan; rows: StepRow[]; picks: PlanPicks | null }) {
+  const prefs = useRunPrefs();
+  const [error, setError] = useState("");
+  // a change saves the step's whole row as shown, so the row always names exactly what runs
+  const set = (id: string, change: Partial<StepPick>) =>
+    setStepPick(plan.id, id, { ...pickOf(picks, id, prefs), ...change }).catch((e) => setError(String(e?.code ?? e)));
+  const saved = rows.filter((r) => picks?.steps?.[r.id]).length;
+  return (
+    <Section id="plan.steps.picks" title="Per-step picks" extra={`runner, model, effort, handoff · ${saved} of ${rows.length} set, the rest follow the Runs tab`} open={false}>
+      <table className="picks">
+        <thead><tr><th>Step</th><th>Runner</th><th>Model</th><th>Effort</th><th>Handoff</th></tr></thead>
+        <tbody>
+          {rows.map((r) => {
+            const w = pickOf(picks, r.id, prefs);
+            const own = !!picks?.steps?.[r.id];
+            return (
+              <tr key={r.id} data-step={r.id}>
+                <td title={r.title}><b>{r.id}</b> <span className="small">{r.title.slice(0, 36)}</span>{own ? "" : <span className="small muted"> · Runs tab</span>}</td>
+                <td>
+                  <select value="claude" aria-label={`${r.id} runner`} onChange={() => undefined}>
+                    <option value="claude">Claude</option>
+                    <option value="local" disabled>local model (needs agent stage)</option>
+                  </select>
+                </td>
+                <td>
+                  <select value={w.model} aria-label={`${r.id} model`} onChange={(e) => set(r.id, { model: e.target.value })}>
+                    {MODELS.map(([k, n]) => <option key={k} value={k}>{n}</option>)}
+                  </select>
+                </td>
+                <td>
+                  <select value={w.effort} aria-label={`${r.id} effort`} onChange={(e) => set(r.id, { effort: e.target.value })}>
+                    {EFFORTS.map(([k, n]) => <option key={k} value={k}>{n}</option>)}
+                  </select>
+                </td>
+                <td>
+                  <select value={w.fresh} aria-label={`${r.id} handoff`} onChange={(e) => set(r.id, { fresh: e.target.value as Fresh })}>
+                    <option value="auto">auto</option>
+                    <option value="always">fresh with a handoff</option>
+                    <option value="never">resume as is</option>
+                  </select>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {error && <p className="bad small">{error}</p>}
+    </Section>
   );
 }
 
@@ -532,6 +591,7 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
   const ticks = useHarness(plan.id);
   const generated = usePlanGenerated(plan.id);
   const [checked, setChecked] = useState<string | null>(null); // when Check plan was pressed
+  const picks = usePlanPicks(plan.id);
   const harnessNote = buildNote(versions.find((x) => x.n === plan.current)?.harness, ticks);
   const withParts = versions.filter((v) => v.parts).sort((a, b) => a.n - b.n);
   const [picked, setPicked] = useState<number | null>(null);
@@ -591,8 +651,11 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
       <Section id="plan.part.steps" title="6. Steps" extra={`${v.parts.steps.length} steps`} stale={staleMark(stale, "results")}>
         {before && <DiffBlock a={partLines(before, "steps")} b={partLines(v.parts, "steps")} />}
         {!before && v.n === plan.current && (
-          <RunAll plan={plan} total={v.parts.steps.length}
-            steps={steps.filter((x) => v.parts!.steps.some((st) => st.id === x.stepId))} />
+          <>
+            <StepBar plan={plan} rows={v.parts.steps} runs={runs} harness={harnessNote} picks={picks}
+              steps={steps.filter((x) => v.parts!.steps.some((st) => st.id === x.stepId))} />
+            {phaseOf(plan) !== "explore" && <PicksTable plan={plan} rows={v.parts.steps} picks={picks} />}
+          </>
         )}
         {v.parts.steps.map((st) => {
           const sv = steps.find((x) => x.stepId === st.id);
@@ -604,12 +667,9 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
                 <span className={"step-state " + (sv?.state ?? "next")}>{sv?.state ?? "next"}</span>
                 <b>{st.id} · {st.title}</b>{st.new && <span className="tag" title="Work the session's record does not hold">new</span>}
               </span>}
-              tools={<span className="step-tools">
-                <RunStep plan={plan} step={st} runs={runs} harness={harnessNote} />
-                <StepActions step={st} />
-                {sv && <MoreMenu path={`planSteps/${plan.id}_${st.id}`} />}
-              </span>}>
+              tools={sv ? <MoreMenu path={`planSteps/${plan.id}_${st.id}`} /> : undefined}>
               <div className="step-row" data-step={st.id}>
+              <p className="step-tools"><StepActions step={st} /></p>
               <Md text={linkEntries(`${st.does}\n\n**Check:** ${st.check}`, plan)} cwd={plan.cwd} />
               <StepCheckBox plan={plan} stepId={st.id} c={checks.find((x) => x.stepId === st.id)} done={sv?.state === "done" || sv?.state === "failed"} />
               <OnMessages runs={runs} plan={plan} where={{ stepId: st.id }} />

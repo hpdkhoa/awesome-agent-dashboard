@@ -127,7 +127,14 @@ class Chains:
         st = left[0]
         nid = uuid.uuid4().hex[:20]
         text = step_text(st, harness_note(v.get("harness"), self.store.get(f"planHarness/{pid}")))
-        w = {k: ch[k] for k in ("model", "effort", "fresh") if ch.get(k)}
+        # the step's own row of Per-step picks (planPicks/<plan id>, the owner's pick 2026-11-16: "Bar + per-step picks
+        # table"), else the chain's pick, else the Runs tab setting (runs.py run_with)
+        own = ((self.store.get(f"planPicks/{pid}") or {}).get("steps") or {}).get(st["id"]) or {}
+        if own.get("runner") not in (None, "", "claude"):
+            return self._stop(ch, f"step {st['id']}: runner {own['runner']} can't build a step yet (Claude only)")
+        w = {k: own.get(k) or ch[k] for k in ("model", "effort", "fresh") if own.get(k) or ch.get(k)}
+        if w.get("fresh") == "auto":
+            w.pop("fresh")
         self.store.put_many({f"commands/{nid}": {
             "id": nid, "action": "message", "machine": plan.get("machine") or self.machine, "sessionId": plan.get("sessionId", ""),
             "cwd": plan.get("cwd", ""), "prompt": text, "ownerText": text, "planId": pid, "stepId": st["id"],

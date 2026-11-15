@@ -155,3 +155,36 @@ def test_the_harness_note_matches_the_page_and_is_read_at_each_step():
     ch.resume()
     run = store.get(f"commands/{store.get('planChains/p1')['runId']}")
     assert run["stepId"] == "S2" and run["prompt"].endswith("approved harness items: h1, h2.")
+
+
+def test_each_step_runs_with_its_own_pick():
+    """Per-step picks (the owner's pick, 2026-11-16: "Bar + per-step picks table"): a step's own row wins over the
+    chain's pick; a step with no row keeps the chain's pick; "auto" handoff sends nothing (the Runs tab rule)."""
+    store = FakeStore()
+    plan(store)
+    store.put_many({"planPicks/p1": {"planId": "p1", "steps": {
+        "S1": {"runner": "claude", "model": "claude-sonnet-5-5", "effort": "high", "fresh": "always"},
+        "S2": {"runner": "claude", "effort": "low", "fresh": "auto"}}}})
+    ch = Chains(store, "PC", Push())
+    ch.resume()
+    run = store.get(f"commands/{store.get('planChains/p1')['runId']}")
+    assert (run["stepId"], run["model"], run["effort"], run["fresh"]) == ("S1", "claude-sonnet-5-5", "high", "always")
+    report(store, "S1", "done")
+    end(store, ch, "done")
+    ch.resume()
+    run = store.get(f"commands/{store.get('planChains/p1')['runId']}")
+    assert (run["stepId"], run["model"], run["effort"]) == ("S2", "opus", "low") and "fresh" not in run
+    report(store, "S2", "done")
+    end(store, ch, "done")
+    ch.resume()
+    run = store.get(f"commands/{store.get('planChains/p1')['runId']}")
+    assert run["stepId"] == "S3" and run["model"] == "opus" and "effort" not in run
+
+
+def test_a_non_claude_runner_stops_the_chain():
+    store, push = FakeStore(), Push()
+    plan(store)
+    store.put_many({"planPicks/p1": {"planId": "p1", "steps": {"S1": {"runner": "local", "model": "qwen3:14b"}}}})
+    Chains(store, "PC", push).resume()
+    c = store.get("planChains/p1")
+    assert c["state"] == "stopped" and "Claude only" in c["reason"] and not c.get("runId")
