@@ -377,3 +377,16 @@ def test_a_restarted_plan_keeps_the_notes_of_unchanged_pages_and_a_usage_limit_p
     assert c["status"] == "done" and len(notes_runs) == 1 and c["reused"] == 1  # no new notes run
     assert (tmp_path / "out" / "plans" / "p2" / "notes-01.md").read_text(encoding="utf-8") == \
         (tmp_path / "out" / "plans" / "p1" / "notes-01.md").read_text(encoding="utf-8")
+
+
+def test_a_done_or_failed_step_posts_its_report_as_a_result_to_review():
+    # the owner's choice, 2026-11-15: "v7 data + code fix" ("the result report is not visible")
+    store = FakeStore()
+    ib = Inbox(store, "PC", [], "s1", "/x")
+    pid = ib.plan_start("p", parts=PARTS)
+    ib.step_update(pid, "s1", "now", "working")
+    assert [d for d in store.docs.values() if d.get("kind") == "result"] == []  # "now" is no result
+    ib.step_update(pid, "s1", "done", "- 12/12 pass", evidence=["a.png"])
+    res = [d for d in store.docs.values() if d.get("kind") == "result"]
+    assert len(res) == 1 and res[0]["planId"] == pid and res[0]["stepId"] == "s1" and res[0]["stepVersion"] == 2
+    assert res[0]["text"] == "- 12/12 pass" and res[0]["files"] == ["a.png"] and res[0]["title"].startswith("Step done: s1")

@@ -27,6 +27,16 @@ from .snapshot import take as take_snapshot
 RETRY_SECONDS = 600
 
 
+def answer_place(item: dict) -> dict:
+    """Where an answer's run belongs on the plan page (the owner's choice, 2026-11-15: "v7 data + code fix"): the
+    question's plan, and its step as answerStep. Not stepId: a stepId makes the run a Run step with that step's scope."""
+    out = {}
+    if item.get("planId"):
+        out["planId"] = str(item["planId"])
+        if item.get("stepId"):
+            out["answerStep"] = str(item["stepId"])
+    return out
+
 def find_claude(env_value: str = "") -> str | None:
     if env_value:
         return env_value if os.path.exists(env_value) else None
@@ -81,7 +91,7 @@ def deliver(store, machine: str, claude: str | None, rows: list[dict] | None = N
         store.put_many({f"commands/{cid}": {
             "id": cid, "action": "message", "machine": machine, "sessionId": item["sessionId"], "cwd": item.get("cwd", ""),
             "prompt": answer_text(item), "inboxId": item["id"], "force": bool(item.get("force")), "status": "new",
-            "createdAt": now_iso(),
+            "createdAt": now_iso(), **answer_place(item),
         }})
         store.update(f"inbox/{item['id']}", {"status": "delivering", "commandId": cid, "lastTryAt": now_iso(), "error": None})
         log.append(f"{item['id']}: handed to run {cid}")

@@ -24,6 +24,16 @@ describe("plan staleness", () => {
     expect(staleMark(rows, "parts")).toBeUndefined();
   });
 
+  it("Summary and Leftover are behind when a step reported after the current version", () => {
+    // the owner's words, 2026-11-15: "it is not update the open points ... after steps done I don't see the update in summarize"
+    const late = [{ ...(steps as never[])[0] as object, versions: [{ n: 1, state: "done", reply: "", at: "2026-11-06T00:00:00Z", planVersion: 2 }] }] as never;
+    const rows = staleness(plan, versions, null, null, late, []);
+    expect(rows.find((r) => r.section === "summary")).toMatchObject({ ok: false, note: "1 step report after v2 (newest: s1 done), not in Summary" });
+    expect(staleMark(rows, "leftover")).toContain("not in Leftover");
+    const early = staleness(plan, versions, null, null, steps, []);
+    expect(early.find((r) => r.section === "summary")).toMatchObject({ ok: true, note: "v2, no step report since" });
+  });
+
   it("generated files approved for an older version only are stale", () => {
     const gen = { planId: "p", versions: { v1: [{ file: "a.svg", kind: "diagram", at: "x" }] } };
     const rows = staleness(plan, versions, null, gen, [], []);

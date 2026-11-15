@@ -378,9 +378,11 @@ class Inbox:
             on_done(self.store, {**plan, "id": plan_id}, step_id, evidence or [], n, self.machine)
         active = step_id if state == "now" else (None if plan.get("activeStep") == step_id else plan.get("activeStep"))
         self.store.update(f"plans/{plan_id}", {"activeStep": active, "updatedAt": now_iso()})
-        if self.push is not None and state in ("done", "failed"):
-            self.push.notify(f"Step {state}: {steps[step_id]['title']}", (reply.splitlines() or [""])[0][:160],
-                             f"/?plan={plan_id}", f"plan-{plan_id}-{step_id}")
+        if state in ("done", "failed"):
+            # the report as a result to review in the inbox (the owner's choice, 2026-11-15: "v7 data + code fix"; the
+            # owner's words: "the result report is not visible"); its push replaces the step's own push
+            self.post("result", f"Step {state}: {step_id} · {steps[step_id]['title']}", reply, files=evidence or [],
+                      extra={"planId": plan_id, "stepId": step_id, "round": int(plan.get("current", 0)), "stepVersion": n})
         return n
 
     def ask_switch(self, to: str, change: str, why: str) -> str:

@@ -336,3 +336,20 @@ def test_redraw_can_reshape_the_question_and_clears_only_a_pick_that_is_gone():
     assert "Only the session" in make(store, "s2").redraw(i, "", question="x")
     store.update(f"inbox/{i}", {"status": "answered"})
     assert "already answered" in ib.redraw(i, "", question="x")
+
+
+def test_a_delivered_answer_keeps_its_plan_and_step_without_becoming_a_run_step():
+    # the owner's choice, 2026-11-15: "v7 data + code fix": answer runs show in the plan's Results
+    store = FakeStore()
+    opts = [{"label": "Close s2", "differs": "d", "example": {"type": "text", "draft": "x"}}]
+    qid = make(store).post("question", "q", "q", opts, extra={"planId": "p1", "stepId": "s2"})
+    owner_answers(store, qid, "Close s2")
+    beat(store, "s1", 10)
+    deliver(store, "PC", "claude")
+    c = store.where("commands", "action", "message")[0]
+    assert c["planId"] == "p1" and c["answerStep"] == "s2" and "stepId" not in c
+    q2 = make(store).post("question", "q", "q")
+    owner_answers(store, q2, "A")
+    deliver(store, "PC", "claude")
+    c2 = [x for x in store.where("commands", "action", "message") if x["inboxId"] == q2][0]
+    assert "planId" not in c2 and "answerStep" not in c2

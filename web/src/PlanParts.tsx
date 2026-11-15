@@ -165,12 +165,14 @@ function OnMessages({ runs, plan, where }: { runs: Run[]; plan: Plan; where: On 
 function ResultsSection({ plan, v, versions, runs, steps, generated, stale }: {
   plan: Plan; v: PlanVersion; versions: PlanVersion[]; runs: Run[]; steps: PlanStep[]; generated: PlanGenerated | null; stale?: string;
 }) {
+  // a Run step, or your answer to a question on a step (it can close the step: "Close s2 with this PC only")
+  const stepOf = (r: Run) => (r.stepId && !r.kind ? r.stepId : r.answerStep) ?? "";
   const list = runs
-    .filter((r) => r.planId === plan.id && r.stepId && !r.kind && r.action === "message")
+    .filter((r) => r.planId === plan.id && stepOf(r) && r.action === "message")
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const title = (id: string) => v.parts?.steps.find((s) => s.id === id)?.title ?? "";
   const report = (r: Run) => {
-    const sv = steps.find((s) => s.stepId === r.stepId);
+    const sv = steps.find((s) => s.stepId === stepOf(r));
     const after = (sv?.versions ?? []).filter((x) => x.at >= (r.startedAt ?? r.createdAt));
     return after[0];
   };
@@ -189,12 +191,13 @@ function ResultsSection({ plan, v, versions, runs, steps, generated, stale }: {
             const rep = report(r);
             const newest = r.id === list[0].id; // the owner's pick, 2026-11-12, "Both": only the newest card starts open
             const files = generated?.versions?.[`v${n}`] ?? [];
-            const st = v.parts?.steps.find((s) => s.id === r.stepId);
+            const st = v.parts?.steps.find((s) => s.id === stepOf(r));
             return (
               <Section key={r.id} id={`plan.result.${r.id}`} open={newest}
                 title={<span className="result-head">
                   <span className={"status " + (rep?.state ?? r.status)}>{rep?.state ?? r.status}</span>
-                  <b>{r.stepId} · {title(r.stepId!) || "step no longer in this version"}</b>
+                  <b>{stepOf(r)} · {title(stepOf(r)) || "step no longer in this version"}</b>
+                  {r.answerStep && <span className="tag" title="The run that took your answer to a question on this step">your answer</span>}
                   <span className="small muted">ran {when(r.startedAt ?? r.createdAt)}{r.endedAt ? ` → ${when(r.endedAt)}` : ""}</span>
                 </span>}>
                 {st && <p className="small muted">check: {st.check}{rep ? ` → ${rep.state === "done" ? "met, by the session's report" : rep.state}` : " → no report yet"}</p>}
@@ -452,7 +455,8 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
       <HarnessSection plan={plan} v={v} parent={parent} stale={staleMark(stale, "harness")} />
 
       {PART_NAMES.filter(([k]) => k !== "steps").map(([k, name]) => (
-        <Section key={k} id={`plan.part.${k}`} title={name} tools={<PartActions k={k} name={name} lines={partLines(v.parts!, k)} />}>
+        <Section key={k} id={`plan.part.${k}`} title={name} stale={v.n === plan.current ? staleMark(stale, k) : undefined}
+          tools={<PartActions k={k} name={name} lines={partLines(v.parts!, k)} />}>
           <div data-part={k}>
             <Part k={k} parts={v.parts!} before={before} plan={plan} />
           </div>

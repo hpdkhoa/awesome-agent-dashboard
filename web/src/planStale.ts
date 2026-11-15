@@ -57,6 +57,18 @@ export function staleness(
     });
   }
 
+  // Summary and Leftover are written in a plan version; a step report never makes one (the owner's words, 2026-11-15:
+  // "Check the leftover section in plan, it is not update the open points ... after steps done I don't see the update
+  // in summarize"). A report newer than the current version leaves both behind until a new version is posted.
+  const after = reported.flatMap((s) => s.versions.map((x) => ({ step: s.stepId, ...x }))).filter((x) => x.at > cur.createdAt)
+    .sort((x, y) => y.at.localeCompare(x.at));
+  for (const part of ["summary", "leftover"] as const) {
+    rows.push(after.length
+      ? { section: part, ok: false, note: `${after.length} step report${after.length > 1 ? "s" : ""} after v${cur.n} (newest: ${after[0].step} ${after[0].state}), not in ${part === "summary" ? "Summary" : "Leftover"}`,
+          fix: "post a new version: the step results in Summary, the open points in Leftover" }
+      : { section: part, ok: true, note: `v${cur.n}, no step report since` });
+  }
+
   const msgs = runs.filter((r) => r.planId === plan.id && r.kind && r.action === "message").sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const m = msgs[0];
   if (m) {

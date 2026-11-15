@@ -168,6 +168,8 @@ export type Run = {
   moved?: { from: string; to: string }[]; // approve_generated: the approved files, where they went
   kind?: PlanKind; // a message on a plan
   planId?: string;
+  inboxId?: string; // an answer delivered as a message (bridge deliver.py)
+  answerStep?: string; // that answer's question was on this step (2026-11-15: "v7 data + code fix")
   sourceSessionId?: string; // plan from a session: the session it reads
   stage?: string; // plan from a session: where the reading is
   pausedUntil?: string | null; // plan from a session stopped by the usage limit: when it resets
