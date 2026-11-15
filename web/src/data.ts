@@ -525,8 +525,12 @@ export const tickHarness = (planId: string, h: HarnessItem, ok: boolean, v: numb
 // Run step and Run all (bridge chain.py) use each step's own pick; a step with no pick takes the Runs tab setting.
 // Runner: Claude only for now (the owner's pick, 2026-11-16: "Claude only now, local later"): a local run has no tools,
 // so it can't send a step's done report.
-export type StepPick = RunWith & { runner?: "claude" };
-export type PlanPicks = { planId: string; steps: Record<string, StepPick> };
+// Async (the owner's picks, 2026-11-16: "Marked steps run together, max N", "Heavy tick: runs alone"): together lets the
+// step run beside other ticked steps, each in its own fresh session; heavy makes it run alone. maxTogether: N (default 2).
+export type StepPick = RunWith & { runner?: "claude"; together?: boolean; heavy?: boolean };
+export type PlanPicks = { planId: string; steps: Record<string, StepPick>; maxTogether?: number };
+export const setMaxTogether = (planId: string, n: number) =>
+  setDoc(doc(db, "planPicks", planId), { planId, maxTogether: n, updatedAt: new Date().toISOString() }, { merge: true });
 export function usePlanPicks(planId: string | undefined): PlanPicks | null {
   const [p, setP] = useState<PlanPicks | null>(null);
   const active = useActive();
@@ -633,6 +637,7 @@ export const runStep = (plan: Plan, step: Parts["steps"][number], harness = "", 
 // every single one"; picks "Chain, stop on fail", "Button only"): the bridge runs the steps not done, one after another
 // (bridge chain.py); it stops on a fail and pushes. Stop ends the chain after the run going now.
 export type PlanChain = { planId: string; state: "on" | "stopped" | "done"; stepId?: string | null; runId?: string | null;
+  running?: Record<string, string>; failing?: string | null;
   left?: number; reason?: string | null; startedAt?: string; endedAt?: string | null };
 export function usePlanChain(planId: string | undefined): PlanChain | null {
   const [c, setC] = useState<PlanChain | null>(null);

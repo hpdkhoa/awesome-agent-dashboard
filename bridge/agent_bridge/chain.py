@@ -6,7 +6,8 @@ is out dated then I'll be the one press rerun manually").
 One record per plan, planChains/<plan id>, written by the page's Run all steps button:
   state "on": the chain goes; "stopped": the owner's Stop or a fail; "done": no step left.
   runId, stepId: the Run step command going now and its step.
-The steps run in the plan's one session, so one at a time. The next step starts only when the last run ended done and
+The steps run in the plan's one session, so one at a time; steps ticked Together on Per-step picks run side by side,
+up to the plan's max, each in its own fresh session (_one). The next step starts only when the last run ended done and
 the session reported the step done (step_update). A run that failed or was stopped, or a step reported failed or left
 without a done report, stops the chain and pushes the owner. A run lost to a bridge restart is not a fail: the chain
 goes on with the steps not done, that step first. A paused run (usage limit) waits for its continue and follows it.
@@ -89,31 +90,52 @@ class Chains:
             self.push.notify(f"{title}: {plan.get('title', '')}", why, f"/?plan={pid}", f"chain-{pid}")
         return f"chain {pid}: {state}, {why}"
 
-    def _one(self, ch: dict) -> str | None:
-        pid = ch["planId"]
-        run_id, step_id = ch.get("runId"), ch.get("stepId")
-        if run_id:
+    def _ended(self, pid: str, step_id: str, run_id: str) -> tuple[str, str, str]:
+        """One chain run: ("going" | "ok" | "fail", why, the run id after any continue). ok: done with a done report, or
+        lost to a bridge restart (the step then runs again)."""
+        c = self.store.get(f"commands/{run_id}") or {}
+        while c.get("continuedBy"):  # a paused run went on as a new run: follow it
+            run_id = c["continuedBy"]
             c = self.store.get(f"commands/{run_id}") or {}
-            while c.get("continuedBy"):  # a paused run went on as a new run: follow it
-                run_id = c["continuedBy"]
-                c = self.store.get(f"commands/{run_id}") or {}
-                self.store.update(f"planChains/{pid}", {"runId": run_id, "updatedAt": now_iso()})
-            status = c.get("status")
-            if status in GOING or status == "paused":
+        status = c.get("status")
+        if status in GOING or status == "paused":
+            return "going", "", run_id
+        # step i8: a done report asked for the step's check; wait for it (stepcheck.py calls back at its end)
+        if status == "done" and (self.store.get(f"planChecks/{pid}_{step_id}") or {}).get("state") in ("queued", "running"):
+            return "going", "", run_id
+        sv = self.store.get(f"planSteps/{pid}_{step_id}") or {}
+        rep = sv.get("state")
+        by_check = ((sv.get("versions") or [{}])[-1] or {}).get("by") == "check"
+        if status in ("failed", "stopped"):
+            return "fail", f"step {step_id}: the run {status}" + (f": {c['error'][:120]}" if c.get("error") else ""), run_id
+        if status == "done" and rep == "failed":
+            return "fail", f"step {step_id}: " + ("its check failed" if by_check else "the session reported it failed"), run_id
+        if status == "done" and rep != "done":
+            return "fail", f"step {step_id}: the run ended with no done report (state {rep or 'none'})", run_id
+        return "ok", "", run_id
+
+    def _one(self, ch: dict) -> str | None:
+        """Async steps (the owner's pick, 2026-11-16: "Marked steps run together, max N": "You tick which steps may run
+        at the same time and set N (default 2). Each runs in its own fresh session with a handoff. Others wait in order.
+        A fail stops new starts; running ones finish."; and "Heavy tick: runs alone": "A heavy step never runs beside
+        another step, even if it's ticked Together."). running: step id -> run id of every chain run going now."""
+        pid = ch["planId"]
+        running = dict(ch.get("running") or ({ch["stepId"]: ch["runId"]} if ch.get("runId") and ch.get("stepId") else {}))
+        failing, fail_step = ch.get("failing"), ch.get("stepId")
+        for step_id, run_id in list(running.items()):
+            state, why, run_id = self._ended(pid, step_id, run_id)
+            if state == "going":
+                running[step_id] = run_id
+                continue
+            del running[step_id]
+            if state == "fail" and not failing:
+                failing, fail_step = why, step_id
+        if failing:  # no new start; the runs going now finish, then the chain stops with the first fail
+            if running:
+                self.store.update(f"planChains/{pid}", {"running": running, "failing": failing, "stepId": fail_step, "updatedAt": now_iso()})
                 return None
-            # step i8: a done report asked for the step's check; wait for it (stepcheck.py calls back at its end)
-            if status == "done" and (self.store.get(f"planChecks/{pid}_{step_id}") or {}).get("state") in ("queued", "running"):
-                return None
-            sv = self.store.get(f"planSteps/{pid}_{step_id}") or {}
-            rep = sv.get("state")
-            by_check = ((sv.get("versions") or [{}])[-1] or {}).get("by") == "check"
-            if status in ("failed", "stopped"):
-                return self._stop(ch, f"step {step_id}: the run {status}" + (f": {c['error'][:120]}" if c.get("error") else ""))
-            if status == "done" and rep == "failed":
-                return self._stop(ch, f"step {step_id}: " + ("its check failed" if by_check else "the session reported it failed"))
-            if status == "done" and rep != "done":
-                return self._stop(ch, f"step {step_id}: the run ended with no done report (state {rep or 'none'})")
-            # done, or lost to a bridge restart: go on with the steps not done
+            self.store.update(f"planChains/{pid}", {"running": {}, "stepId": fail_step})
+            return self._stop(ch, failing)
         plan = self.store.get(f"plans/{pid}") or {}
         if not plan:
             return self._stop(ch, "the plan is gone")
@@ -122,22 +144,48 @@ class Chains:
         v = self.store.get(f"planVersions/{pid}_v{plan.get('current', 0)}") or {}
         steps = (v.get("parts") or {}).get("steps") or []
         left = [st for st in steps if (self.store.get(f"planSteps/{pid}_{st['id']}") or {}).get("state") != "done"]
-        if not left:
+        if not left and not running:
+            self.store.update(f"planChains/{pid}", {"running": {}})
             return self._stop(ch, f"{len(steps)} of {len(steps)} steps done", "done")
-        st = left[0]
-        nid = uuid.uuid4().hex[:20]
-        text = step_text(st, harness_note(v.get("harness"), self.store.get(f"planHarness/{pid}")))
         # the step's own row of Per-step picks (planPicks/<plan id>, the owner's pick 2026-11-16: "Bar + per-step picks
         # table"), else the chain's pick, else the Runs tab setting (runs.py run_with)
-        own = ((self.store.get(f"planPicks/{pid}") or {}).get("steps") or {}).get(st["id"]) or {}
-        if own.get("runner") not in (None, "", "claude"):
-            return self._stop(ch, f"step {st['id']}: runner {own['runner']} can't build a step yet (Claude only)")
-        w = {k: own.get(k) or ch[k] for k in ("model", "effort", "fresh") if own.get(k) or ch.get(k)}
-        if w.get("fresh") == "auto":
-            w.pop("fresh")
-        self.store.put_many({f"commands/{nid}": {
-            "id": nid, "action": "message", "machine": plan.get("machine") or self.machine, "sessionId": plan.get("sessionId", ""),
-            "cwd": plan.get("cwd", ""), "prompt": text, "ownerText": text, "planId": pid, "stepId": st["id"],
-            "chain": True, "status": "new", "createdAt": now_iso(), **w}})
-        self.store.update(f"planChains/{pid}", {"runId": nid, "stepId": st["id"], "left": len(left), "updatedAt": now_iso()})
-        return f"chain {pid}: step {st['id']} sent as {nid} ({len(left)} left)"
+        picks = self.store.get(f"planPicks/{pid}") or {}
+        rows = picks.get("steps") or {}
+        try:
+            n = max(1, min(int(picks.get("maxTogether") or 2), 8))
+        except (TypeError, ValueError):
+            n = 2
+        together = lambda sid: bool((rows.get(sid) or {}).get("together")) and not (rows.get(sid) or {}).get("heavy") and n > 1
+        note = harness_note(v.get("harness"), self.store.get(f"planHarness/{pid}"))
+        sent = []
+        for st in left:
+            if st["id"] in running:
+                continue
+            if running and not (together(st["id"]) and all(together(s) for s in running) and len(running) < n):
+                break  # in order: a step that may not run beside the ones going waits, and so do the steps after it
+            own = rows.get(st["id"]) or {}
+            if own.get("runner") not in (None, "", "claude"):
+                why = f"step {st['id']}: runner {own['runner']} can't build a step yet (Claude only)"
+                if running:
+                    self.store.update(f"planChains/{pid}", {"running": running, "failing": why, "stepId": st["id"], "updatedAt": now_iso()})
+                    return f"chain {pid}: {why}; waits for the runs going now"
+                return self._stop({**ch, "stepId": st["id"]}, why)
+            side = together(st["id"])
+            w = {k: own.get(k) or ch.get(k) for k in ("model", "effort", "fresh") if own.get(k) or ch.get(k)}
+            if side:  # its own fresh session with a handoff; the plan keeps its session
+                w["fresh"] = "always"
+            if w.get("fresh") == "auto":
+                w.pop("fresh")
+            nid = uuid.uuid4().hex[:20]
+            text = step_text(st, note)
+            self.store.put_many({f"commands/{nid}": {
+                "id": nid, "action": "message", "machine": plan.get("machine") or self.machine, "sessionId": plan.get("sessionId", ""),
+                "cwd": plan.get("cwd", ""), "prompt": text, "ownerText": text, "planId": pid, "stepId": st["id"],
+                "chain": True, "status": "new", "createdAt": now_iso(), **w, **({"side": True} if side else {})}})
+            running[st["id"]] = nid
+            sent.append(f"{st['id']} as {nid}")
+            if not side:
+                break  # an unticked or heavy step runs alone
+        last = list(running.items())[-1] if running else (ch.get("stepId"), ch.get("runId"))
+        self.store.update(f"planChains/{pid}", {"running": running, "stepId": last[0], "runId": last[1], "left": len(left), "updatedAt": now_iso()})
+        return f"chain {pid}: step {', '.join(sent)} sent ({len(left)} left)" if sent else None

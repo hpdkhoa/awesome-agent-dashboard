@@ -188,3 +188,78 @@ def test_a_non_claude_runner_stops_the_chain():
     Chains(store, "PC", push).resume()
     c = store.get("planChains/p1")
     assert c["state"] == "stopped" and "Claude only" in c["reason"] and not c.get("runId")
+
+
+
+def test_ticked_steps_run_together_up_to_max_then_in_order():
+    """Async (the owner's pick, 2026-11-16: "Marked steps run together, max N"): S1 and S2 ticked, max 2, S3 not ticked.
+    S1 and S2 start at once, each in its own fresh session; S3 waits until both end."""
+    store = FakeStore()
+    plan(store)
+    store.put_many({"planPicks/p1": {"planId": "p1", "maxTogether": 2, "steps": {"S1": {"together": True}, "S2": {"together": True}}}})
+    ch = Chains(store, "PC", Push())
+    ch.resume()
+    c = store.get("planChains/p1")
+    assert sorted(c["running"]) == ["S1", "S2"]
+    for s in ("S1", "S2"):
+        r = store.get(f"commands/{c['running'][s]}")
+        assert r["fresh"] == "always" and r["side"] is True
+    report(store, "S1", "done")
+    store.update(f"commands/{c['running']['S1']}", {"status": "done"})
+    ch.resume()
+    assert sorted(store.get("planChains/p1")["running"]) == ["S2"]  # S3 runs alone: waits for S2
+    report(store, "S2", "done")
+    store.update(f"commands/{c['running']['S2']}", {"status": "done"})
+    ch.resume()
+    c = store.get("planChains/p1")
+    assert list(c["running"]) == ["S3"] and "side" not in store.get(f"commands/{c['running']['S3']}")
+
+
+def test_max_n_caps_how_many_go_at_once():
+    store = FakeStore()
+    plan(store)
+    store.put_many({"planPicks/p1": {"planId": "p1", "maxTogether": 2, "steps": {s: {"together": True} for s in ("S1", "S2", "S3")}}})
+    ch = Chains(store, "PC", Push())
+    ch.resume()
+    c = store.get("planChains/p1")
+    assert sorted(c["running"]) == ["S1", "S2"]
+    report(store, "S1", "done")
+    store.update(f"commands/{c['running']['S1']}", {"status": "done"})
+    ch.resume()
+    assert sorted(store.get("planChains/p1")["running"]) == ["S2", "S3"]
+
+
+def test_a_heavy_step_runs_alone_even_when_ticked():
+    """The owner's pick, 2026-11-16: "Heavy tick: runs alone"."""
+    store = FakeStore()
+    plan(store)
+    store.put_many({"planPicks/p1": {"planId": "p1", "maxTogether": 3, "steps": {
+        "S1": {"together": True, "heavy": True}, "S2": {"together": True}, "S3": {"together": True}}}})
+    ch = Chains(store, "PC", Push())
+    ch.resume()
+    c = store.get("planChains/p1")
+    assert list(c["running"]) == ["S1"] and "side" not in store.get(f"commands/{c['running']['S1']}")
+    report(store, "S1", "done")
+    store.update(f"commands/{c['running']['S1']}", {"status": "done"})
+    ch.resume()
+    assert sorted(store.get("planChains/p1")["running"]) == ["S2", "S3"]
+
+
+def test_a_fail_stops_new_starts_and_the_running_ones_finish():
+    store, push = FakeStore(), Push()
+    plan(store)
+    store.put_many({"planPicks/p1": {"planId": "p1", "maxTogether": 2, "steps": {s: {"together": True} for s in ("S1", "S2", "S3")}}})
+    ch = Chains(store, "PC", push)
+    ch.resume()
+    c = store.get("planChains/p1")
+    report(store, "S1", "failed")
+    store.update(f"commands/{c['running']['S1']}", {"status": "done"})
+    ch.resume()
+    c = store.get("planChains/p1")
+    assert c["state"] == "on" and list(c["running"]) == ["S2"] and "reported it failed" in c["failing"]
+    report(store, "S2", "done")
+    store.update(f"commands/{c['running']['S2']}", {"status": "done"})
+    ch.resume()
+    c = store.get("planChains/p1")
+    assert c["state"] == "stopped" and c["stepId"] == "S1" and "reported it failed" in c["reason"]
+    assert not any(k.startswith("commands/") and v.get("stepId") == "S3" for k, v in store.docs.items())

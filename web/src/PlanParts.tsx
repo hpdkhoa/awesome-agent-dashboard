@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  PLAN_KINDS, runAllSteps, runStep, sendPlanMessage, setStepPick, stopChain, useHarness, usePlanChain, usePlanPicks, usePlanSteps,
+  PLAN_KINDS, runAllSteps, runStep, sendPlanMessage, setMaxTogether, setStepPick, stopChain, useHarness, usePlanChain, usePlanPicks, usePlanSteps,
   EFFORTS, exactEffort, exactModel, MODELS, useRunPrefs, type Fresh, type PlanPicks, type StepPick,
   checkTicked, runCheck, saveCheckCommand, tickCheck, useStepChecks, type StepCheck,
   type InboxItem, type Parts, type Plan, type PlanGenerated, type PlanKind, type PlanStep, type PlanVersion, type Run,
@@ -436,7 +436,8 @@ function KeptExample({ q, o, cwd }: { q: InboxItem; o: InboxItem["options"][numb
 type StepRow = Parts["steps"][number];
 const pickOf = (picks: PlanPicks | null, id: string, prefs: { model?: string; effort?: string } | null) => {
   const p = picks?.steps?.[id] ?? {};
-  return { model: p.model || exactModel(prefs?.model), effort: p.effort || exactEffort(prefs?.effort), fresh: (p.fresh ?? "auto") as Fresh };
+  return { model: p.model || exactModel(prefs?.model), effort: p.effort || exactEffort(prefs?.effort), fresh: (p.fresh ?? "auto") as Fresh,
+    together: !!p.together, heavy: !!p.heavy };
 };
 
 function StepBar({ plan, rows, steps, runs, harness, picks }: {
@@ -456,6 +457,8 @@ function StepBar({ plan, rows, steps, runs, harness, picks }: {
   const left = rows.filter((r) => !done(r.id)).length;
   const w = step ? pickOf(picks, step.id, prefs) : null;
   const fail = (e: { code?: string }) => setError(String(e?.code ?? e));
+  const max = picks?.maxTogether ?? 2;
+  const together = rows.filter((r) => picks?.steps?.[r.id]?.together).length;
   return (
     <div className="run-all step-bar">
       <select value={id} onChange={(e) => setPick(e.target.value)} aria-label="step">
@@ -469,10 +472,17 @@ function StepBar({ plan, rows, steps, runs, harness, picks }: {
         <button disabled={!left} title={left ? "Each step runs with its own row in Per-step picks" : "Every step is done; rerun one by hand"}
           onClick={() => runAllSteps(plan).catch(fail)}>Run all steps ({left} not done)</button>
       )}
+      <label className="small" title="How many steps ticked Together may run at once (each in its own fresh session)">
+        max at once{" "}
+        <select value={max} onChange={(e) => setMaxTogether(plan.id, Number(e.target.value)).catch(fail)} aria-label="max at once">
+          {[1, 2, 3, 4].map((k) => <option key={k} value={k}>{k}</option>)}
+        </select>
+      </label>
+      {together > 0 && <span className="small muted">{together} ticked Together</span>}
       {w && <span className="small muted">{id}: Claude · {w.model} · {w.effort} · handoff {w.fresh}</span>}
       {chain && (
         <span className={"status " + (on ? "running" : chain.state === "done" ? "done" : "failed")}>
-          {on ? `running ${chain.stepId ?? "…"}${chain.left ? ` · ${chain.left} left` : ""}` : chain.state === "done" ? `all done · ${chain.reason ?? ""}` : `stopped · ${chain.reason ?? ""}`}
+          {on ? `${chain.failing ? "stopping after the runs going" : "running"} ${Object.keys(chain.running ?? {}).join(", ") || chain.stepId || "…"}${chain.left ? ` · ${chain.left} left` : ""}` : chain.state === "done" ? `all done · ${chain.reason ?? ""}` : `stopped · ${chain.reason ?? ""}`}
         </span>
       )}
       {error && <span className="bad small"> {error}</span>}
@@ -488,9 +498,11 @@ function PicksTable({ plan, rows, picks }: { plan: Plan; rows: StepRow[]; picks:
     setStepPick(plan.id, id, { ...pickOf(picks, id, prefs), ...change }).catch((e) => setError(String(e?.code ?? e)));
   const saved = rows.filter((r) => picks?.steps?.[r.id]).length;
   return (
-    <Section id="plan.steps.picks" title="Per-step picks" extra={`runner, model, effort, handoff · ${saved} of ${rows.length} set, the rest follow the Runs tab`} open={false}>
+    <Section id="plan.steps.picks" title="Per-step picks" extra={`runner, model, effort, handoff, together, heavy · ${saved} of ${rows.length} set, the rest follow the Runs tab`} open={false}>
       <table className="picks">
-        <thead><tr><th>Step</th><th>Runner</th><th>Model</th><th>Effort</th><th>Handoff</th></tr></thead>
+        <thead><tr><th>Step</th><th>Runner</th><th>Model</th><th>Effort</th><th>Handoff</th>
+          <th title="May run beside other ticked steps, each in its own fresh session">Together</th>
+          <th title="Blender, Unreal, GPU: runs alone, even when ticked Together">Heavy</th></tr></thead>
         <tbody>
           {rows.map((r) => {
             const w = pickOf(picks, r.id, prefs);
@@ -521,6 +533,8 @@ function PicksTable({ plan, rows, picks }: { plan: Plan; rows: StepRow[]; picks:
                     <option value="never">resume as is</option>
                   </select>
                 </td>
+                <td><input type="checkbox" checked={w.together} aria-label={`${r.id} together`} onChange={(e) => set(r.id, { together: e.target.checked })} /></td>
+                <td><input type="checkbox" checked={w.heavy} aria-label={`${r.id} heavy`} onChange={(e) => set(r.id, { heavy: e.target.checked })} /></td>
               </tr>
             );
           })}

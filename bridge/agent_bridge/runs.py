@@ -998,7 +998,8 @@ class Runs:
                                                   "permissionMode": mode, "model": model, "effort": effort,
                                                   "sessionId": new_sid, "freshFrom": sid, "contextTokens": context, "waitReason": None})
         self._answer_back(c, {"waitReason": None})
-        if plan_id and self.store.get(f"plans/{plan_id}"):
+        # a step run beside others (chain.py, async) works in its own session; the plan keeps its session
+        if plan_id and not c.get("side") and self.store.get(f"plans/{plan_id}"):
             self.store.update(f"plans/{plan_id}", {"sessionId": new_sid, "previousSessionId": sid, "updatedAt": now_iso()})
         return f"{c['id']}: fresh session {new_sid} with a handoff from {sid} ({context:,} tokens of context)"
 

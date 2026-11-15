@@ -735,3 +735,16 @@ def test_a_command_can_carry_its_own_mode(tmp_path, monkeypatch):
     cmd(store, "c2", action="start", folder=str(work), prompt="hello")
     runs.step()
     assert store.get("commands/c2")["permissionMode"] == "manual"
+
+
+def test_a_side_step_run_gets_its_own_session_and_the_plan_keeps_its_own(tmp_path, monkeypatch):
+    """Async steps (chain.py): a step run beside others starts a fresh session; the plan's session does not move."""
+    store, runs, work = setup(tmp_path, monkeypatch)
+    store.put_many({"plans/pl": {"id": "pl", "sessionId": "main-session", "status": "open", "kind": "parts", "format": 1}})
+    cmd(store, "a1", action="message", sessionId="main-session", cwd=str(work), prompt="Work on step S2", planId="pl",
+        stepId="S2", fresh="always", side=True, chain=True)
+    runs.step()
+    c = store.get("commands/a1")
+    assert c["freshFrom"] == "main-session" and c["sessionId"] != "main-session"
+    assert store.get("plans/pl")["sessionId"] == "main-session"
+    wait_done(runs, "a1", store)
