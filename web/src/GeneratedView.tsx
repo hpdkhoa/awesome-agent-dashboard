@@ -1,7 +1,8 @@
 import { usePlanGenerated, type Plan, type PlanVersion } from "./data";
 import { LocalImg, openFile } from "./FileView";
 import { kindName, KINDS, type Kind } from "./planCheck";
-import { Section } from "./Section";
+import { FoldAll, Section } from "./Section";
+import { useContext } from "react";
 import { dt } from "./fmt";
 
 // The plan's Generated section (the owner's words, 2026-11-04: "not new version because the generated just is the
@@ -12,6 +13,7 @@ const PIC = /\.(png|jpe?g|gif|webp|svg|avif|bmp)$/i;
 
 export function GeneratedSection({ plan, v, stale }: { plan: Plan; v: PlanVersion; stale?: string }) {
   const rec = usePlanGenerated(plan.id);
+  const foldAll = useContext(FoldAll);
   const files = rec?.versions?.[`v${v.n}`] ?? [];
   // earlier versions' files stay with their own version; listed closed, newest first
   const earlier = Object.entries(rec?.versions ?? {})
@@ -38,7 +40,7 @@ export function GeneratedSection({ plan, v, stale }: { plan: Plan; v: PlanVersio
       {kinds.map((k) => {
         const mine = files.filter((f) => f.kind === k);
         return (
-          <details key={k} className="gen-kind" open>
+          <details key={k} className="gen-kind" open={!foldAll}>
             <summary><b>{KINDS.some((x) => x.id === k) ? kindName(k as Kind) : k}</b> <span className="small muted">{mine.length}</span></summary>
             {mine.map((f) => (
               <figure key={f.file} className="gen-figure">

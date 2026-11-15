@@ -166,3 +166,10 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
 .evidence-pic img { width: 100%; height: auto; display: block; cursor: zoom-in; }
 .evidence-pic figcaption { padding: 0.25rem 0.125rem 0; overflow-wrap: anywhere; }
 @media (max-width: 560px) { .evidence-grid { grid-template-columns: minmax(0, 1fr); } }
+
+/* Run reports (2026-11-15, "A + exact report fields"): the board keeps its columns, a sorted reply line keeps its depth */
+.report-board { table-layout: fixed; width: 100%; }
+.report-board td, .report-board th { overflow-wrap: anywhere; vertical-align: top; }
+.report-board th:nth-child(2), .report-board th:nth-child(6), .report-board th:nth-child(7) { width: 5.5em; }
+.report-line.sub { margin-left: 1.4em; }
+.report-line p, .report-line ul { margin: 0; }

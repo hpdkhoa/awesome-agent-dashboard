@@ -211,6 +211,42 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+
+# The run report's fields (the owner's pick, 2026-11-15: "A + exact report fields"; the owner's words: "I want better
+# report but not losing data"): what was built, the numbers with how each was measured, the tests with their result,
+# and what is not done with its fix. The reply stays whole beside them.
+REPORT_FIELDS = {"numbers": ("metric", "before", "after", "how"), "tests": ("method", "result"), "not_done": ("item", "fix")}
+
+
+def clean_report(report: dict | None) -> dict:
+    report = report or {}
+    out: dict = {}
+    built = [redact(str(x), 400) for x in report.get("built") or [] if str(x).strip()]
+    if built:
+        out["built"] = built[:30]
+    for k, keys in REPORT_FIELDS.items():
+        rows = []
+        for r in report.get(k) or []:
+            if not isinstance(r, dict):
+                raise ValueError(f"{k}: each row is an object with " + ", ".join(keys))
+            row = {key: redact(str(r.get(key) or ""), 400) for key in keys}
+            if row[keys[0]].strip():
+                rows.append(row)
+        if rows:
+            out[k] = rows[:40]
+    return out
+
+
+def report_text(rep: dict) -> str:
+    """The report as short lines: the inbox result's text."""
+    if not rep:
+        return ""
+    lines = [f"- Built: {b}" for b in rep.get("built", [])]
+    lines += [f"- {r['metric']}: {r['before'] or '-'} -> {r['after']} ({r['how']})" for r in rep.get("numbers", [])]
+    lines += [f"- Test: {r['method']}: {r['result']}" for r in rep.get("tests", [])]
+    lines += [f"- Not done: {r['item']}" + (f" -> {r['fix']}" if r["fix"] else "") for r in rep.get("not_done", [])]
+    return chr(10).join(lines)
+
 class Inbox:
     """Inbox operations on any store with get, update, put_many and where (Firestore, or a fake in tests)."""
 
@@ -348,11 +384,15 @@ class Inbox:
         return n
 
     def step_update(self, plan_id: str, step_id: str, state: str, reply: str, check_command: str = "",
-                    evidence: list[str] | None = None) -> int:
+                    evidence: list[str] | None = None, report: dict | None = None) -> int:
         """A step version: the step's state and the session's reply on it. Never a plan version (the owner's words:
         "not moving step"). Questions asked while a step is "now" join that step. Returns the step version number."""
         if state not in STEP_STATES:
             raise ValueError("state is one of " + ", ".join(STEP_STATES))
+        rep = clean_report(report)
+        if state == "done" and (not rep.get("numbers") or not rep.get("tests")):
+            raise ValueError("A done report needs its numbers (metric, before, after, how measured) and its tests (method, "
+                             "result), the owner's pick 2026-11-15 \"A + exact report fields\". Add them and report again.")
         plan = self.store.get(f"plans/{plan_id}")
         if not plan:
             raise ValueError(f"no plan {plan_id}")
@@ -364,7 +404,7 @@ class Inbox:
         versions = list((self.store.get(path) or {}).get("versions") or [])
         n = len(versions) + 1
         versions.append({"n": n, "state": state, "reply": redact(reply, 8000), "at": now_iso(),
-                         "planVersion": int(plan.get("current", 0))})
+                         "planVersion": int(plan.get("current", 0)), **({"report": rep} if rep else {})})
         self.store.put_many({path: {"id": f"{plan_id}_{step_id}", "planId": plan_id, "stepId": step_id, "state": state,
                                     "versions": versions, "updatedAt": now_iso()}})
         # step i8: the session proposes the step's check command; a done report asks the bridge to run it if ticked
@@ -381,7 +421,7 @@ class Inbox:
         if state in ("done", "failed"):
             # the report as a result to review in the inbox (the owner's choice, 2026-11-15: "v7 data + code fix"; the
             # owner's words: "the result report is not visible"); its push replaces the step's own push
-            self.post("result", f"Step {state}: {step_id} · {steps[step_id]['title']}", reply, files=evidence or [],
+            self.post("result", f"Step {state}: {step_id} · {steps[step_id]['title']}", report_text(rep) or reply, files=evidence or [],
                       extra={"planId": plan_id, "stepId": step_id, "round": int(plan.get("current", 0)), "stepVersion": n})
         return n
 
@@ -854,7 +894,9 @@ def server():
 
     @mcp.tool()
     async def step_update(step_id: str, state: str, reply: str, plan_id: str = "", check_command: str = "",
-                          evidence: list[str] | None = None) -> str:
+                          evidence: list[str] | None = None, built: list[str] | None = None,
+                          numbers: list[dict] | None = None, tests: list[dict] | None = None,
+                          not_done: list[dict] | None = None) -> str:
         """Report on one step of the plan: state next, now, done or failed, and your reply (what was done, the
         numbers, what is open). A step version; never a plan version. Questions asked while a step is now join it.
         check_command: propose one PowerShell command that checks this step (run in the plan's folder, 10 min max,
@@ -862,12 +904,20 @@ def server():
         page's Run check; a non-zero exit after done turns the step failed.
         evidence: on a done report, the paths of the pictures that show the step's feature working (screenshots,
         renders), taken before reporting; the owner wants pictures, not text. None attached: the bridge starts a
-        picture run."""
+        picture run.
+        The run report card (required on done, the owner's pick "A + exact report fields"):
+        built: short lines, what was built (files, commit).
+        numbers: [{"metric", "before", "after", "how"}]: each measured number, before and after ("" when none), and how
+        it was measured; at least one on done.
+        tests: [{"method", "result"}]: each test or check run and its result ("pytest tests/x.py", "16 pass"); at least
+        one on done.
+        not_done: [{"item", "fix"}]: what is not done and the suggestion or question to solve it."""
         plan_id = plan_id or ((await asyncio.to_thread(inbox.open_plan)) or {}).get("id", "")
         if not plan_id:
             return "No plan in this session."
         try:
-            n = await asyncio.to_thread(inbox.step_update, plan_id, step_id, state, reply, check_command, evidence)
+            report = {"built": built, "numbers": numbers, "tests": tests, "not_done": not_done}
+            n = await asyncio.to_thread(inbox.step_update, plan_id, step_id, state, reply, check_command, evidence, report)
         except ValueError as e:
             return str(e)
         return f"Saved step version {n} of {step_id} ({state})."

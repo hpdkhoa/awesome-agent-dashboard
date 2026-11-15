@@ -35,7 +35,7 @@ function Gallery({ set, cwd, marks }: { set: EvidenceSet; cwd: string; marks?: S
   );
 }
 
-function StepEvidenceCard({ plan, id, title, done, e }: { plan: Plan; id: string; title: string; done: boolean; e?: StepEvidence }) {
+export function StepEvidenceCard({ plan, id, title, done, e }: { plan: Plan; id: string; title: string; done: boolean; e?: StepEvidence }) {
   const [err, setErr] = useState("");
   const sets = e?.sets ?? [];
   const last = sets[0];

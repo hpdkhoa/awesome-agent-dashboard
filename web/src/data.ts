@@ -123,7 +123,14 @@ export const PLAN_KINDS: [PlanKind, string][] = [
 // A step version: each report on a step, its state and the session's reply (no plan version).
 export type PlanStep = {
   id: string; planId: string; stepId: string; state: "next" | "now" | "done" | "failed"; updatedAt: string;
-  versions: { n: number; state: string; reply: string; at: string; planVersion: number }[];
+  versions: { n: number; state: string; reply: string; at: string; planVersion: number; report?: StepReport }[];
+};
+// The run report's fields (bridge inbox.py clean_report; the owner's pick, 2026-11-15: "A + exact report fields").
+export type StepReport = {
+  built?: string[];
+  numbers?: { metric: string; before: string; after: string; how: string }[];
+  tests?: { method: string; result: string }[];
+  not_done?: { item: string; fix: string }[];
 };
 // madeBy: the answers that made this version, as they were then; parent: the version it grew from (a branch when older).
 export type Decision = { id: string; title: string; choice: string; text: string };

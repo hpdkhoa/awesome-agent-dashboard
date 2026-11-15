@@ -85,7 +85,7 @@ def test_step_update_done_takes_the_attached_pictures(tmp_path):
     store, _, work = make(tmp_path, None)
     (work / "p.png").write_bytes(PNG)
     ib = Inbox(store, "PC", [], "s1", "/x")
-    ib.step_update("p1", "S1", "done", "built", evidence=["p.png"])
+    ib.step_update("p1", "S1", "done", "built", evidence=["p.png"], report={"numbers": [{"metric": "m", "after": "1"}], "tests": [{"method": "t", "result": "pass"}]})
     assert store.get("planEvidence/p1_S1")["sets"][0]["pictures"] == [str((work / "p.png").resolve())]
 
 

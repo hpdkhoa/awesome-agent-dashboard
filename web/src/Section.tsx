@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { createContext, useContext, useState, type ReactNode } from "react";
 import { getSettings } from "./prefs";
 
 const KEY = "aad.sections";
@@ -10,6 +10,11 @@ function remembered(): Record<string, boolean> {
     return {};
   }
 }
+
+// Inside a plan page every section, card and step starts folded, whatever this browser remembered or the Settings tab
+// says (the owner's words, 2026-11-15: "make sure every section every card every step every category got the collapsed
+// as default and I'll open them manually"; the pick: "Fold all, always").
+export const FoldAll = createContext(false);
 
 // A section with a header that collapses and expands it. The open or closed state of each section id is remembered
 // in this browser, so the page opens the way it was left.
@@ -31,7 +36,8 @@ export function Section({
   children: ReactNode;
 }) {
   // a section this browser never folded or opened starts as the Settings tab says (Sections start: Open or Folded)
-  const [isOpen, setOpen] = useState<boolean>(() => remembered()[id] ?? (getSettings().foldDefault ? false : open));
+  const foldAll = useContext(FoldAll);
+  const [isOpen, setOpen] = useState<boolean>(() => (foldAll ? false : remembered()[id] ?? (getSettings().foldDefault ? false : open)));
 
   function toggle() {
     const next = !isOpen;

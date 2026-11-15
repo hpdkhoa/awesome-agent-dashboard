@@ -11,6 +11,8 @@ from test_inbox import FakeStore
 ROOT = os.path.dirname(os.path.abspath(__file__))
 
 
+REP = {"numbers": [{"metric": "m", "after": "1"}], "tests": [{"method": "t", "result": "pass"}]}
+
 def setup(store, cmd="exit 0", tick=True, cwd=ROOT):
     plan(store)
     store.update("plans/p1", {"cwd": cwd})
@@ -78,13 +80,13 @@ def test_a_done_report_queues_a_ticked_check_and_a_proposal_unticks_a_changed_co
     store = FakeStore()
     setup(store, cmd="npm test")
     ib = Inbox(store, "PC", [("t", ROOT)], "s1", ROOT)
-    ib.step_update("p1", "S1", "done", "built")
+    ib.step_update("p1", "S1", "done", "built", report=REP)
     q = [c for c in store.where("commands", "action", "step_check")]
     assert len(q) == 1 and q[0]["trigger"] == "done" and store.get("planChecks/p1_S1")["state"] == "queued"
     ib.step_update("p1", "S1", "now", "again", check_command="npm test -- --bail")
     rec = store.get("planChecks/p1_S1")
     assert rec["command"] == "npm test -- --bail" and rec["proposedBy"] == "session" and not ticked(rec)
-    ib.step_update("p1", "S1", "done", "built")
+    ib.step_update("p1", "S1", "done", "built", report=REP)
     assert len(store.where("commands", "action", "step_check")) == 1  # not ticked: nothing queued
 
 

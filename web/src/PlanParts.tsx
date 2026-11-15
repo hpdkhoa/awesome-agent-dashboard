@@ -19,10 +19,11 @@ import { GeneratedSection } from "./GeneratedView";
 import { buildNote } from "./harness";
 import { RunList, RunWithPicker } from "./Runs";
 import type { RunWith } from "./data";
-import { Section } from "./Section";
+import { FoldAll, Section } from "./Section";
 import { Clamp } from "./Clamp";
-import { EvidenceSection } from "./EvidenceView";
-import { useStepEvidence } from "./data";
+import { StepEvidenceCard } from "./EvidenceView";
+import { boardCells, openItems, sortCheck, sortReply, type Item, type Sorted } from "./reportSort";
+import { useStepEvidence, type StepEvidence, type StepReport } from "./data";
 import { dt, tm } from "./fmt";
 
 // A plan with six parts (plan from a session; the owner's words, 2026-11-03, in cc/dashboard/SESSION_PLAN.md).
@@ -159,63 +160,185 @@ function OnMessages({ runs, plan, where }: { runs: Run[]; plan: Plan; where: On 
   );
 }
 
-// 7. Results: one card per step run, newest first, grouped by the plan version that was current when it ran (the
-// owner's words, 2026-11-10: "where I can see the result of each build or step?"; the pick: "7. Results, one card per
-// run"): step, state, when, the session's reply read whole from the PC, the files approved for that version.
-function ResultsSection({ plan, v, versions, runs, steps, generated, stale }: {
-  plan: Plan; v: PlanVersion; versions: PlanVersion[]; runs: Run[]; steps: PlanStep[]; generated: PlanGenerated | null; stale?: string;
-}) {
-  // a Run step, or your answer to a question on a step (it can close the step: "Close s2 with this PC only")
-  const stepOf = (r: Run) => (r.stepId && !r.kind ? r.stepId : r.answerStep) ?? "";
-  const list = runs
-    .filter((r) => r.planId === plan.id && stepOf(r) && r.action === "message")
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  const title = (id: string) => v.parts?.steps.find((s) => s.id === id)?.title ?? "";
-  const report = (r: Run) => {
-    const sv = steps.find((s) => s.stepId === stepOf(r));
-    const after = (sv?.versions ?? []).filter((x) => x.at >= (r.startedAt ?? r.createdAt));
-    return after[0];
-  };
-  const groups = new Map<number, Run[]>();
-  for (const r of list) {
-    const n = versionAt(versions, r.createdAt);
-    groups.set(n, [...(groups.get(n) ?? []), r]);
-  }
+// Run reports (the owner's pick, 2026-11-15: "A + exact report fields"; the owner's words: "I don't see the report
+// result after run and the shortlist of the result, kind of report about the execution plan, what has been built, the
+// benchmarked numbers and the test methods"; "I want better report but not losing data"). A board with one row per step,
+// then one card per step: its report fields (exact when the session gave them, else every reply line placed in one
+// field, "read from the reply"), its pictures, the full reply, older step versions and every run's reply.
+const stepOf = (r: Run) => (r.stepId && !r.kind ? r.stepId : r.answerStep) ?? "";
+const lastOf = (sv?: PlanStep) => sv?.versions[sv.versions.length - 1];
+const md = (t: string, plan: Plan) => <Md text={linkEntries(t, plan)} cwd={plan.cwd} />;
+
+function ReportBoard({ plan, v, steps, evidence }: { plan: Plan; v: PlanVersion; steps: PlanStep[]; evidence: StepEvidence[] }) {
+  const rows = v.parts?.steps ?? [];
+  const done = rows.filter((st) => steps.find((x) => x.stepId === st.id)?.state === "done").length;
   return (
-    <Section id="plan.part.results" title="7. Results" extra={list.length ? `${list.length} step runs` : "none yet"} stale={stale}>
-      {list.length === 0 && <p className="muted small">No step has run yet. Run step on a step in Build, and its result lands here.</p>}
-      {[...groups.entries()].sort((a, b) => b[0] - a[0]).map(([n, rs]) => (
-        <div key={n}>
-          <p className="small muted">on v{n}{n === plan.current ? " · current" : ""}</p>
-          {rs.map((r) => {
-            const rep = report(r);
-            const newest = r.id === list[0].id; // the owner's pick, 2026-11-12, "Both": only the newest card starts open
-            const files = generated?.versions?.[`v${n}`] ?? [];
-            const st = v.parts?.steps.find((s) => s.id === stepOf(r));
+    <Section id="plan.part.board" title="Report board" extra={`${done} of ${rows.length} steps done · one row per step`}>
+      <table className="report-board">
+        <thead><tr><th>Step</th><th>State</th><th>Built</th><th>Key number</th><th>Tested by</th><th>Pics</th><th>Open</th></tr></thead>
+        <tbody>
+          {rows.map((st) => {
+            const sv = steps.find((x) => x.stepId === st.id);
+            const last = lastOf(sv);
+            const pics = evidence.find((e) => e.stepId === st.id)?.sets?.[0]?.pictures.length ?? 0;
+            if (!last) return <tr key={st.id}><td>{st.id} · {st.title}</td><td><span className="status next">next</span></td><td colSpan={5} className="muted small">not started</td></tr>;
+            const c = boardCells(last.reply, last.report);
             return (
-              <Section key={r.id} id={`plan.result.${r.id}`} open={newest}
-                title={<span className="result-head">
-                  <span className={"status " + (rep?.state ?? r.status)}>{rep?.state ?? r.status}</span>
-                  <b>{stepOf(r)} · {title(stepOf(r)) || "step no longer in this version"}</b>
-                  {r.answerStep && <span className="tag" title="The run that took your answer to a question on this step">your answer</span>}
-                  <span className="small muted">ran {when(r.startedAt ?? r.createdAt)}{r.endedAt ? ` → ${when(r.endedAt)}` : ""}</span>
-                </span>}>
-                {st && <p className="small muted">check: {st.check}{rep ? ` → ${rep.state === "done" ? "met, by the session's report" : rep.state}` : " → no report yet"}</p>}
-                {(r.status === "done" || r.status === "lost") && (
-                  <>
-                    <p className="label">Reply</p>
-                    <Clamp><PcText run={r.id} cwd={plan.cwd} /></Clamp>
-                  </>
-                )}
-                {r.status !== "done" && r.status !== "lost" && r.error && <p className="bad small">{r.error}</p>}
-                <p className="small muted">
-                  files approved for v{n}: {files.length ? files.map((f) => <code key={f.file} className="file-link" role="button" onClick={() => openFile(f.file, plan.cwd)}>{f.file.split(/[\\/]/).pop()}</code>).reduce<React.ReactNode[]>((a, x, i) => (i ? [...a, " · ", x] : [x]), []) : "none"}
-                </p>
-              </Section>
+              <tr key={st.id}>
+                <td>{st.id} · {st.title}{!c.exact && <span className="small muted" title="Read from the reply: the report has no fields"> *</span>}</td>
+                <td><span className={"status " + sv!.state}>{sv!.state}</span></td>
+                <td className="small">{c.built || <span className="muted">none</span>}</td>
+                <td className="small">{c.number || <span className="muted">none</span>}</td>
+                <td className="small">{c.tested || <span className="muted">none</span>}</td>
+                <td className="small">{pics}</td>
+                <td className="small">{c.open ? <span className="status waiting">{c.open}</span> : 0}</td>
+              </tr>
             );
           })}
-        </div>
+        </tbody>
+      </table>
+      <p className="small muted">* read from the reply: a report made before the report fields; its card shows every line of it</p>
+    </Section>
+  );
+}
+
+function ItemList({ items, plan }: { items: Item[]; plan: Plan }) {
+  return (
+    <>
+      {items.map((it, i) => it.kind === "table"
+        ? <div key={i}>{md(it.rows.join("\n"), plan)}</div>
+        : <div key={i} className={it.sub ? "report-line sub" : "report-line"}>{md("- " + it.text, plan)}</div>)}
+    </>
+  );
+}
+
+const SORTED_NAMES: [keyof Sorted, string][] = [
+  ["built", "Built"], ["numbers", "Numbers"], ["tests", "Tested by"], ["notDone", "Not done → what to do"],
+  ["pictures", "Pictures named in the reply"], ["notes", "Notes"],
+];
+
+function ExactFields({ r, plan }: { r: StepReport; plan: Plan }) {
+  return (
+    <>
+      {r.built?.length ? <><p className="label">Built</p>{md(r.built.map((b) => `- ${b}`).join("\n"), plan)}</> : null}
+      {r.numbers?.length ? (
+        <>
+          <p className="label">Numbers</p>
+          <table>
+            <thead><tr><th>Metric</th><th>Before</th><th>After</th><th>Measured by</th></tr></thead>
+            <tbody>{r.numbers.map((n, i) => <tr key={i}><td>{md(n.metric, plan)}</td><td>{md(n.before || "-", plan)}</td><td><b>{md(n.after, plan)}</b></td><td className="small">{md(n.how, plan)}</td></tr>)}</tbody>
+          </table>
+        </>
+      ) : null}
+      {r.tests?.length ? (
+        <>
+          <p className="label">Tested by</p>
+          <table>
+            <thead><tr><th>Method</th><th>Result</th></tr></thead>
+            <tbody>{r.tests.map((t, i) => <tr key={i}><td>{md(t.method, plan)}</td><td>{md(t.result, plan)}</td></tr>)}</tbody>
+          </table>
+        </>
+      ) : null}
+      {r.not_done?.length ? <><p className="label">Not done → what to do</p>{md(r.not_done.map((x) => `- ${x.item}${x.fix ? ` → ${x.fix}` : ""}`).join("\n"), plan)}</> : null}
+    </>
+  );
+}
+
+function SortedFields({ reply, plan }: { reply: string; plan: Plan }) {
+  const { fields } = sortReply(reply);
+  const ck = sortCheck(reply);
+  return (
+    <>
+      <p className="small muted">
+        Read from the reply (made before the report fields): {ck.placed} of {ck.lines} lines placed · {ck.numbers} numbers,{" "}
+        {ck.missing.length ? <span className="bad">missing: {ck.missing.join(", ")}</span> : "none missing"} · a line may sit
+        in a near field; the full reply is below
+      </p>
+      {SORTED_NAMES.filter(([k]) => fields[k].length).map(([k, name]) => (
+        <div key={k}><p className="label">{name}</p><ItemList items={fields[k]} plan={plan} /></div>
       ))}
+    </>
+  );
+}
+
+function RunReports({ plan, v, runs, steps, evidence, generated, stale }: {
+  plan: Plan; v: PlanVersion; runs: Run[]; steps: PlanStep[]; evidence: StepEvidence[]; generated: PlanGenerated | null; stale?: string;
+}) {
+  const rows = (v.parts?.steps ?? []).filter((st) => steps.some((x) => x.stepId === st.id && x.versions.length));
+  const stepRuns = runs.filter((r) => r.planId === plan.id && stepOf(r) && r.action === "message")
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return (
+    <Section id="plan.part.reports" title="Run reports" extra={rows.length ? `${rows.length} steps reported` : "none yet"} stale={stale}>
+      {rows.length === 0 && <p className="muted small">No step has reported yet. Run step on a step in Build, and its report lands here.</p>}
+      {rows.map((st) => {
+        const sv = steps.find((x) => x.stepId === st.id)!;
+        const last = lastOf(sv)!;
+        const mine = stepRuns.filter((r) => stepOf(r) === st.id);
+        const files = generated?.versions?.[`v${last.planVersion}`] ?? [];
+        return (
+          <Section key={st.id} id={`plan.report.${plan.id}.${st.id}`}
+            title={<span className="result-head">
+              <span className={"status " + sv.state}>{sv.state}</span>
+              <b>{st.id} · {st.title}</b>
+              <span className="small muted">step version {last.n} · {when(last.at)} · {last.report ? "report fields" : "read from the reply"}</span>
+            </span>}>
+            <p className="small muted">check: {st.check}</p>
+            {last.report ? <ExactFields r={last.report} plan={plan} /> : <SortedFields reply={last.reply} plan={plan} />}
+            <StepEvidenceCard plan={plan} id={st.id} title={`Pictures · ${st.title}`} done={sv.state === "done"} e={evidence.find((e) => e.stepId === st.id)} />
+            <Section id={`plan.report.reply.${plan.id}.${st.id}`} title="Full reply, as written" extra={`${last.reply.length.toLocaleString()} chars`}>
+              {md(last.reply, plan)}
+            </Section>
+            {sv.versions.length > 1 && (
+              <Section id={`plan.report.older.${plan.id}.${st.id}`} title="Older step versions" extra={sv.versions.length - 1}>
+                {sv.versions.slice(0, -1).reverse().map((x) => (
+                  <div key={x.n}>
+                    <p className="small muted">step version {x.n} · {x.state} · {when(x.at)} · on plan v{x.planVersion}</p>
+                    {x.report ? <ExactFields r={x.report} plan={plan} /> : null}
+                    {md(x.reply, plan)}
+                  </div>
+                ))}
+              </Section>
+            )}
+            {mine.length > 0 && (
+              <Section id={`plan.report.runs.${plan.id}.${st.id}`} title="Run replies" extra={`${mine.length} runs`}>
+                {mine.map((r) => (
+                  <Section key={r.id} id={`plan.result.${r.id}`}
+                    title={<span className="result-head">
+                      <span className={"status " + r.status}>{r.status}</span>
+                      {r.answerStep && <span className="tag" title="The run that took your answer to a question on this step">your answer</span>}
+                      <span className="small muted">ran {when(r.startedAt ?? r.createdAt)}{r.endedAt ? ` → ${when(r.endedAt)}` : ""}</span>
+                    </span>}>
+                    {(r.status === "done" || r.status === "lost") && <PcText run={r.id} cwd={plan.cwd} />}
+                    {r.status !== "done" && r.status !== "lost" && r.error && <p className="bad small">{r.error}</p>}
+                  </Section>
+                ))}
+              </Section>
+            )}
+            <p className="small muted">
+              files approved for v{last.planVersion}:{" "}
+              {files.length
+                ? files.map((f) => <code key={f.file} className="file-link" role="button" onClick={() => openFile(f.file, plan.cwd)}>{f.file.split(/[\\/]/).pop()}</code>)
+                    .reduce<React.ReactNode[]>((a, x, i) => (i ? [...a, " · ", x] : [x]), [])
+                : "none"}
+            </p>
+          </Section>
+        );
+      })}
+    </Section>
+  );
+}
+
+// Leftover, open items: every report's "Not done" lines (they cannot go stale), then the plan text's own Leftover.
+function LeftoverSection({ plan, v, steps }: { plan: Plan; v: PlanVersion; steps: PlanStep[] }) {
+  const fromReports = (v.parts?.steps ?? []).flatMap((st) => {
+    const last = lastOf(steps.find((x) => x.stepId === st.id));
+    return last ? openItems(last.reply, last.report).map((t) => ({ step: st.id, t })) : [];
+  });
+  const written = v.parts?.leftover ?? [];
+  return (
+    <Section id="plan.part.open" title="Leftover · open items" extra={`${fromReports.length} from the reports · ${written.length} in the plan text`}>
+      {fromReports.length === 0 && written.length === 0 && <p className="muted small">Nothing open.</p>}
+      {md([...fromReports.map((x) => `- **${x.step}:** ${x.t}`), ...written.map((t) => `- **plan text:** ${t}`)].join("\n"), plan)}
     </Section>
   );
 }
@@ -259,14 +382,15 @@ function DecisionsSection({ plan, versions, asked, onOpenItem }: {
             const chosen = q.options.filter((o) => picked.includes(o.label));
             const others = q.options.filter((o) => !picked.includes(o.label));
             const made = q.answer ? madeIn(q) : undefined;
+            // one line each, the rest folded (the owner's pick, 2026-11-15: "A")
             return (
-              <div key={q.id} className="decision">
-                <p>
-                  <button className="link" onClick={() => onOpenItem(q.id)}>{q.title}</button>{" "}
-                  {q.answer
-                    ? <span className="status done">{q.answer.choice}{made ? ` · made v${made}` : ""} · {dt(q.answer.at)}</span>
-                    : <span className="status waiting">waiting for you</span>}
-                </p>
+              <Section key={q.id} id={`plan.decision.${q.id}`}
+                title={<span>{q.title} → {q.answer
+                  ? <b>{q.answer.choice || "your own answer"}</b>
+                  : <span className="status waiting">waiting for you</span>}
+                  <span className="small muted">{made ? ` · made v${made}` : ""}{q.answer ? ` · ${dt(q.answer.at)}` : ""} · {q.kind}</span></span>}>
+              <div className="decision">
+                <p><button className="link" onClick={() => onOpenItem(q.id)}>Open in the inbox</button></p>
                 {q.answer?.text && <p className="small">Your note: {q.answer.text}</p>}
                 {q.history?.length ? <p className="small muted">Earlier: {q.history.map((h) => h.choice).join(" → ")}</p> : null}
                 {chosen.map((o) => (
@@ -287,6 +411,7 @@ function DecisionsSection({ plan, versions, asked, onOpenItem }: {
                   </Section>
                 )}
               </div>
+              </Section>
             );
           })}
         </div>
@@ -388,7 +513,13 @@ function Part({ k, parts, before, plan }: { k: keyof Parts; parts: Parts; before
     case "leftover":
       return md(parts.leftover.map((x) => `- ${x}`).join("\n") || "none");
     case "steps":
-      return null; // the steps list below shows them with their states
+      // the raw step text, as the session reads it (the Steps section shows them with their states and runs)
+      return (
+        <table>
+          <thead><tr><th>Step</th><th>Does</th><th>Check</th></tr></thead>
+          <tbody>{parts.steps.map((s) => <tr key={s.id}><td>{s.id} · {s.title}</td><td>{md(s.does)}</td><td className="small">{md(s.check)}</td></tr>)}</tbody>
+        </table>
+      );
   }
 }
 
@@ -415,6 +546,7 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
   const stale = staleness(plan, versions, ticks, generated, steps, runs);
   const behind = stale.filter((r) => !r.ok).length;
   return (
+    <FoldAll.Provider value={true}>
     <div ref={root} data-quote-plan={plan.id}>
       <div className="chips">
         {withParts.map((x) => {
@@ -452,17 +584,9 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
         {v.change ? `: ${v.change.message}` : v.note} <MoreMenu path={`planVersions/${plan.id}_v${v.n}`} />
       </p>
 
-      <HarnessSection plan={plan} v={v} parent={parent} stale={staleMark(stale, "harness")} />
+      <ReportBoard plan={plan} v={v} steps={steps} evidence={evidence} />
 
-      {PART_NAMES.filter(([k]) => k !== "steps").map(([k, name]) => (
-        <Section key={k} id={`plan.part.${k}`} title={name} stale={v.n === plan.current ? staleMark(stale, k) : undefined}
-          tools={<PartActions k={k} name={name} lines={partLines(v.parts!, k)} />}>
-          <div data-part={k}>
-            <Part k={k} parts={v.parts!} before={before} plan={plan} />
-          </div>
-          <OnMessages runs={runs} plan={plan} where={{ part: k }} />
-        </Section>
-      ))}
+      <RunReports plan={plan} v={v} runs={runs} steps={steps} evidence={evidence} generated={generated} stale={staleMark(stale, "results")} />
 
       <Section id="plan.part.steps" title="6. Steps" extra={`${v.parts.steps.length} steps`} stale={staleMark(stale, "results")}>
         {before && <DiffBlock a={partLines(before, "steps")} b={partLines(v.parts, "steps")} />}
@@ -472,7 +596,6 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
         )}
         {v.parts.steps.map((st) => {
           const sv = steps.find((x) => x.stepId === st.id);
-          const last = sv?.versions[sv.versions.length - 1];
           const qs = asked.filter((i) => i.stepId === st.id);
           return (
             // the owner's pick, 2026-11-12, "All folded": every step starts folded to its header line
@@ -490,21 +613,6 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
               <Md text={linkEntries(`${st.does}\n\n**Check:** ${st.check}`, plan)} cwd={plan.cwd} />
               <StepCheckBox plan={plan} stepId={st.id} c={checks.find((x) => x.stepId === st.id)} done={sv?.state === "done" || sv?.state === "failed"} />
               <OnMessages runs={runs} plan={plan} where={{ stepId: st.id }} />
-              {last && (
-                <Section id={`plan.step.last.${plan.id}.${st.id}`} title={`Last reply · step version ${last.n}`} extra={when(last.at)}>
-                  <Clamp><Md text={last.reply} cwd={plan.cwd} /></Clamp>
-                </Section>
-              )}
-              {sv && sv.versions.length > 1 && (
-                <Section id={`plan.step.older.${plan.id}.${st.id}`} title="Older step versions" extra={sv.versions.length - 1} open={false}>
-                  {sv.versions.slice(0, -1).reverse().map((x) => (
-                    <div key={x.n}>
-                      <p className="small muted">step version {x.n} · {x.state} · {when(x.at)} · on plan v{x.planVersion}</p>
-                      <Clamp><Md text={x.reply} cwd={plan.cwd} /></Clamp>
-                    </div>
-                  ))}
-                </Section>
-              )}
               {qs.map((q) => (
                 <p key={q.id} className="small">
                   <button className="link" onClick={() => onOpenItem(q.id)}>{q.title}</button>{" "}
@@ -517,22 +625,11 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
         })}
       </Section>
 
-      <ResultsSection plan={plan} v={v} versions={versions} runs={runs} steps={steps} generated={generated} stale={staleMark(stale, "results")} />
-
-      <EvidenceSection plan={plan} v={v} steps={steps} evidence={evidence} />
+      <LeftoverSection plan={plan} v={v} steps={steps} />
 
       <DecisionsSection plan={plan} versions={versions} asked={asked} onOpenItem={onOpenItem} />
 
-      {(v.parts.cite || before?.cite) && (
-        // the owner's words, 2026-11-05: "move what the plan read ... out into the cite section like generated section"
-        <Section id="plan.part.cite" title="Cite" extra="your words this plan reads" open={false}
-          tools={<PartActions k="cite" name="Cite" lines={partLines(v.parts!, "cite")} />}>
-          <div data-part="cite">
-            <Part k="cite" parts={v.parts} before={before} plan={plan} />
-          </div>
-          <OnMessages runs={runs} plan={plan} where={{ part: "cite" }} />
-        </Section>
-      )}
+      <HarnessSection plan={plan} v={v} parent={parent} stale={staleMark(stale, "harness")} />
 
       <GeneratedSection plan={plan} v={v} stale={staleMark(stale, "generated")} />
 
@@ -551,7 +648,35 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
           </ul>
         </Section>
       )}
+
+      {/* the plan text as the session reads it, at the end (the owner's words, 2026-11-15: "the 'Plan text folded,
+          unchanged' should be show in the end so I still can see the raw data which LLM can see as its database") */}
+      <Section id="plan.part.raw" title="Plan text · raw, as the session reads it" extra={`v${v.n} · goal, summary, rules, lessons, leftover, steps`}>
+
+      {PART_NAMES.map(([k, name]) => (
+        <Section key={k} id={`plan.part.${k}`} title={name} stale={v.n === plan.current ? staleMark(stale, k) : undefined}
+          tools={<PartActions k={k} name={name} lines={partLines(v.parts!, k)} />}>
+          <div data-part={k}>
+            <Part k={k} parts={v.parts!} before={before} plan={plan} />
+          </div>
+          <OnMessages runs={runs} plan={plan} where={{ part: k }} />
+        </Section>
+      ))}
+
+      {(v.parts.cite || before?.cite) && (
+        // the owner's words, 2026-11-05: "move what the plan read ... out into the cite section like generated section"
+        <Section id="plan.part.cite" title="Cite" extra="your words this plan reads" open={false}
+          tools={<PartActions k="cite" name="Cite" lines={partLines(v.parts!, "cite")} />}>
+          <div data-part="cite">
+            <Part k="cite" parts={v.parts} before={before} plan={plan} />
+          </div>
+          <OnMessages runs={runs} plan={plan} where={{ part: "cite" }} />
+        </Section>
+      )}
+
+      </Section>
     </div>
+    </FoldAll.Provider>
   );
 }
 
