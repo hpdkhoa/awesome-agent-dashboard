@@ -22,6 +22,7 @@ import { RunList, RunWithPicker } from "./Runs";
 import type { RunWith } from "./data";
 import { FoldAll, Section } from "./Section";
 import { Clamp } from "./Clamp";
+import { usePhone } from "./phone";
 import { StepEvidenceCard } from "./EvidenceView";
 import { keyNumber, openItems, sortCheck, sortReply, type Item, type Sorted } from "./reportSort";
 import { useStepEvidence, type StepEvidence, type StepReport } from "./data";
@@ -815,6 +816,13 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
 // an edit unticks it. Its last run shows the exit code, the time and the last lines of output.
 function StepCheckBox({ plan, stepId, c, done }: { plan: Plan; stepId: string; c?: StepCheck; done: boolean }) {
   const [text, setText] = useState(c?.command ?? "");
+  const phone = usePhone();
+  // the box grows to its whole wrapped text (measured, not guessed from the length)
+  const grow = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const t = grow.current;
+    if (t) (t.style.height = "auto", t.style.height = t.scrollHeight + 2 + "px");
+  }, [text, phone]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   useEffect(() => setText(c?.command ?? ""), [c?.command]);
@@ -836,7 +844,14 @@ function StepCheckBox({ plan, stepId, c, done }: { plan: Plan; stepId: string; c
     <div className="stepcheck" data-check={stepId}>
       <div className="stepcheck-row">
         <span className="small muted">Check command{c?.proposedBy ? ` (${c.proposedBy === "session" ? "proposed by the session" : "edited by you"})` : ""}</span>
-        <input className="mono" value={text} placeholder="none yet: the session proposes one, or type it" onChange={(e) => setText(e.target.value)} />
+        {/* the owner's pick, 2026-11-16: "2-line box on phones", note "make it become text wrap so can display multiple
+            lines": on a phone the command wraps and the box grows to show all of it; desktop keeps one line */}
+        {phone ? (
+          <textarea ref={grow} className="mono" value={text} rows={2}
+            placeholder="none yet: the session proposes one, or type it" onChange={(e) => setText(e.target.value.replace(/\n/g, " "))} />
+        ) : (
+          <input className="mono" value={text} placeholder="none yet: the session proposes one, or type it" onChange={(e) => setText(e.target.value)} />
+        )}
         {changed && <button disabled={busy || !text.trim()} onClick={() => act(() => saveCheckCommand(plan.id, stepId, text))}>Save</button>}
         {c?.command && !changed && (
           <label className="small stepcheck-tick">

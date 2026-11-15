@@ -153,7 +153,12 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
 .check-chip.pass { background: var(--live); color: var(--bg); }
 .check-chip.fail { background: var(--bad); color: var(--bg); }
 .check-out { margin: 0.25rem 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-@media (max-width: 560px) { .stepcheck-row > input.mono { font-size: 1rem; } }
+@media (max-width: 560px) {
+  .stepcheck-row > input.mono, .stepcheck-row > textarea.mono { font-size: 1rem; }
+  /* the owner's note, 2026-11-16: the command wraps over several lines on a phone */
+  .stepcheck-row > textarea.mono { flex: 1 1 100%; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere;
+    resize: vertical; padding: 0.25rem 0.5rem; border-radius: 6px; border: 1px solid var(--line); background: var(--card); color: inherit; }
+}
 
 /* 8. Evidence: a picture gallery per step, each picture with its LLM mark (EvidenceView.tsx) */
 .check-chip.unclear { background: var(--wait-fg); color: var(--bg); }
