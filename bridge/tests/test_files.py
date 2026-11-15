@@ -85,3 +85,19 @@ def test_download_sends_the_file_as_an_attachment(site):
     assert st == 200 and body.startswith(b"<img")
     assert h["Content-Disposition"] == "attachment; filename=\"page.html\"; filename*=UTF-8''page.html"
     assert "Content-Disposition" not in call(base, t["url"])[1]  # the viewer itself still shows it inline
+
+
+def test_list_shows_one_folder_inside_work_roots_for_the_file_picker(site):
+    """s5 (plan 1c08f4c2): the local run's file picker."""
+    base, root, _ = site
+    st, _, body = call(base, "/list", {"folder": ""})
+    assert st == 200 and [e["path"] for e in json.loads(body)["entries"]] == [str(root)]
+    d = json.loads(call(base, "/list", {"folder": str(root)})[2])
+    names = [e["name"] for e in d["entries"]]
+    assert names == ["web"] and d["parent"] == ""  # .env is never listed; the root's parent is the roots list
+    d = json.loads(call(base, "/list", {"folder": str(root / "web")})[2])
+    assert [(e["name"], e["dir"]) for e in d["entries"]] == [("img", True), ("page.html", False)]
+    assert d["entries"][1]["kind"] == "html" and d["entries"][1]["size"] == 21 and d["parent"].endswith("work")
+    assert call(base, "/list", {"folder": str(root.parent)})[0] == 400  # outside WORK_ROOTS
+    assert call(base, "/list", {"folder": str(root / "none")})[0] == 404
+    assert call(base, "/list", {"folder": str(root)}, token="someone")[0] == 401

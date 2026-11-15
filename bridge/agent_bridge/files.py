@@ -51,6 +51,7 @@ KINDS = {
 
 # never served, even inside WORK_ROOTS: env files, keys, credentials
 SECRET_NAMES = (".env", "id_rsa", "id_ed25519", "credentials", ".npmrc", ".netrc", ".pypirc")
+LIST_MAX = 500  # entries one folder listing sends (s5 file picker)
 SECRET_EXTS = {".pem", ".key", ".p12", ".pfx", ".keystore", ".jks"}
 
 
@@ -135,6 +136,34 @@ class Files:
             raise ValueError("a secret file is never sent")
         return root, os.path.relpath(real, os.path.realpath(root)).replace(os.sep, "/")
 
+    def listing(self, token: str, folder: str) -> dict:
+        """s5 (plan 1c08f4c2) the local run's file picker: one folder's entries, folders first. No folder: the WORK_ROOTS
+        themselves. A folder outside WORK_ROOTS is refused; secret files are never listed; at most LIST_MAX entries."""
+        self.verify(token)
+        if not folder.strip():
+            return {"folder": "", "parent": None, "entries": [{"name": r, "path": r, "dir": True} for r in self.roots]}
+        full = os.path.realpath(clean(folder))
+        root = next((r for r in self.roots if inside(full, r)), None)
+        if root is None:
+            raise ValueError("outside WORK_ROOTS")
+        if not os.path.isdir(full):
+            raise ValueError("no such folder")
+        out = []
+        with os.scandir(full) as it:
+            for e in it:
+                try:
+                    d = e.is_dir()
+                    if not d and secret(e.name):
+                        continue
+                    out.append({"name": e.name, "path": os.path.join(full, e.name), "dir": d,
+                                **({} if d else {"size": e.stat().st_size, "kind": kind_of(e.name)})})
+                except OSError:
+                    continue
+        out.sort(key=lambda x: (not x["dir"], x["name"].lower()))
+        top = _norm(full) == _norm(root)
+        return {"folder": full, "parent": "" if top else os.path.dirname(full), "entries": out[:LIST_MAX],
+                "more": max(0, len(out) - LIST_MAX)}
+
     def ticket(self, token: str, path: str, cwd: str) -> dict:
         self.verify(token)
         root, rel = self.resolve(path, cwd)
@@ -206,7 +235,7 @@ def handler(files: Files, origins: list[str], texts=None, usage=None, health=Non
                     return self._json(400, {"error": str(e)})
                 except Exception as e:
                     return self._json(500, {"error": f"the database refused: {type(e).__name__}"})
-            if self.path not in ("/ticket", "/text", "/usage", "/health", "/restart") or (self.path == "/text" and texts is None) or (self.path == "/usage" and usage is None) or (self.path in ("/health", "/restart") and health is None):
+            if self.path not in ("/ticket", "/list", "/text", "/usage", "/health", "/restart") or (self.path == "/text" and texts is None) or (self.path == "/usage" and usage is None) or (self.path in ("/health", "/restart") and health is None):
                 return self._json(404, {"error": "not found"})
             auth = self.headers.get("Authorization", "")
             try:
@@ -224,6 +253,8 @@ def handler(files: Files, origins: list[str], texts=None, usage=None, health=Non
                     if self.path == "/health":
                         return self._json(200, health.answer(body))
                     return self._json(200, health.restart(body, "the owner"))
+                if self.path == "/list":  # s5: the local run's file picker
+                    return self._json(200, files.listing(auth[7:], str(body.get("folder", ""))))
                 self._json(200, files.ticket(auth[7:], str(body.get("path", "")), str(body.get("cwd", ""))))
             except ValueError as e:
                 self._json(404 if str(e).startswith("no ") else 400, {"error": str(e)})

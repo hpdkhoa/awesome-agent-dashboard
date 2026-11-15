@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { forSession, QUOTE_EVENT, takeQuote } from "./quote";
 import {
-  addRoot, newestFirst, PAGE, cancelMessage, checkSession, continueRun, forceMessage, setAutoContinue, planFromSession, PLAN_KINDS, searchRun, sendMessage, setRunMode, startRun, stopRun, useRunMode,
+  addRoot, localRun, newestFirst, PAGE, cancelMessage, checkSession, continueRun, forceMessage, setAutoContinue, planFromSession, PLAN_KINDS, searchRun, sendMessage, setRunMode, startRun, stopRun, useRunMode,
   EFFORTS, exactEffort, exactModel, FRESH_OVER, MODELS, setRunPrefs, useRunPrefs, type Fresh, type RunWith,
-  type Machine, type Run, type Session,
+  type LocalModel, type Machine, type Run, type Session,
 } from "./data";
+import { boxes, bridgePost, postTo } from "./bridge";
 import { num, usd } from "./Dashboard";
 import { Md } from "./Markdown";
 import { LiveText, PcText } from "./FileView";
@@ -56,8 +57,18 @@ export function RunWithPicker({ value, onChange, compact = false, fresh = false 
   );
 }
 
+// plan 1c08f4c2 s5: every machine's local models, as "machine / model" with the model's score (the gate task set, s6)
+const localChoices = (machines: Machine[]) =>
+  machines.flatMap((m) => (m.avatar?.localModels?.models ?? []).map((x) => ({ machine: m.name, model: x })));
+export const scoreText = (x: LocalModel) =>
+  x.score ? `score ${x.score.pass}/${x.score.runs}${x.score.tokensPerSec != null ? `, ${x.score.tokensPerSec} tok/s` : ""}` : "no score yet";
+
 export function StartForm({ machines, plan = false }: { machines: Machine[]; plan?: boolean }) {
   const folders = machines.flatMap((m) => (m.folders ?? []).map((f) => ({ ...f, machine: m.name })));
+  const locals = plan ? [] : localChoices(machines);
+  const [engine, setEngine] = useState("claude"); // "claude", or the index of a local model in locals
+  const local = engine === "claude" ? null : locals[Number(engine)] ?? null;
+  const [files, setFiles] = useState<string[]>([]);
   const [pick, setPick] = useState(0);
   const [w, setW] = useState<RunWith>({});
   const [keep, setKeep] = useState(true);
@@ -66,6 +77,17 @@ export function StartForm({ machines, plan = false }: { machines: Machine[]; pla
   const [busy, setBusy] = useState(false);
 
   async function start() {
+    if (local) {
+      if (!prompt.trim()) return setError("Write what the local model should do first.");
+      setBusy(true);
+      try {
+        await localRun(local.machine, local.model.name, prompt.trim(), files);
+        setPrompt("");
+      } catch (e) {
+        setError(String((e as { code?: string }).code ?? e));
+      }
+      return setBusy(false);
+    }
     const f = folders[pick];
     if (!f) return setError("No registered folder. Set WORK_ROOTS in the bridge's .env.");
     if (!prompt.trim()) return setError("Write what the session should do first.");
@@ -81,15 +103,33 @@ export function StartForm({ machines, plan = false }: { machines: Machine[]; pla
 
   return (
     <Section id={plan ? "plans.start" : "runs.start"} title={plan ? "Start a plan" : "Start a session"}>
-      <select value={pick} onChange={(e) => setPick(Number(e.target.value))}>
-        {folders.map((f, n) => (
-          <option key={n} value={n}>
-            {f.workType} · {f.machine} · {f.path}
-          </option>
-        ))}
-      </select>
-      <RunWithPicker value={w} onChange={setW} />
       {!plan && (
+        <div className="engine-pick" data-mark="engine">
+          <span className="label">Run with</span>
+          <select value={engine} onChange={(e) => (setEngine(e.target.value), setError(""))} aria-label="run with">
+            <option value="claude">Claude Code (your plan)</option>
+            {locals.map((l, n) => (
+              <option key={n} value={String(n)}>
+                {l.machine} / {l.model.name}{l.model.params ? ` · ${l.model.params}` : ""} · {scoreText(l.model)}
+              </option>
+            ))}
+          </select>
+          {!locals.length && <span className="muted small"> no local model published by a bridge yet</span>}
+        </div>
+      )}
+      {local && <p className="small model-score" data-mark="score">{local.machine} / {local.model.name}{local.model.quant ? ` · ${local.model.quant}` : ""} · {scoreText(local.model)}</p>}
+      {!local && (
+        <select value={pick} onChange={(e) => setPick(Number(e.target.value))}>
+          {folders.map((f, n) => (
+            <option key={n} value={n}>
+              {f.workType} · {f.machine} · {f.path}
+            </option>
+          ))}
+        </select>
+      )}
+      {!local && <RunWithPicker value={w} onChange={setW} />}
+      {local && <FilePicker machine={local.machine} picked={files} onChange={setFiles} />}
+      {!plan && !local && (
         <label className="small keep-session">
           <input type="checkbox" checked={keep} onChange={(e) => setKeep(e.target.checked)} /> keep the session
           <span className="muted"> (untick for a one-off job: nothing is saved, no session on the list, no message after)</span>
@@ -98,7 +138,7 @@ export function StartForm({ machines, plan = false }: { machines: Machine[]; pla
       <textarea
         rows={3}
         value={prompt}
-        placeholder={plan ? "What should the plan be about?" : "What should the session do?"}
+        placeholder={plan ? "What should the plan be about?" : local ? "What should the local model answer? The picked files go with it." : "What should the session do?"}
         onChange={(e) => {
           setPrompt(e.target.value);
           setError("");
@@ -108,13 +148,54 @@ export function StartForm({ machines, plan = false }: { machines: Machine[]; pla
       <p className="muted small">
         {plan
           ? "Starts one session on that machine that plans with you: its questions come to the inbox, its versions show here."
-          : "Runs your own Claude Code on that machine. Every tool call that needs approval comes to the inbox."}
+          : local
+            ? `Runs ${local.model.name} on the Ollama of ${local.machine} through its bridge, not Claude Code: prompt in, answer out, no tools. Files only from that machine's work folders. Counted in tokens, $0.`
+            : "Runs your own Claude Code on that machine. Every tool call that needs approval comes to the inbox."}
       </p>
       <button className="primary" disabled={busy} onClick={start}>
-        Start
+        {local ? "Run locally" : "Start"}
       </button>
-      {!plan && <AddFolder machines={machines} />}
+      {!plan && !local && <AddFolder machines={machines} />}
     </Section>
+  );
+}
+
+// plan 1c08f4c2 s5 file picker: browse a machine's work folders (bridge POST /list, files.py listing) and tick files
+// for a local run. Secret files are never listed; a folder outside the work folders is refused by the bridge.
+type Listing = { folder: string; parent: string | null; entries: { name: string; path: string; dir: boolean; size?: number }[]; more?: number };
+async function listOn(machine: string, folder: string): Promise<Listing> {
+  const box = (await boxes()).find((b) => b.name === machine);
+  return box ? postTo<Listing>(box.url, "/list", { folder }) : bridgePost<Listing>("/list", { folder });
+}
+const kb = (n?: number) => (n == null ? "" : n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`);
+export function FilePicker({ machine, picked, onChange }: { machine: string; picked: string[]; onChange: (p: string[]) => void }) {
+  const [folder, setFolder] = useState("");
+  const [list, setList] = useState<Listing | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let live = true;
+    setError("");
+    listOn(machine, folder).then((l) => live && setList(l)).catch((e) => live && setError(String((e as Error).message ?? e)));
+    return () => { live = false; };
+  }, [machine, folder]);
+  const toggle = (p: string) => onChange(picked.includes(p) ? picked.filter((x) => x !== p) : [...picked, p]);
+  return (
+    <div className="file-picker" data-mark="files">
+      <p className="label">Files for the model ({picked.length} picked)</p>
+      {picked.map((p) => (
+        <p key={p} className="small picked"><button className="link" onClick={() => toggle(p)} title="remove">✕</button> {p}</p>
+      ))}
+      <p className="small muted">{list?.folder || "work folders"}{list && list.parent !== null && <> · <button className="link" onClick={() => setFolder(list.parent ?? "")}>up</button></>}</p>
+      {error && <p className="bad small">{error}</p>}
+      <div className="file-list">
+        {(list?.entries ?? []).map((e) => e.dir ? (
+          <p key={e.path} className="small"><button className="link" onClick={() => setFolder(e.path)}>📁 {e.name}</button></p>
+        ) : (
+          <label key={e.path} className="small"><input type="checkbox" checked={picked.includes(e.path)} onChange={() => toggle(e.path)} /> {e.name} <span className="muted">{kb(e.size)}</span></label>
+        ))}
+        {!!list?.more && <p className="muted small">{list.more} more not shown</p>}
+      </div>
+    </div>
   );
 }
 
@@ -429,7 +510,7 @@ const quoteTarget = (r: Run): Record<string, string> =>
 // see the messages newest and top 10, the rest show in show more"). The rows are already read, so Show more reads nothing.
 export function RunList({ runs, title = "Runs from the dashboard", paged = false }: { runs: Run[]; title?: string; paged?: boolean }) {
   // newest first wherever a list of runs shows: the Runs tab, messages to a session, messages on a plan (2026-11-14)
-  const all = newestFirst(runs.filter((r) => r.action === "start" || r.action === "message" || r.action === "plan" || r.action === "search"), "createdAt");
+  const all = newestFirst(runs.filter((r) => r.action === "start" || r.action === "message" || r.action === "plan" || r.action === "search" || r.action === "local"), "createdAt");
   const [count, setCount] = useState(PAGE);
   const shown = paged ? all.slice(0, count) : all;
   return (
@@ -452,7 +533,9 @@ export function RunList({ runs, title = "Runs from the dashboard", paged = false
             <>
               {r.action === "message" ? (r.kind ? `plan message: ${KIND_NAME[r.kind]}` : "message")
                 : r.action === "plan" ? `plan from session${r.status === "running" && r.stage ? ": " + r.stage : ""}`
-                : r.action === "search" ? `search${r.firstTokenMs != null ? " · first token " + secs(r.firstTokenMs) : ""}${r.sources ? ` · ${r.sources.length} sources` : ""}` : "new session"}
+                : r.action === "search" ? `search${r.firstTokenMs != null ? " · first token " + secs(r.firstTokenMs) : ""}${r.sources ? ` · ${r.sources.length} sources` : ""}`
+                : r.action === "local" ? `local run${r.tokensPerSec != null ? ` · ${r.tokensPerSec} tok/s` : ""}${r.promptTokens != null ? ` · ${num(r.promptTokens)} in / ${num(r.outputTokens ?? 0)} out tokens` : ""} · $0`
+                : "new session"}
               {r.archive ? ` · ${ARCHIVE_LABEL[r.archive] ?? r.archive}${r.archiveNote ? ": " + r.archiveNote : ""}` : ""}
               {r.quotes ? ` · quotes ${r.quotes.checked} checked, ${r.quotes.marked} marked` : ""}{" "}
               · {r.workType ?? ""} · {r.machine} ·{" "}
@@ -469,6 +552,15 @@ export function RunList({ runs, title = "Runs from the dashboard", paged = false
           <div {...quoteTarget(r)}>
           <p className="label">Prompt</p>
           <Md text={r.prompt} cwd={r.cwd ?? r.folder ?? ""} />
+          {r.action === "local" && (r.context ?? []).length > 0 && (
+            <>
+              <p className="label">Context sent</p>
+              {r.context!.map((c) => (
+                <p key={c.name} className="small">{c.name}: {num(c.sent)} of {num(c.chars)} chars{c.chunks ? ` (chunks ${c.chunks})` : ""}</p>
+              ))}
+            </>
+          )}
+          {r.stoppedOnRepeat && <p className="small bad">Stopped: the answer repeated itself.</p>}
           {(r.status === "done" || r.status === "lost") && (
             <>
               <p className="label">Result</p>

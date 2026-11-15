@@ -140,7 +140,11 @@ export type Machine = {
   sessions: number;
   syncedAt: string;
   folders?: { workType: string; path: string }[];
+  // what the machine's bridge publishes (status.py publish_state); localModels: its Ollama models (plan 1c08f4c2 s3);
+  // a model's score comes from the gate task set (s6) when it has one
+  avatar?: { localModels?: { server: string; error: string | null; models: LocalModel[] } };
 };
+export type LocalModel = { name: string; sizeBytes?: number; params?: string; quant?: string; score?: { pass: number; runs: number; tokensPerSec?: number; at?: string } };
 
 export type Run = {
   id: string;
@@ -150,7 +154,10 @@ export type Run = {
   target?: string;
   cwd?: string;
   status: "new" | "waiting" | "running" | "stopping" | "done" | "stopped" | "failed" | "lost" | "cancelled" | "paused";
-  action: "start" | "stop" | "message" | "check" | "plan" | "approve_generated" | "continue" | "auto_continue" | "add_root" | "search";
+  action: "start" | "stop" | "message" | "check" | "plan" | "approve_generated" | "continue" | "auto_continue" | "add_root" | "search" | "local";
+  // plan 1c08f4c2 s3/s4 local run (bridge localrun.py): this machine's Ollama; tokens, never dollars (s5: "$0")
+  files?: string[]; promptTokens?: number | null; outputTokens?: number | null; tokensPerSec?: number | null; loadMs?: number | null;
+  numCtx?: number | null; stoppedOnRepeat?: boolean; context?: { name: string; chars: number; sent: number; chunks: string | null }[];
   // s9 search (bridge search.py): Gemini Flash + Google Search; the time to the first streamed text, the source links
   engine?: string; firstTokenMs?: number | null; totalMs?: number | null; sources?: { title: string; url: string }[];
   pausedUntilAt?: string | null; // a run paused by the usage limit: the reset time the bridge read from claude's message
@@ -374,6 +381,14 @@ export const startRun = (machine: string, folder: string, prompt: string, w?: Ru
 export const searchRun = async (machine: string, prompt: string) => {
   const id = newId();
   await setDoc(doc(db, "commands", id), { id, action: "search", machine, prompt, status: "new", createdAt: new Date().toISOString() });
+  return id;
+};
+// plan 1c08f4c2 s5 (step: "Runs tab picker (Claude or machine / local model with its score); file picker"): a prompt to
+// a local model on that machine's Ollama, with the picked files as context (bridge localrun.py; files only from its
+// WORK_ROOTS). Not Claude Code. Returns the run's id.
+export const localRun = async (machine: string, model: string, prompt: string, files: string[]) => {
+  const id = newId();
+  await setDoc(doc(db, "commands", id), { id, action: "local", machine, model, prompt, files, status: "new", createdAt: new Date().toISOString() });
   return id;
 };
 // A work folder added on the page (step i4, the owner's choice, 2026-11-12: "Bridge checks"): the bridge on that
