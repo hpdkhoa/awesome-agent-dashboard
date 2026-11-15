@@ -127,7 +127,11 @@ class Status:
         runs = max(self.own_runs(), mine)
         with self.lock:
             hosts = list(self.host_state)
-        return {"status": "in progress" if runs else "done", "runs": runs, "hosts": hosts}
+        st = {"status": "in progress" if runs else "done", "runs": runs, "hosts": hosts}
+        lm = getattr(self.runs, "local_models", None)
+        if lm is not None:  # s3 (plan 1c08f4c2): this machine's local models, so a run can pick one per machine
+            st["localModels"] = lm.current()
+        return st
 
     def publish_state(self) -> dict:
         """p11: what goes into machines/<this machine>: this bridge's own state, plus the account's counts (commands

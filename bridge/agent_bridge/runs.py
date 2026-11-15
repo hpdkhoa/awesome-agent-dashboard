@@ -76,6 +76,7 @@ from .evidence import Evidence
 from .planfrom import NO_EDITS, mark_quotes, note_command, plan_prompt, scoped, system_args
 from .redact import redact
 from .search import NO_KEY, SearchRun, settings as search_settings
+from .localrun import NO_SERVER, LocalModels, LocalRun, gather, server_url, user_message
 
 APPROVAL_TOOL = "mcp__agent-inbox__inbox_approve"
 STREAM = ["--output-format", "stream-json", "--verbose", "--include-partial-messages"]
@@ -484,7 +485,7 @@ def folder_ok(folder: str, roots: list[tuple[str, str]]) -> str | None:
 
 
 def _kill_tree(p: subprocess.Popen) -> None:
-    if isinstance(p, SearchRun):  # a search is a thread, not a process
+    if isinstance(p, (SearchRun, LocalRun)):  # a search or a local run is a thread, not a process
         p.kill()
         return
     if os.name == "nt":
@@ -531,6 +532,8 @@ class Runs:
         self.on_roots: list = []
         self.budget = None  # budget.Budget (step i5): set by cli.py; None = no guard (tests, dry runs)
         self.env_path: Path | None = None
+        # s3 (plan 1c08f4c2): this machine's Ollama models, published on machines/<machine> (status.own_state)
+        self.local_models = LocalModels(lambda: self.env_path)
 
     def forget_lost(self) -> list[str]:
         """On start: runs an earlier bridge on this machine left running. One whose .out already holds claude's
@@ -621,6 +624,7 @@ class Runs:
                     else self.evidence.start(c) if action == "evidence"
                     else self._add_root(c) if action == "add_root"
                     else self._search(c) if action == "search"
+                    else self._local(c) if action == "local"
                     else self._continue(c) if action == "continue" else self._auto_continue(c) if action == "auto_continue"
                     else self._unknown(c))
             if line:
@@ -779,6 +783,37 @@ class Runs:
                                  "workType": "search"})
         self.procs[c["id"]] = SearchRun(c["id"], prompt, self.out_dir / f"{c['id']}.out", key, model)
         return f"{c['id']}: search sent to {model}"
+
+    def _local(self, c: dict) -> str:
+        """s3 (plan 1c08f4c2, stage 1): a prompt to this machine's Ollama with picked files or a session log as
+        context (localrun.py). Not Claude Code: no claude process, no Claude sign-in. Every check runs before the call;
+        a refused run sends nothing."""
+        path, prompt = f"commands/{c['id']}", str(c.get("prompt") or "").strip()
+        model, files, sid = str(c.get("model") or "").strip(), c.get("files") or [], str(c.get("sessionId") or "").strip()
+        url = server_url(self.env_path)
+        base = {"engine": "ollama", "model": model, "workType": "local"}
+
+        def refuse(why: str) -> str:
+            self.store.update(path, {"status": "failed", "endedAt": now_iso(), "error": why, **base})
+            return f"{c['id']}: local run refused, {why}"
+
+        if not prompt:
+            return refuse("Empty prompt.")
+        if not isinstance(files, list):
+            return refuse("files must be a list of paths.")
+        known = self.local_models.current(force=True)
+        if known["error"]:
+            return refuse(NO_SERVER.format(url=url))
+        names = [m["name"] for m in known["models"]]
+        if model not in names:
+            return refuse(f"{model or 'No model'} is not one of this machine's models: {', '.join(names) or 'none'}.")
+        pieces, why = gather([str(f) for f in files], sid, self.roots, self.logs)
+        if why:
+            return refuse(why)
+        self.store.update(path, {"status": "running", "startedAt": now_iso(), **base,
+                                 "context": [{"name": p["name"], "chars": p["chars"], "cut": p["cut"]} for p in pieces]})
+        self.procs[c["id"]] = LocalRun(c["id"], url, model, user_message(prompt, pieces), self.out_dir / f"{c['id']}.out")
+        return f"{c['id']}: local run sent to {model}"
 
     def _unknown(self, c: dict) -> str:
         self.store.update(f"commands/{c['id']}", {"status": "failed", "error": "Unknown action."})
@@ -1268,6 +1303,9 @@ class Runs:
         if r.get("engine") == "gemini":  # s9: a search's first-token time and source links, from its result line
             fields.update({"firstTokenMs": r.get("firstTokenMs"), "totalMs": r.get("duration_ms"),
                            "sources": r.get("sources") or []})
+        if r.get("engine") == "ollama":  # s3: a local run's measured speed and token counts, from its result line
+            fields.update({k: r.get(k) for k in ("firstTokenMs", "loadMs", "promptTokens", "outputTokens", "tokensPerSec")})
+            fields["totalMs"] = r.get("duration_ms")
         if not stopped and r.get("api_error") == "usage_limit_reached":
             # paused, not failed: Continue (or the auto continue at the reset) does the leftover work; an answer's
             # inbox item stays as it is until then
