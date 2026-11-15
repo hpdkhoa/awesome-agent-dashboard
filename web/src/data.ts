@@ -117,10 +117,11 @@ export type Parts = {
   board?: Board; // the plan's main look (bridge inbox.py clean_board; the owner's pick, 2026-11-16, "Product board, new fields")
 };
 export type Board = { whatFor: string; idea: string[]; product: { feature: string; steps: string[] }[] };
-// The message kinds on a plan: four change it (a new plan version), Q&A never does.
-export type PlanKind = "qa" | "goal" | "step" | "rule" | "lesson";
+// The message kinds on a plan: four change it (a new plan version), Q&A never does; Action does the work asked and makes
+// no version (step i11, the owner's words, 2026-11-16: "need action type to cover this case when I ask you to perform an action").
+export type PlanKind = "qa" | "goal" | "step" | "rule" | "lesson" | "action";
 export const PLAN_KINDS: [PlanKind, string][] = [
-  ["qa", "Q&A"], ["goal", "Shift goal"], ["step", "Add step"], ["rule", "Change rule"], ["lesson", "Audit lesson"],
+  ["qa", "Q&A"], ["goal", "Shift goal"], ["step", "Add step"], ["rule", "Change rule"], ["lesson", "Audit lesson"], ["action", "Action"],
 ];
 // A step version: each report on a step, its state and the session's reply (no plan version).
 export type PlanStep = {

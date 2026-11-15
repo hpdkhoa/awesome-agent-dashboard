@@ -88,6 +88,14 @@ KIND_PROMPTS = {
     "rule": "This message changes the plan's rules: add, edit or remove a rule in part 3, with its source (this "
             "message, dated). Mark the steps that break the new rule. Post the whole six parts and the cite with "
             "plan_version(parts=..., note=...). Do not run a step.",
+    # step i11 (the owner's words, 2026-11-16: "the \"Send a message on this plan\" need action type to cover this case
+    # when I ask you to perform an action (not just Q&A or change step, change plan, etc...)")
+    "action": "This message is an Action on your plan: do the work it asks. Change files and run commands inside the "
+              "work folders (WORK_ROOTS), under the owner's Approvals setting. Ask first with inbox_ask only for anything "
+              "outside the plan, then stop. It makes no plan version: if the plan itself needs a change, call plan_switch "
+              "with the kind (goal, step, rule or lesson) and the exact change; change it only if the owner confirms. End "
+              "with what you did and what is not done, each not-done item with its fix or question, and post it with "
+              "inbox_result.",
     "lesson": "This message audits a lesson in part 4. Check the lesson against the code and the session log, with "
               "proof (file and line, commit, log entry). Answer with the proof. If the lesson or where it was "
               "applied changes, post the whole six parts with plan_version(parts=..., note=...).",

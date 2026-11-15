@@ -38,6 +38,7 @@ const HINT: Record<PlanKind, string> = {
   step: "A step, more work or more tests. A new plan version.",
   rule: "Add, edit or remove a rule. Steps that break it are marked. A new plan version.",
   lesson: "Which lesson to check, and what you doubt. The session answers with proof.",
+  action: "The work to do: files, commands, fixes. The session does it, asks first for anything outside the plan, reports what it did. No plan version.",
 };
 const when = (iso: string) => dt(iso);
 const PART_LABEL: Record<string, string> = { ...Object.fromEntries(PART_NAMES), cite: "Cite" };

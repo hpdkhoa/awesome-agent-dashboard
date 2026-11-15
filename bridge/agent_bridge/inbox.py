@@ -22,8 +22,9 @@ previous 2026-11-01 version will be the step version, which in each step I can s
 message"):
 - plan version (planVersions): only when the plan's data changes, never when a step moves;
 - step version (planSteps): each report on a step (step_update), its state and its reply; no plan version.
-A message on the plan has a kind: qa, goal, step, rule or lesson. A Q&A run never changes the plan: plan_version is
-refused in it until the owner confirms a switch to another kind (plan_switch).
+A message on the plan has a kind: qa, goal, step, rule, lesson or action. A Q&A or an Action run never changes the plan:
+plan_version is refused in it until the owner confirms a switch to another kind (plan_switch). An Action run does the
+work asked (step i11).
 Every option of a question in a plan carries an example (the owner's words: "every choose will have an example"): a
 picture pair, a code diff with a benchmark, or a draft. A plan question without one is refused.
 """
@@ -51,7 +52,9 @@ ARCHIVER_WAIT = 1200
 MAX_WAIT_MINUTES = 25  # under Claude Code's 30-minute idle limit for a local MCP server
 PUSH_TITLE = {"question": "Question", "suggestion": "Suggestion", "result": "Result to review"}
 PARTS = ("goal", "summary", "rules", "lessons", "leftover", "steps")
-KINDS = {"qa": "Q&A", "goal": "Shift goal", "step": "Add step", "rule": "Change rule", "lesson": "Audit lesson"}
+KINDS = {"qa": "Q&A", "goal": "Shift goal", "step": "Add step", "rule": "Change rule", "lesson": "Audit lesson",
+         "action": "Action"}
+NO_PLAN_CHANGE = ("qa", "action")  # kinds that never post a plan version without a confirmed switch
 STEP_STATES = ("next", "now", "done", "failed")
 # The plan's phases (the owner's words, 2026-11-04: "In my mind having these phases: 1. Explore 2. Build 3. Verify
 # 4. Remove 5. Optimize. Then in any phase can rollback to previous phases at any step"; "Every plan starts in Explore";
@@ -368,9 +371,9 @@ class Inbox:
         if not plan:
             raise ValueError(f"no plan {plan_id}")
         run = self.running_command()
-        if run and run.get("kind") == "qa" and not run.get("switchedTo"):
-            raise ValueError("This is a Q&A message: it never changes the plan. If the answer needs a change, ask the "
-                             "owner with plan_switch first.")
+        if run and run.get("kind") in NO_PLAN_CHANGE and not run.get("switchedTo"):
+            raise ValueError(f"This is a {KINDS[run['kind']]} message: it never changes the plan. If the plan needs a "
+                             "change, ask the owner with plan_switch first.")
         if run and run.get("kind") in KINDS and not change:
             change = run.get("switchedTo") or run["kind"]
         was = plan.get("phase") or PHASES[0]
@@ -478,9 +481,9 @@ class Inbox:
         return n
 
     def ask_switch(self, to: str, change: str, why: str) -> str:
-        """A Q&A run asks the owner to switch to a kind that changes the plan. Returns the question's id."""
-        if to not in KINDS or to == "qa":
-            raise ValueError("switch to one of: " + ", ".join(k for k in KINDS if k != "qa"))
+        """A Q&A or an Action run asks the owner to switch to a kind that changes the plan. Returns the question's id."""
+        if to not in KINDS or to in NO_PLAN_CHANGE:
+            raise ValueError("switch to one of: " + ", ".join(k for k in KINDS if k not in NO_PLAN_CHANGE))
         run = self.running_command() or {}
         opts = [{"label": f"Switch to {KINDS[to]}", "detail": "the session makes this change as a new plan version",
                  "differs": "the plan changes: a new version", "example": {"type": "text", "draft": change}},
@@ -991,7 +994,7 @@ def server():
 
     @mcp.tool()
     async def plan_switch(to: str, change: str, why: str, ctx: Context) -> str:
-        """In a Q&A message, when the answer needs the plan changed: ask the owner to switch the message to another
+        """In a Q&A or an Action message, when the plan needs a change: ask the owner to switch the message to another
         kind (goal, step, rule or lesson). change: the exact change you would make (the owner sees it as the draft).
         Waits for the answer; only after the owner confirms may you post plan_version."""
         try:

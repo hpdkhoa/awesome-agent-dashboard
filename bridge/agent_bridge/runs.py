@@ -305,7 +305,7 @@ def ensure_plan_data_ignored(cwd: str) -> bool:
 
 def message_command(claude: str, message: str, session_id: str, mode: str = "manual", kind: str = "",
                     step: str = "", model: str = "", effort: str = "") -> list[str]:
-    """kind: a plan message's kind (qa, goal, step, rule, lesson); step: a Run step's step id. Either goes as an
+    """kind: a plan message's kind (qa, goal, step, rule, lesson, action); step: a Run step's step id. Either goes as an
     appended system prompt; a Run step has no kind."""
     return [claude, "-p", scoped(message, kind, step), *STREAM, "--resume", session_id,
             "--permission-prompt-tool", APPROVAL_TOOL, *mode_args(mode), *system_args(kind, step),

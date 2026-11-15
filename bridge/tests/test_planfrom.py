@@ -411,3 +411,22 @@ def test_a_done_report_needs_numbers_and_tests_and_keeps_its_fields():
     assert v["reply"] == "built it" and v["report"] == {"built": ["x.py"], **REP, "not_done": [{"item": "Mac", "fix": "s7"}]}
     ib.step_update(pid, "s1", "now", "again")  # a now report needs no fields
     assert "report" not in store.docs[f"planSteps/{pid}_s1"]["versions"][1]
+
+
+def test_an_action_message_can_edit_its_scope_rides_in_the_message_and_it_never_changes_the_plan_on_its_own():
+    # step i11 (the owner's words, 2026-11-16): "need action type to cover this case when I ask you to perform an action"
+    a = message_command("claude", "fix the box", "sid", "manual", "action")
+    assert a[2].startswith("<run-scope>") and "Action on your plan" in a[2] and a[2].endswith("\n\nfix the box")
+    assert "--disallowedTools" not in a  # it does the work: edit tools stay
+    store = FakeStore()
+    ib = Inbox(store, "PC", [], "s1", "/x")
+    pid = ib.plan_start("p", parts=PARTS)
+    store.put_many({"commands/m2": {"id": "m2", "action": "message", "kind": "action", "sessionId": "s1",
+                                    "status": "running", "prompt": "fix it", "startedAt": "t"}})
+    with pytest.raises(ValueError, match="Action message"):
+        ib.plan_version(pid, "", "x", parts=PARTS)
+    with pytest.raises(ValueError, match="switch to one of"):
+        ib.ask_switch("action", "x", "y")
+    q = ib.ask_switch("step", "add s2", "the work needs a step")
+    store.update(f"inbox/{q}", {"status": "answered", "answer": {"choice": "Switch to Add step", "text": "", "at": "t"}})
+    assert ib.confirm_switch(q) is True and ib.plan_version(pid, "", "added s2", parts=PARTS) == 2

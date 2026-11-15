@@ -117,8 +117,10 @@ against its page and marks any that differ; the run shows how many it checked an
   Files on your PC and Claude Code's logs stay.
   A run still running is stopped first (the list says how many). A session open in the Claude app can't be
   stopped from the dashboard; the list warns about it.
-- **Messages on a plan** have a kind: Q&A, Shift goal, Add step, Change rule, Audit lesson. Q&A changes nothing; when
-  its answer needs a change, the session asks you to switch first.
+- **Messages on a plan** have a kind: Q&A, Shift goal, Add step, Change rule, Audit lesson, Action. Q&A changes nothing;
+  when its answer needs a change, the session asks you to switch first. Action does the work you ask (files and commands
+  in the work folders, under your Approvals setting), asks first for anything outside the plan, reports what it did, and
+  makes no plan version.
 - **Examples:** every option of a plan question carries one: before and after pictures, a code diff with benchmarks
   marked measured or estimated, or a draft. A plan question without one is refused.
 

@@ -95,9 +95,9 @@ export function staleness(
     const answered = versions.some((v) => v.createdAt > m.createdAt);
     const live = m.status === "new" || m.status === "waiting" || m.status === "running";
     rows.push({
-      section: "last message", ok: live || answered || m.kind === "qa" || m.kind === "lesson",
+      section: "last message", ok: live || answered || m.kind === "qa" || m.kind === "lesson" || m.kind === "action",
       note: `${m.kind} · ${m.status}${answered ? ` · answered with v${versionAt(versions, "9999")}` : ""}`,
-      fix: live ? undefined : answered || m.kind === "qa" || m.kind === "lesson" ? undefined : "the session made no new version for it: send it again or read its reply",
+      fix: live ? undefined : answered || m.kind === "qa" || m.kind === "lesson" || m.kind === "action" ? undefined : "the session made no new version for it: send it again or read its reply",
     });
   }
   return rows;
