@@ -76,7 +76,7 @@ from .evidence import Evidence
 from .planfrom import NO_EDITS, mark_quotes, note_command, plan_prompt, scoped, system_args
 from .redact import redact
 from .search import NO_KEY, SearchRun, settings as search_settings
-from .localrun import NO_SERVER, LocalModels, LocalRun, gather, server_url, user_message
+from .localrun import NO_SERVER, Budgets, LocalModels, LocalRun, gather, server_url, settings as local_settings
 
 APPROVAL_TOOL = "mcp__agent-inbox__inbox_approve"
 STREAM = ["--output-format", "stream-json", "--verbose", "--include-partial-messages"]
@@ -534,6 +534,8 @@ class Runs:
         self.env_path: Path | None = None
         # s3 (plan 1c08f4c2): this machine's Ollama models, published on machines/<machine> (status.own_state)
         self.local_models = LocalModels(lambda: self.env_path)
+        # s4: each model's measured context length and characters per token, cached next to the runs folder
+        self.budgets = Budgets(out_dir.parent / "local_models.json")
 
     def forget_lost(self) -> list[str]:
         """On start: runs an earlier bridge on this machine left running. One whose .out already holds claude's
@@ -810,9 +812,10 @@ class Runs:
         pieces, why = gather([str(f) for f in files], sid, self.roots, self.logs)
         if why:
             return refuse(why)
-        self.store.update(path, {"status": "running", "startedAt": now_iso(), **base,
-                                 "context": [{"name": p["name"], "chars": p["chars"], "cut": p["cut"]} for p in pieces]})
-        self.procs[c["id"]] = LocalRun(c["id"], url, model, user_message(prompt, pieces), self.out_dir / f"{c['id']}.out")
+        st = local_settings(self.env_path)
+        self.store.update(path, {"status": "running", "startedAt": now_iso(), **base, "keepAlive": st["keep_alive"]})
+        self.procs[c["id"]] = LocalRun(c["id"], url, model, prompt, pieces, self.out_dir / f"{c['id']}.out", self.budgets,
+                                       st["num_ctx"], st["keep_alive"])
         return f"{c['id']}: local run sent to {model}"
 
     def _unknown(self, c: dict) -> str:
@@ -1304,7 +1307,8 @@ class Runs:
             fields.update({"firstTokenMs": r.get("firstTokenMs"), "totalMs": r.get("duration_ms"),
                            "sources": r.get("sources") or []})
         if r.get("engine") == "ollama":  # s3: a local run's measured speed and token counts, from its result line
-            fields.update({k: r.get(k) for k in ("firstTokenMs", "loadMs", "promptTokens", "outputTokens", "tokensPerSec")})
+            fields.update({k: r.get(k) for k in ("firstTokenMs", "loadMs", "promptTokens", "outputTokens", "tokensPerSec",
+                                                 "stoppedOnRepeat", "numCtx", "context", "budgetCounts")})
             fields["totalMs"] = r.get("duration_ms")
         if not stopped and r.get("api_error") == "usage_limit_reached":
             # paused, not failed: Continue (or the auto continue at the reset) does the leftover work; an answer's
