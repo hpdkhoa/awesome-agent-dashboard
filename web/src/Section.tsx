@@ -25,6 +25,7 @@ export function Section({
   open = true,
   tools,
   stale,
+  main,
   children,
 }: {
   id: string;
@@ -33,11 +34,14 @@ export function Section({
   open?: boolean;
   tools?: ReactNode; // beside the header, outside its button (a button cannot hold another)
   stale?: string; // the plan's update check: why this section is behind the current version (planStale.ts)
+  // open on every load, over fold-all, the remembered state and Settings (the owner's pick, 2026-11-16, for the plan's
+  // Report board: "Board open, rest folded")
+  main?: boolean;
   children: ReactNode;
 }) {
   // a section this browser never folded or opened starts as the Settings tab says (Sections start: Open or Folded)
   const foldAll = useContext(FoldAll);
-  const [isOpen, setOpen] = useState<boolean>(() => (foldAll ? false : remembered()[id] ?? (getSettings().foldDefault ? false : open)));
+  const [isOpen, setOpen] = useState<boolean>(() => (main ? true : foldAll ? false : remembered()[id] ?? (getSettings().foldDefault ? false : open)));
 
   function toggle() {
     const next = !isOpen;

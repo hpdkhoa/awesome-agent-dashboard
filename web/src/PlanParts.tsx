@@ -208,7 +208,7 @@ function ReportBoard({ plan, v, steps, evidence, asked, onOpenItem }: {
   const latestPic = latest && evidence.find((e) => e.stepId === latest.sv.stepId)?.sets?.[0]?.pictures[0];
   const title = (id: string) => rows.find((st) => st.id === id)?.title ?? id;
   return (
-    <Section id="plan.board" title="Report board" extra={b ? `${count("built") + count("open")} of ${feats.length} features built` : "no board yet"}>
+    <Section id="plan.board" main title="Report board" extra={b ? `${count("built") + count("open")} of ${feats.length} features built` : "no board yet"}>
       {!b && <p className="small muted">This plan has no board yet: its session adds What for, Idea and the product list with the next plan version.</p>}
       {b && (
         <>
