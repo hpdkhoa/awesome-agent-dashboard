@@ -233,6 +233,11 @@ def clean_board(board, step_ids: list[str]) -> dict:
         product.append({"feature": redact(str(f["feature"]).strip(), 120), "steps": ids[:20]})
     if bad:
         raise ValueError("board.product names steps the plan does not have: " + ", ".join(sorted(set(bad))))
+    # the owner's words, 2026-11-16: "Don't let the dashboard out of date in any kind": every step builds a feature
+    left = [x for x in step_ids if not any(x in f["steps"] for f in product)]
+    if left:
+        raise ValueError("board.product leaves steps out: " + ", ".join(left) + ". Put each step under the feature it "
+                         "builds (or a new feature), so the board follows the plan.")
     if not what or not product:
         raise ValueError("board needs what_for and product: " + BOARD_SHAPE)
     return {"whatFor": what, "idea": idea, "product": product[:30]}
@@ -927,7 +932,10 @@ def server():
         version that keeps the data. harness: the whole harness list, each {"id": "h1", "item", "kind": "tool" or
         "check"}: the tools and context each step needs, and each step's check; the owner approves every item on the
         page. Left out, the list stays as it was. parts.board (see plan_start): send it with every parts version;
-        a version that drops the board its parent had is refused."""
+        a version that drops the board its parent had is refused. Before each version, read the board again against
+        the goal, the steps and the step results, and adjust What for, Idea and the features (the owner's words,
+        2026-11-16: "in new version you should look back and adjust the What for, Idea and 8 features ... Don't let
+        the dashboard out of date in any kind")."""
         plan_id = plan_id or ((await asyncio.to_thread(inbox.open_plan)) or {}).get("id", "")
         if not plan_id:
             return "No plan in this session. Open one with plan_start."
@@ -940,6 +948,11 @@ def server():
         saved = (await asyncio.to_thread(inbox.store.get, f"planVersions/{plan_id}_v{n}")) or {}
         if saved.get("parts") and not saved["parts"].get("board"):
             out += NO_BOARD
+        elif saved.get("parts"):
+            was = ((await asyncio.to_thread(inbox.store.get, f"planVersions/{plan_id}_v{saved.get('parent')}")) or {}).get("parts") or {}
+            if was.get("board") == saved["parts"]["board"] and (was.get("goal") != saved["parts"]["goal"] or was.get("steps") != saved["parts"]["steps"]):
+                out += (" The goal or the steps changed but the board did not: read What for, Idea and the features "
+                        "again and post a version that adjusts them, if they no longer match.")
         split = saved.get("phaseMove", {}).get("harness")
         if split:
             out += (" Build uses only the approved harness items: " + (", ".join(split["approved"]) or "none")

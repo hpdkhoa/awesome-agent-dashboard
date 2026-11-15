@@ -367,6 +367,9 @@ def test_board_is_kept_checked_and_never_dropped():
     pid = ib.plan_start("Board", parts=PARTS)
     with pytest.raises(ValueError, match="s9"):
         ib.plan_version(pid, "", "bad step", parts={**PARTS, "board": {**BOARD, "product": [{"feature": "x", "steps": ["s9"]}]}})
+    two = {**PARTS, "steps": PARTS["steps"] + [{"id": "s2", "title": "t2", "does": "d", "check": "c"}]}
+    with pytest.raises(ValueError, match="leaves steps out: s2"):
+        ib.plan_version(pid, "", "s2 under no feature", parts={**two, "board": BOARD})
     with pytest.raises(ValueError, match="what_for"):
         ib.plan_version(pid, "", "no what for", parts={**PARTS, "board": {"product": BOARD["product"]}})
     n = ib.plan_version(pid, "", "board added", parts={**PARTS, "board": BOARD})

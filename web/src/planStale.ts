@@ -69,6 +69,26 @@ export function staleness(
       : { section: part, ok: true, note: `v${cur.n}, no step report since` });
   }
 
+  // The board (the owner's words, 2026-11-16: "in new version you should look back and adjust the What for, Idea and
+  // 8 features ... Don't let the dashboard out of date in any kind"): there is one, every step sits under a feature,
+  // and it changed in or after the last version that changed the goal or the steps.
+  if (cur.parts) {
+    const b = cur.parts.board;
+    const line = versions.filter((v) => v.parts && v.n <= cur.n).sort((x, y) => x.n - y.n);
+    const js = (x: unknown) => JSON.stringify(x ?? null);
+    let boardAt = 0, planAt = 0;
+    line.forEach((v, i) => {
+      const p = line[i - 1]?.parts;
+      if (!p || js(p.board) !== js(v.parts!.board)) boardAt = v.n;
+      if (!p || p.goal !== v.parts!.goal || js(p.steps.map((s) => [s.id, s.title])) !== js(v.parts!.steps.map((s) => [s.id, s.title]))) planAt = v.n;
+    });
+    const left = b ? cur.parts.steps.filter((s) => !b.product.some((f) => f.steps.includes(s.id))).map((s) => s.id) : [];
+    rows.push(!b ? { section: "board", ok: false, note: `v${cur.n} has no board`, fix: "post a version with What for, Idea and the product features" }
+      : left.length ? { section: "board", ok: false, note: `steps under no feature: ${left.join(", ")}`, fix: "post a version that puts each step under a feature" }
+      : boardAt < planAt ? { section: "board", ok: false, note: `board from v${boardAt}; goal or steps changed in v${planAt}`, fix: "post a version that reads What for, Idea and the features again" }
+      : { section: "board", ok: true, note: `board from v${boardAt}, every step under a feature` });
+  }
+
   const msgs = runs.filter((r) => r.planId === plan.id && r.kind && r.action === "message").sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const m = msgs[0];
   if (m) {

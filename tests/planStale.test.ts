@@ -34,6 +34,20 @@ describe("plan staleness", () => {
     expect(early.find((r) => r.section === "summary")).toMatchObject({ ok: true, note: "v2, no step report since" });
   });
 
+  it("the board is behind when missing, when a step sits under no feature, or when the goal or steps changed after it", () => {
+    // the owner's words, 2026-11-16: "Don't let the dashboard out of date in any kind"
+    const b = { whatFor: "w", idea: [], product: [{ feature: "F", steps: ["s1", "s2"] }] };
+    const withB = (n: number, at: string, st: ReturnType<typeof step>[], board?: object) => v(n, at, { ...parts(st), ...(board ? { board } : {}) } as never);
+    const row = (vs: never[]) => staleness(plan, vs, null, null, [], []).find((r) => r.section === "board");
+    expect(row(versions as never[])).toMatchObject({ ok: false, note: "v2 has no board" });
+    const two = [step("s1", "a"), step("s2", "b")];
+    expect(row([withB(1, "2026-11-01", two, b), withB(2, "2026-11-02", two, b)] as never[])).toMatchObject({ ok: true, note: "board from v1, every step under a feature" });
+    const three = [...two, step("s3", "c")];
+    expect(row([withB(1, "2026-11-01", two, b), withB(2, "2026-11-02", three, b)] as never[])).toMatchObject({ ok: false, note: "steps under no feature: s3" });
+    const retitled = [step("s1", "a"), { ...step("s2", "b"), title: "new title" }];
+    expect(row([withB(1, "2026-11-01", two, b), withB(2, "2026-11-02", retitled, b)] as never[])).toMatchObject({ ok: false, note: "board from v1; goal or steps changed in v2" });
+  });
+
   it("generated files approved for an older version only are stale", () => {
     const gen = { planId: "p", versions: { v1: [{ file: "a.svg", kind: "diagram", at: "x" }] } };
     const rows = staleness(plan, versions, null, gen, [], []);

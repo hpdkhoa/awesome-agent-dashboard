@@ -191,8 +191,8 @@ function featureOf(ids: string[], steps: PlanStep[]) {
   return { state, open, key: newest ? keyNumber(newest.reply, newest.report) : "" };
 }
 
-function ReportBoard({ plan, v, steps, evidence, asked, onOpenItem }: {
-  plan: Plan; v: PlanVersion; steps: PlanStep[]; evidence: StepEvidence[]; asked: InboxItem[]; onOpenItem: (id: string) => void;
+function ReportBoard({ plan, v, steps, evidence, asked, onOpenItem, stale }: {
+  plan: Plan; v: PlanVersion; steps: PlanStep[]; evidence: StepEvidence[]; asked: InboxItem[]; onOpenItem: (id: string) => void; stale?: string;
 }) {
   const b = v.parts?.board;
   const rows = v.parts?.steps ?? [];
@@ -208,7 +208,7 @@ function ReportBoard({ plan, v, steps, evidence, asked, onOpenItem }: {
   const latestPic = latest && evidence.find((e) => e.stepId === latest.sv.stepId)?.sets?.[0]?.pictures[0];
   const title = (id: string) => rows.find((st) => st.id === id)?.title ?? id;
   return (
-    <Section id="plan.board" main title="Report board" extra={b ? `${count("built") + count("open")} of ${feats.length} features built` : "no board yet"}>
+    <Section id="plan.board" main stale={stale} title="Report board" extra={b ? `${count("built") + count("open")} of ${feats.length} features built` : "no board yet"}>
       {!b && <p className="small muted">This plan has no board yet: its session adds What for, Idea and the product list with the next plan version.</p>}
       {b && (
         <>
@@ -714,7 +714,7 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
         {v.change ? `: ${v.change.message}` : v.note} <MoreMenu path={`planVersions/${plan.id}_v${v.n}`} />
       </p>
 
-      <ReportBoard plan={plan} v={v} steps={steps} evidence={evidence} asked={asked} onOpenItem={onOpenItem} />
+      <ReportBoard plan={plan} v={v} steps={steps} evidence={evidence} asked={asked} onOpenItem={onOpenItem} stale={v.n === plan.current ? staleMark(stale, "board") : undefined} />
 
       <RunReports plan={plan} v={v} runs={runs} steps={steps} evidence={evidence} generated={generated} stale={staleMark(stale, "results")} />
 
