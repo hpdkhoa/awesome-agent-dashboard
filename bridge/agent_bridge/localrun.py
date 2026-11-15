@@ -79,8 +79,8 @@ def list_models(url: str, opener=None, timeout: float = 3) -> list[dict]:
 class LocalModels:
     """The model list a bridge publishes on machines/<machine> (s3: "models listed per machine"), cached 5 minutes."""
 
-    def __init__(self, env_path_of, opener=None, clock=time.monotonic):
-        self.env_path_of, self.opener, self.clock = env_path_of, opener, clock
+    def __init__(self, env_path_of, opener=None, clock=time.monotonic, cache: Path | None = None):
+        self.env_path_of, self.opener, self.clock, self.cache = env_path_of, opener, clock, cache
         self.at, self.value = -1e9, {"server": "", "models": [], "error": None}
         self.lock = threading.Lock()
 
@@ -90,11 +90,25 @@ class LocalModels:
                 return self.value
             url = server_url(self.env_path_of())
             try:
-                self.value = {"server": "ollama", "models": list_models(url, self.opener), "error": None}
+                models = list_models(url, self.opener)
+                scores = self._scores()
+                for m in models:  # s6: the gate task set's score, kept in local_models.json by gate.py
+                    if m["name"] in scores:
+                        m["score"] = scores[m["name"]]
+                self.value = {"server": "ollama", "models": models, "error": None}
             except Exception:
                 self.value = {"server": "ollama", "models": [], "error": "no Ollama answered"}
             self.at = self.clock()
             return self.value
+
+
+    def _scores(self) -> dict:
+        try:
+            cache = json.loads(self.cache.read_text(encoding="utf-8")) if self.cache else {}
+        except (OSError, ValueError):
+            return {}
+        keep = ("pass", "runs", "tokensPerSec", "at")
+        return {k: {f: v["score"].get(f) for f in keep} for k, v in cache.items() if isinstance(v, dict) and v.get("score")}
 
 
 def _session_text(log: Path) -> str:

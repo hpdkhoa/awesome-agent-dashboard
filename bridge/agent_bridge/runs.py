@@ -533,7 +533,7 @@ class Runs:
         self.budget = None  # budget.Budget (step i5): set by cli.py; None = no guard (tests, dry runs)
         self.env_path: Path | None = None
         # s3 (plan 1c08f4c2): this machine's Ollama models, published on machines/<machine> (status.own_state)
-        self.local_models = LocalModels(lambda: self.env_path)
+        self.local_models = LocalModels(lambda: self.env_path, cache=out_dir.parent / "local_models.json")
         # s4: each model's measured context length and characters per token, cached next to the runs folder
         self.budgets = Budgets(out_dir.parent / "local_models.json")
 
