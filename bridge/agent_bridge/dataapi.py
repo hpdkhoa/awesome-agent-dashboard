@@ -13,8 +13,9 @@ sign-in checked there. One JSON body per call:
   {"op": "changes", "since", "wait"}                      -> {"seq": n, "changes": [{"path", "coll", "op"}]}
         waits up to `wait` seconds (25 at most) for a change after `since`: the page's live updates, one open call.
   {"op": "many", "calls": [...]}                          -> {"results": [...]}   several reads in one round trip
-  {"op": "env_keys"}                                      -> {"keys": [{"name", "set", "last4"}]}
-  {"op": "env_set", "name", "value"}                      -> {"ok": true, "name", "last4", "backup"}
+  {"op": "env_keys"}                                      -> {"keys": [{"name", "group", "kind", "secret", "risky", "when",
+                                                               "hint", "set", "last4" (secret) | "value" (plain)}]}
+  {"op": "env_set", "name", "value", "confirm"}           -> {"ok": true, "name", "last4" | "value", "backup"}
 
 env_keys and env_set (plan c5cb9485 s10, the owner's words, 2026-11-14: "another step to create config node that do
 configuration inside the avatar so I can add the keys to bridge to add to its .env"): the Config node reads the
@@ -22,6 +23,12 @@ allow-listed key names with their values masked (the last 4 only) and writes one
 .env is copied to the bridge's own folder first (data_dir()/env-backups). A key never touches the database, so it never
 reaches Firestore, the mirror or a run record; no log line holds it. The search reads the .env on each call, so a new
 key works with no restart.
+
+s11 (the owner's words, 2026-11-16: "the config need to send more keys (example as the gemini model and everything can
+config in .env) so that user can put up the configuration via avatar"; pick "All keys, risky ones confirm"): ENV_SPEC
+lists every .env key the bridge reads, each with its group, its value check and when it takes effect. A secret is shown
+as its last 4 only; a plain value in full. WORK_ROOTS, SITE_ORIGINS and OWNER_EMAIL are written only with "confirm":
+true (the avatar's second CONFIRM, which shows the old value; the old value also stays in the .env backup).
 """
 
 from __future__ import annotations
@@ -39,8 +46,47 @@ MAX_WAIT = 25.0
 MAX_LIMIT = 500
 # the money collections stay on Firestore (the owner's pick 2b); the page never asks the bridge for them
 READS = {"get", "find", "count", "seq", "changes"}
-ENV_KEYS = ("GEMINI_API_KEY",)  # the keys the Config node may set (s10); anything else is refused
-ENV_VALUE = re.compile(r"[A-Za-z0-9_\-.]{8,200}")  # one token: no spaces, quotes, = or line breaks
+# s11: one value check per kind, each a full match; no kind lets a line break, a quote or a # through
+_HOST = r"[A-Za-z0-9.\-]{1,200}(?::\d{1,5})?"
+_ROOT = r"[^;=\r\n\"'#]{1,300}=[^;=\r\n\"'#]{1,300}"
+_HOSTS = r"[A-Za-z0-9 _\-]{1,40}=" + _HOST
+ENV_KINDS = {
+    "secret": (re.compile(r"[A-Za-z0-9_\-.]{8,200}"), "one token of 8 to 200 letters, digits, - _ or ."),
+    "model": (re.compile(r"[A-Za-z0-9][A-Za-z0-9_\-.:/]{1,99}"), "a model name: letters, digits, - _ . : /"),
+    "url": (re.compile(r"https?://" + _HOST + r"(?:/[A-Za-z0-9._~\-/]*)?"), "a URL: http(s)://host[:port][/path]"),
+    "int": (re.compile(r"[1-9]\d{0,6}"), "a whole number, 1 to 9999999"),
+    "port": (re.compile(r"[1-9]\d{0,4}"), "a port, 1 to 65535"),
+    "duration": (re.compile(r"-1|0|\d{1,6}(?:ms|s|m|h)"), "a time like 10m, 30s, 2h, 0 or -1"),
+    "hosts": (re.compile(_HOSTS + r"(?:;" + _HOSTS + r")*"), "name=host[:port], ; between them"),
+    "name": (re.compile(r"[A-Za-z0-9][A-Za-z0-9 _.\-]{0,59}"), "a name: letters, digits, space, _ . -"),
+    "roots": (re.compile(_ROOT + r"(?:;" + _ROOT + r")*"), "name=folder, ; between them"),
+    "origins": (re.compile(r"https?://" + _HOST + r"(?:;https?://" + _HOST + r")*"), "https://site[:port], ; between them"),
+    "email": (re.compile(r"[A-Za-z0-9._%+\-]{1,64}@[A-Za-z0-9.\-]{1,190}\.[A-Za-z]{2,24}"), "an email address"),
+    "id": (re.compile(r"[A-Za-z0-9_\-.:]{1,200}"), "letters, digits, - _ . :"),
+}
+# name -> (group, kind, risky, when); when: "now" (read on each use), "restart" (read when the bridge starts),
+# "rebuild" (the page reads it when it is built)
+ENV_SPEC = {
+    "GEMINI_API_KEY": ("SEARCH", "secret", False, "now"),
+    "GEMINI_MODEL": ("SEARCH", "model", False, "now"),
+    "OLLAMA_URL": ("LOCAL MODEL", "url", False, "now"),
+    "LOCAL_NUM_CTX": ("LOCAL MODEL", "int", False, "now"),
+    "LOCAL_KEEP_ALIVE": ("LOCAL MODEL", "duration", False, "now"),
+    "FILES_URL": ("FILES + STATUS", "url", False, "restart"),
+    "FILES_PORT": ("FILES + STATUS", "port", False, "restart"),
+    "STATUS_HOSTS": ("FILES + STATUS", "hosts", False, "restart"),
+    "STATUS_PORT": ("FILES + STATUS", "port", False, "restart"),
+    "MACHINE_NAME": ("ACCESS", "name", False, "restart"),
+    "WORK_ROOTS": ("ACCESS", "roots", True, "restart"),
+    "SITE_ORIGINS": ("ACCESS", "origins", True, "restart"),
+    "OWNER_EMAIL": ("ACCESS", "email", True, "restart"),
+    "FIREBASE_PROJECT_ID": ("FIREBASE", "id", False, "rebuild"),
+    "VITE_FIREBASE_API_KEY": ("FIREBASE", "secret", False, "rebuild"),
+    "VITE_FIREBASE_AUTH_DOMAIN": ("FIREBASE", "id", False, "rebuild"),
+    "VITE_FIREBASE_PROJECT_ID": ("FIREBASE", "id", False, "rebuild"),
+    "VITE_FIREBASE_APP_ID": ("FIREBASE", "id", False, "rebuild"),
+}
+ENV_KEYS = tuple(ENV_SPEC)  # the keys the Config node may set (s10, s11); anything else is refused
 BACKUPS = 20  # the newest .env copies kept
 
 
@@ -56,15 +102,26 @@ class DataApi:
     def env_keys(self) -> dict:
         from .config import read_env
         env = read_env(self._env()) if self._env().exists() else {}
-        return {"keys": [{"name": k, "set": bool(env.get(k)), "last4": (env.get(k) or "")[-4:]} for k in ENV_KEYS]}
+        out = []
+        for k, (group, kind, risky, when) in ENV_SPEC.items():
+            v = env.get(k) or ""
+            row = {"name": k, "group": group, "kind": kind, "secret": kind == "secret", "risky": risky, "when": when,
+                   "hint": ENV_KINDS[kind][1], "set": bool(v)}
+            row.update({"last4": v[-4:]} if kind == "secret" else {"value": v})
+            out.append(row)
+        return {"keys": out}
 
     def env_set(self, body: dict) -> dict:
         from .config import data_dir, save_env_line
         name, value = str(body.get("name") or ""), str(body.get("value") or "").strip()
-        if name not in ENV_KEYS:
+        if name not in ENV_SPEC:
             raise ValueError(f"{name or 'that name'} is not a key the Config node can set")
-        if not ENV_VALUE.fullmatch(value):
-            raise ValueError("a key is one token of 8 to 200 letters, digits, - _ or .")
+        _, kind, risky, _ = ENV_SPEC[name]
+        rx, hint = ENV_KINDS[kind]
+        if not rx.fullmatch(value) or (kind == "port" and int(value) > 65535):
+            raise ValueError(f"{name}: {hint}")
+        if risky and body.get("confirm") is not True:
+            raise ValueError(f"{name} is written only after the second CONFIRM")
         path = self._env()
         backup = ""
         if path.exists():
@@ -76,7 +133,8 @@ class DataApi:
             for old in sorted(folder.glob(".env.*"))[:-BACKUPS]:
                 old.unlink(missing_ok=True)
         save_env_line(name, value, path)
-        return {"ok": True, "name": name, "last4": value[-4:], "backup": backup}
+        shown = {"last4": value[-4:]} if kind == "secret" else {"value": value}
+        return {"ok": True, "name": name, **shown, "backup": backup}
 
     def answer(self, body: dict) -> dict:
         op = body.get("op")

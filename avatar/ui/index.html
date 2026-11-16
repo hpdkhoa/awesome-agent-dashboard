@@ -17,9 +17,11 @@
  <div class="wrap cfg" id="cwrap"><div class="glow"><i></i></div><div class="glow2"><i></i></div><div class="box" id="cbox">
   <div class="title"><span>CONFIG//BOX</span><span id="cclock"></span></div>
   <label class="pk cpk"><b>BOX</b><select id="cbx"></select></label>
-  <div class="chead">KEYS IN THIS BOX'S .ENV</div>
   <div id="ckeys"></div>
+  <!-- s11: the picked key's edit row; WORK_ROOTS, SITE_ORIGINS, OWNER_EMAIL ask a second CONFIRM (old -> new) -->
+  <div class="chead" id="chead">EDIT</div>
   <div class="crow"><input type="password" id="cval" autocomplete="off" spellcheck="false" placeholder="paste the key..."><button type="button" id="csave" disabled>SAVE</button></div>
+  <div id="cconf" hidden><div id="cctext"></div><div class="bt"><button type="button" id="cyes">CONFIRM</button><button type="button" id="cno">CANCEL</button></div><div class="u">old value stays in the .env backup to undo</div></div>
   <div class="cnote" id="cnote"></div>
  </div></div>
  <!-- layer 2: the status box -->

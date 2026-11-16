@@ -140,13 +140,20 @@ fn is_send(v: &serde_json::Value) -> bool {
 
 // plan c5cb9485 s10: the CONFIG box's one write: one allow-listed key into the box's .env ({op, name, value} and nothing
 // else); the bridge checks the value and backs up the old .env (dataapi.py env_set). env_keys (masked) is a read.
-const ENV_KEYS: [&str; 1] = ["GEMINI_API_KEY"];
+// s11 (pick "All keys, risky ones confirm"): the same list as the bridge's ENV_SPEC; an optional "confirm": true (the
+// second CONFIRM for WORK_ROOTS, SITE_ORIGINS, OWNER_EMAIL); a value of 1 to 650 characters with no control character,
+// quote or #. The bridge checks each key's own value shape.
+const ENV_KEYS: [&str; 18] = ["GEMINI_API_KEY", "GEMINI_MODEL", "OLLAMA_URL", "LOCAL_NUM_CTX", "LOCAL_KEEP_ALIVE",
+    "FILES_URL", "FILES_PORT", "STATUS_HOSTS", "STATUS_PORT", "MACHINE_NAME", "WORK_ROOTS", "SITE_ORIGINS", "OWNER_EMAIL",
+    "FIREBASE_PROJECT_ID", "VITE_FIREBASE_API_KEY", "VITE_FIREBASE_AUTH_DOMAIN", "VITE_FIREBASE_PROJECT_ID", "VITE_FIREBASE_APP_ID"];
 fn is_env_set(v: &serde_json::Value) -> bool {
     let Some(o) = v.as_object() else { return false };
-    o.len() == 3
+    let shape_ok = match o.get("confirm") { None => o.len() == 3, Some(c) => c == &serde_json::Value::Bool(true) && o.len() == 4 };
+    shape_ok
         && o.get("op").and_then(|x| x.as_str()) == Some("env_set")
         && o.get("name").and_then(|x| x.as_str()).is_some_and(|n| ENV_KEYS.contains(&n))
-        && o.get("value").and_then(|x| x.as_str()).is_some_and(|x| (8..=200).contains(&x.len()))
+        && o.get("value").and_then(|x| x.as_str()).is_some_and(|x| (1..=650).contains(&x.len())
+            && !x.chars().any(|c| c.is_control() || c == '"' || c == '\'' || c == '#'))
 }
 
 // plan c5cb9485 s4: the NEEDS YOU deck's one write: an update of one inbox record with the fields the page writes when
@@ -462,9 +469,16 @@ mod tests {
     #[test]
     fn only_one_allowed_key_goes_to_the_env() {
         assert!(is_env_set(&json!({"op": "env_set", "name": "GEMINI_API_KEY", "value": "AIzaExample0123"})));
+        assert!(is_env_set(&json!({"op": "env_set", "name": "GEMINI_MODEL", "value": "gemini-2.5-flash-lite"})));
+        assert!(is_env_set(&json!({"op": "env_set", "name": "WORK_ROOTS", "value": "a=K:\\a;b=D:\\w", "confirm": true})));
         for bad in [
-            json!({"op": "env_set", "name": "WORK_ROOTS", "value": "C:/anything"}),
-            json!({"op": "env_set", "name": "GEMINI_API_KEY", "value": "short"}),
+            json!({"op": "env_set", "name": "ANTHROPIC_API_KEY", "value": "sk-ant-anything"}),
+            json!({"op": "env_set", "name": "CLAUDE_BIN", "value": "C:/x.exe"}),
+            json!({"op": "env_set", "name": "WORK_ROOTS", "value": "a=K:\\a", "confirm": false}),
+            json!({"op": "env_set", "name": "WORK_ROOTS", "value": "a=K:\\a", "confirm": "true"}),
+            json!({"op": "env_set", "name": "GEMINI_MODEL", "value": "x\nWORK_ROOTS=C:\\"}),
+            json!({"op": "env_set", "name": "GEMINI_MODEL", "value": "a\"b"}),
+            json!({"op": "env_set", "name": "GEMINI_MODEL", "value": ""}),
             json!({"op": "env_set", "name": "GEMINI_API_KEY", "value": "AIzaExample0123", "path": "x/y"}),
             json!({"op": "env_set", "name": "GEMINI_API_KEY", "value": 12345678901u64}),
             json!({"op": "set", "name": "GEMINI_API_KEY", "value": "AIzaExample0123"}),

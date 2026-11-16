@@ -80,7 +80,7 @@ html,body{margin:0;background:transparent;overflow:hidden;font-family:Tahoma,Ver
 #b1:hover .tag{opacity:1}
 .boxopen #b1 .tag{display:none}
 .link{position:absolute;height:2px;background:linear-gradient(90deg,var(--green),transparent);box-shadow:0 0 6px var(--green);display:none}
-.boxopen .link{display:block}
+.boxopen #link{display:block}   /* s11: STATUS draws its own ray only (was every .link: all 5 rays) */
 #wrap{display:none}.boxopen #wrap{display:block}
 /* p15 button 2 RATES and the rate box (approved preview rates-preview.png): gold ring, yellow box */
 .btn.gold{border-color:var(--yellow);color:var(--yellow);box-shadow:0 0 10px var(--yellow)}
@@ -211,10 +211,22 @@ html,body{margin:0;background:transparent;overflow:hidden;font-family:Tahoma,Ver
 .btn.cfg{border-color:#e8f0ff;color:#e8f0ff;box-shadow:0 0 10px #e8f0ff}.btn.cfg svg{width:24px}
 .configopen #b5 .tag{display:none}.configopen #link5{display:block}
 #cwrap{display:none}.configopen #cwrap{display:block}
-.wrap.cfg{--c:#e8f0ff}#cbox{width:300px}
+.wrap.cfg{--c:#e8f0ff}#cbox{width:340px}
+/* s11: the CONFIG ray in the node's own white (it had no colour: it drew STATUS green) */
+.link.cfg{background:linear-gradient(90deg,#e8f0ff,transparent);box-shadow:0 0 6px #e8f0ff}
 .cpk{margin:6px 0}.chead{font:9px Tahoma;color:#6a7a80;letter-spacing:1px;margin:8px 0 3px}
-.ckey{display:flex;justify-content:space-between;border:1px solid #1f6a30;padding:4px 6px;font:12px Tahoma;color:#cfe}
-.ckey .n{color:var(--green)}.ckey .no{color:var(--orange)}.ckey .yes{color:var(--green)}
+/* s11 (approved preview prev-a-list / prev-a-confirm): every key in groups, a scroll list, click a row to edit it */
+#ckeys{max-height:250px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#3a4a50 transparent}
+.cgrp{font:9px Tahoma;color:#6a7a80;letter-spacing:1px;margin:6px 0 2px}
+.ckey{display:flex;justify-content:space-between;gap:8px;border:1px solid #1f3a40;padding:3px 6px;font:11px Tahoma;color:#cfe;margin-bottom:2px;cursor:pointer}
+.ckey.on{border-color:#e8f0ff;background:#0b1a22}
+.ckey .n{color:var(--green)}.ckey.risky .n{color:#ff9f0a}.ckey .no{color:var(--orange)}.ckey .yes{color:var(--green)}
+.ckey .v{color:#cfe;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px}
+#cconf{border:1px solid #ff9f0a;background:#2a1a05;padding:6px;margin-top:6px;font:11px Tahoma;color:#f8f8f8;word-break:break-all}
+#cconf .o{color:#7a8a90}#cconf .w{color:#ff9f0a}#cconf .u{color:#7a8a90;font-size:10px;margin-top:4px}
+#cconf .bt{display:flex;gap:8px;margin-top:6px}
+#cconf button{font:11px Tahoma;background:transparent;padding:2px 10px;cursor:pointer;color:#cfe;border:1px solid #3a4a50}
+#cconf #cyes{color:#ff9f0a;border-color:#ff9f0a}
 .crow{display:flex;gap:6px;margin-top:6px}
 .crow input{flex:1;min-width:0;background:#000;border:1px solid #3a4a50;color:#cfe;font:12px Tahoma;padding:3px 5px;outline:none}
 .crow button{font:12px Tahoma;color:var(--green);border:1px solid var(--green);background:transparent;padding:2px 10px;cursor:pointer}

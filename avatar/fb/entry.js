@@ -171,10 +171,11 @@ async function envKeys(name) {
   window.FB.boxAsks += 1;
   return (await ask(box, { op: "env_keys" })).keys;
 }
-async function envSet(name, key, value) {
+// s11: confirm = true only after the second CONFIRM (WORK_ROOTS, SITE_ORIGINS, OWNER_EMAIL); left out otherwise
+async function envSet(name, key, value, confirm = false) {
   const box = boxes.find((b) => b.name === name);
   if (!box) throw new Error("this box has no data API: keys go only to a registered box");
-  const r = await ask(box, { op: "env_set", name: key, value });
+  const r = await ask(box, confirm ? { op: "env_set", name: key, value, confirm: true } : { op: "env_set", name: key, value });
   if (!r || r.ok !== true) throw new Error((r && r.error) || "the box refused the key");
   window.FB.boxAsks += 1;
   return r;

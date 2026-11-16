@@ -1000,10 +1000,48 @@ window.addEventListener("keydown", (e) => { if (e.key === "Escape" && layer === 
 // below". Pick a box; its allowed keys show with the value masked (the last 4 only, bridge dataapi env_keys); a key
 // pasted here goes to that box's bridge (env_set), which backs up its .env and writes the one line. The key lives in
 // this page only while it is typed: the field is cleared on SAVE, on close and on a box change, and nothing keeps it.
+// s11 (plan c5cb9485, the owner's words, 2026-11-16: "the config need to send more keys (example as the gemini model
+// and everything can config in .env) so that user can put up the configuration via avatar"; pick "All keys, risky ones
+// confirm"; approved preview prev-a-list / prev-a-confirm): the box lists every key the bridge reads (dataapi ENV_SPEC)
+// in groups; click a row to edit it below. A secret shows its last 4 only and its field hides what is typed; a plain
+// value shows in full. WORK_ROOTS, SITE_ORIGINS and OWNER_EMAIL go out only after a second CONFIRM that shows old -> new.
 let cBox = localStorage.getItem("cfgBox") || "", cKeys = null, cErr = "", cSay = "", cSayCls = "", cBusy = false, cTick = null;
-const CFG_KEY = "GEMINI_API_KEY", CFG_VALUE = /^[A-Za-z0-9_\-.]{8,200}$/;
+let cSel = "GEMINI_API_KEY", cConf = null;   // the picked key; the value waiting for CONFIRM
+// the same checks as the bridge (dataapi ENV_KINDS), so a bad value is refused here with why; the bridge checks again
+const HOST = "[A-Za-z0-9.\\-]{1,200}(?::\\d{1,5})?", ROOT = "[^;=\\r\\n\"'#]{1,300}=[^;=\\r\\n\"'#]{1,300}", HOSTS = "[A-Za-z0-9 _\\-]{1,40}=" + HOST;
+const CFG_KINDS = {
+  secret: "[A-Za-z0-9_\\-.]{8,200}", model: "[A-Za-z0-9][A-Za-z0-9_\\-.:/]{1,99}",
+  url: "https?://" + HOST + "(?:/[A-Za-z0-9._~\\-/]*)?", int: "[1-9]\\d{0,6}", port: "[1-9]\\d{0,4}",
+  duration: "-1|0|\\d{1,6}(?:ms|s|m|h)", hosts: HOSTS + "(?:;" + HOSTS + ")*", name: "[A-Za-z0-9][A-Za-z0-9 _.\\-]{0,59}",
+  roots: ROOT + "(?:;" + ROOT + ")*", origins: "https?://" + HOST + "(?:;https?://" + HOST + ")*",
+  email: "[A-Za-z0-9._%+\\-]{1,64}@[A-Za-z0-9.\\-]{1,190}\\.[A-Za-z]{2,24}", id: "[A-Za-z0-9_\\-.:]{1,200}",
+};
+const CFG_WHEN = { now: "used at once", restart: "used after a bridge restart", rebuild: "used after a page rebuild" };
+const cfgKey = () => (cKeys || []).find((k) => k.name === cSel);
+function cfgBad(k, v) {
+  if (!v) return "";
+  if (!new RegExp(`^(?:${CFG_KINDS[k.kind]})$`).test(v) || (k.kind === "port" && +v > 65535)) return `${k.name}: ${k.hint}`;
+  return "";
+}
 function cfgPick(bs) {   // the last picked box, else the first online one
   if (!bs.some((b) => b.name === cBox) && bs.length) { cBox = (bs.find((b) => b.online) || bs[0]).name; localStorage.setItem("cfgBox", cBox); }
+}
+function cfgShown(k) {   // what a row shows: a secret's last 4, a plain value in full
+  if (!k.set) return `<span class="no">not set</span>`;
+  return k.secret ? `<span class="yes">set ····${esc(k.last4)}</span>` : `<span class="v" title="${esc(k.value)}">${esc(k.value)}</span>`;
+}
+function cfgRows() {
+  if (cErr) return `<div class="ckey"><span class="no">${esc(cErr)}</span></div>`;
+  if (!cKeys) return `<div class="ckey"><span class="k">reading...</span></div>`;
+  let h = "", g = "";
+  for (const k of cKeys) {
+    if (k.group !== g) {
+      g = k.group;
+      h += `<div class="cgrp">${esc(g)}${g === "ACCESS" ? "  ⚠ confirm" : g === "FIREBASE" ? "  (after a page rebuild)" : ""}</div>`;
+    }
+    h += `<div class="ckey${k.name === cSel ? " on" : ""}${k.risky ? " risky" : ""}" data-k="${esc(k.name)}"><span class="n">${esc(k.name)}${k.risky ? " ⚠" : ""}</span>${cfgShown(k)}</div>`;
+  }
+  return h;
 }
 function cfgRender() {
   if (layer !== "config") return;
@@ -1011,41 +1049,68 @@ function cfgRender() {
   cfgPick(bs);
   setOpts($("cbx"), bs.length ? bs.map((b) => opt(b.name, `${b.name} (${b.online ? "online" : "offline"})`, b.name === cBox)).join("")
     : opt("", !signed ? "not signed in" : machines === null ? "loading boxes..." : "no box yet", true));
-  const rows = cErr ? `<div class="ckey"><span class="no">${esc(cErr)}</span></div>`
-    : !cKeys ? `<div class="ckey"><span class="k">reading...</span></div>`
-    : cKeys.map((k) => `<div class="ckey"><span class="n">${esc(k.name)}</span>${k.set ? `<span class="yes">set \u00b7\u00b7\u00b7\u00b7${esc(k.last4)}</span>` : `<span class="no">not set</span>`}</div>`).join("");
+  const rows = cfgRows();
   if ($("ckeys").innerHTML !== rows) $("ckeys").innerHTML = rows;
+  const k = cfgKey();
+  setText($("chead"), `EDIT ${cSel}`);
+  const typ = k && !k.secret ? "text" : "password";
+  if ($("cval").type !== typ) $("cval").type = typ;
+  const ph = !k ? "pick a key above" : k.secret ? "paste the key..." : k.hint;
+  if ($("cval").placeholder !== ph) $("cval").placeholder = ph;
   const v = $("cval").value.trim();
-  const why = cBusy ? "saving..." : !cBox ? "pick a box" : !v ? "" : !CFG_VALUE.test(v) ? "a key is one token of 8 to 200 letters, digits, - _ or ." : "";
-  $("csave").disabled = !!why || !v || !!cErr || !cKeys;
-  const note = cSay || why || `Goes into ${cBox || "the box"}'s .env only (old .env backed up first). Never stored here, never shown again: last 4 only.`;
-  setText($("cnote"), note); $("cnote").className = "cnote" + (cSay ? " " + cSayCls : why && v ? " bad" : "");
+  const bad = k ? cfgBad(k, v) : "";
+  const why = cBusy ? "saving..." : !cBox ? "pick a box" : !k ? "pick a key" : bad;
+  $("csave").disabled = !!why || !v || !!cErr || !cKeys || !!cConf || (k && !k.secret && k.value === v);
+  $("cconf").hidden = !cConf;
+  if (cConf) $("cctext").innerHTML = `Change ${esc(cConf.name)} on ${esc(cBox)}?<br><span class="o">old:</span> ${esc(cConf.old || "(not set)")}<br><span class="w">new:</span> ${esc(cConf.value)}`;
+  const base = !k ? "" : k.secret
+    ? `Goes into ${cBox || "the box"}'s .env only (old .env backed up first). Never stored here, never shown again: last 4 only. ${CFG_WHEN[k.when]}.`
+    : `${k.hint}. Goes into ${cBox || "the box"}'s .env (old .env backed up first); ${CFG_WHEN[k.when]}.`;
+  setText($("cnote"), cSay || why || base); $("cnote").className = "cnote" + (cSay ? " " + cSayCls : why && v ? " bad" : "");
   setText($("cclock"), hhmmss(new Date()));
+}
+function cfgSelect(name) {   // a plain key's field starts with its value; a secret's starts empty
+  cSel = name; cConf = null; cSay = "";
+  const k = cfgKey();
+  $("cval").value = k && !k.secret ? k.value : "";
+  cfgRender();
+  const row = $("ckeys").querySelector(".ckey.on"); if (row) row.scrollIntoView({ block: "nearest" });
 }
 async function cfgLoad() {
   cfgPick(sendBoxes());
-  const name = cBox; cKeys = null; cErr = ""; cfgRender();
+  const name = cBox; cKeys = null; cErr = ""; cConf = null; cfgRender();
   try {
     if (!window.FB || !FB.signedIn()) throw new Error("not signed in: right click > Sign in with Google");
     const keys = await FB.envKeys(name);
     if (name === cBox) cKeys = keys;
   } catch (e) { if (name === cBox) cErr = String(e.message || e).slice(0, 80); }
+  const k = cfgKey(); if (k && !k.secret && !$("cval").value) $("cval").value = k.value;
   cfgRender(); if (shown === "config") fit();
 }
-async function cfgSave() {
-  const v = $("cval").value.trim();
-  if (cBusy || !CFG_VALUE.test(v)) return;
+async function cfgSend(k, v, confirm) {
   cBusy = true; cSay = ""; cfgRender();
   try {
-    const r = await FB.envSet(cBox, CFG_KEY, v);
-    $("cval").value = "";
-    cSay = `saved ${hhmmss(new Date()).slice(0, 5)} \u00b7 ${r.name} \u00b7\u00b7\u00b7\u00b7${r.last4}${r.backup ? " \u00b7 backup " + r.backup : ""} \u00b7 search can use it now`; cSayCls = "ok";
+    const r = await FB.envSet(cBox, k.name, v, confirm);
+    $("cval").value = ""; cConf = null;
+    cSay = `saved ${hhmmss(new Date()).slice(0, 5)} · ${r.name} ${r.last4 !== undefined ? "····" + r.last4 : r.value}${r.backup ? " · backup " + r.backup : ""} · ${CFG_WHEN[k.when]}`; cSayCls = "ok";
     cBusy = false; await cfgLoad();
-  } catch (e) { cSay = "not saved: " + String(e.message || e).slice(0, 80); cSayCls = "bad"; cBusy = false; cfgRender(); }
+  } catch (e) { cSay = "not saved: " + String(e.message || e).slice(0, 80); cSayCls = "bad"; cBusy = false; cConf = null; cfgRender(); }
 }
-function cfgOn() { cSay = ""; cfgLoad(); cTick = setInterval(() => setText($("cclock"), hhmmss(new Date())), 1000); }
-function cfgOff() { clearInterval(cTick); cTick = null; $("cval").value = ""; cKeys = null; cSay = ""; }
+function cfgSave() {   // a risky key opens the CONFIRM box first; nothing is sent until CONFIRM
+  const k = cfgKey(), v = $("cval").value.trim();
+  if (!k || cBusy || cConf || !v || cfgBad(k, v)) return;
+  if (k.risky) { cConf = { name: k.name, old: k.value, value: v }; cfgRender(); fit(); return; }
+  cfgSend(k, v, false);
+}
+function cfgOn() { cSay = ""; cConf = null; cfgLoad(); cTick = setInterval(() => setText($("cclock"), hhmmss(new Date())), 1000); }
+function cfgOff() { clearInterval(cTick); cTick = null; $("cval").value = ""; cKeys = null; cSay = ""; cConf = null; }
 $("cbx").addEventListener("change", (e) => { cBox = e.target.value; localStorage.setItem("cfgBox", cBox); $("cval").value = ""; cSay = ""; cfgLoad(); });
+$("ckeys").addEventListener("click", (e) => { const r = e.target.closest(".ckey[data-k]"); if (r && !cBusy) cfgSelect(r.dataset.k); });
 $("cval").addEventListener("input", () => { cSay = ""; cfgRender(); });
 $("cval").addEventListener("keydown", (e) => { if (e.key === "Enter") cfgSave(); });
-window.addEventListener("keydown", (e) => { if (e.key === "Escape" && layer === "config") go("menu"); });
+$("cyes").addEventListener("click", () => { const k = cfgKey(); if (k && cConf && !cBusy) cfgSend(k, cConf.value, true); });
+$("cno").addEventListener("click", () => { cConf = null; cSay = "not saved: cancelled"; cSayCls = "bad"; cfgRender(); fit(); });
+window.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || layer !== "config") return;
+  if (cConf) { cConf = null; cfgRender(); fit(); } else go("menu");
+});
