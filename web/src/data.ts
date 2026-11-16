@@ -684,7 +684,7 @@ export const sendGenerate = (plan: Plan, kinds: string[], note: string, text: st
 
 // The owner's approval of a Generate result (planCheck.ts approvals): the bridge moves the ticked files out of tmp/,
 // removes tmp/ and deletes the "Generated" results that pointed into it.
-export const sendApproveGenerated = (plan: Plan, a: { folder: string; keep: string[]; drop: string[]; kinds?: Record<string, string> }) => {
+export const sendApproveGenerated = (plan: Plan, a: { folder: string; keep: string[]; drop: string[]; kinds?: Record<string, string>; keepTmp?: boolean }) => {
   const id = newId();
   return setDoc(doc(db, "commands", id), {
     id, action: "approve_generated", machine: plan.machine, cwd: plan.cwd, planId: plan.id, ...a,

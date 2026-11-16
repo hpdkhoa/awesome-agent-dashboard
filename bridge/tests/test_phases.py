@@ -217,3 +217,26 @@ def test_approve_files_each_file_under_its_results_kind_the_owners_own_kinds_too
     gen = store.get("planGenerated/pl1")["versions"]["v2"]
     assert [g["kind"] for g in gen] == ["risk map", "productmap", "image"]  # a kind that is not a plain name: by type
     assert generated_kind("featuremap-x.html") == "featuremap" and generated_kind("compare-v3.svg") == "compare"
+
+
+def test_approving_one_generated_result_keeps_the_rest_of_tmp(tmp_path, monkeypatch):
+    # the owner's pick 2026-11-16, "Fix the dashboard": an approved answer on one Generated result approves its file
+    # alone and keeps the rest of tmp/; tmp/ goes only when nothing is left in it
+    from test_runs import cmd, setup
+    store, runs, work = setup(tmp_path, monkeypatch)
+    store.put_many({"plans/pl1": {"id": "pl1", "sessionId": "s1"}})
+    tmp = work / ".plan_data" / "pl1" / "v4" / "tmp"
+    tmp.mkdir(parents=True)
+    for name in ("featuremap-a.svg", "chart-b.svg"):
+        (tmp / name).write_text(name, encoding="utf-8")
+    cmd(store, "a1", action="approve_generated", planId="pl1", cwd=str(work), folder=".plan_data/pl1/v4",
+        keep=[".plan_data/pl1/v4/tmp/featuremap-a.svg"], drop=[], keepTmp=True)
+    runs.step()
+    assert store.get("commands/a1")["moved"] == [{"from": ".plan_data/pl1/v4/tmp/featuremap-a.svg", "to": ".plan_data/pl1/v4/featuremap-a.svg"}]
+    assert (tmp / "chart-b.svg").exists()  # the file still waiting stays in tmp/
+    cmd(store, "a2", action="approve_generated", planId="pl1", cwd=str(work), folder=".plan_data/pl1/v4",
+        keep=[".plan_data/pl1/v4/tmp/chart-b.svg"], drop=[], keepTmp=True)
+    runs.step()
+    assert not tmp.exists()  # empty now: removed
+    gen = store.get("planGenerated/pl1")["versions"]["v4"]
+    assert [(g["file"], g["kind"]) for g in gen] == [(".plan_data/pl1/v4/featuremap-a.svg", "featuremap"), (".plan_data/pl1/v4/chart-b.svg", "chart")]

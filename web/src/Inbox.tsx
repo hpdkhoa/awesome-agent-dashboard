@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { PcText } from "./FileView";
-import { answerItem, askBack, batchOf, cancelAnswer, forceAnswer, saveDraft, sendBatch, type InboxItem, type Plan, type Session } from "./data";
+import { answerItem, askBack, batchOf, cancelAnswer, forceAnswer, saveDraft, sendApproveGenerated, sendBatch, type InboxItem, type Plan, type Session } from "./data";
+import { relPath, tmpFolderOf, versionFolderOf } from "./planCheck";
 import { dotState, isSaved, nextTodo, step, swipeDir } from "./phone";
 import { Example } from "./Example";
 import { Md } from "./Markdown";
@@ -19,6 +20,17 @@ const STATUS = {
 };
 
 export const isWaiting = (i: InboxItem) => i.status === "open";
+
+// The owner's pick 2026-11-16, "Fix the dashboard": an approved answer on a Generated result approves that result's
+// files alone (from <version>/tmp/ to <version>/, onto the plan's Generated section) and keeps the rest of tmp/.
+// Approved = the Approve button, or a note that starts with "approve" / "approved" (the owner's own answer).
+export const approvesNote = (choice: string, note: string) => choice === "Approve" || /^\s*approved?\b/i.test(note);
+export function generatedApproval(item: InboxItem, plan?: Plan) {
+  if (item.kind !== "result" || !plan || !/^generated\b/i.test(item.title ?? "")) return null;
+  const keep = (item.files ?? []).map((f) => relPath(f, plan.cwd)).filter((f) => tmpFolderOf(f) && versionFolderOf(f, plan.id));
+  const folder = keep.length ? tmpFolderOf(keep[0]) : null;
+  return folder ? { folder, keep: keep.filter((f) => tmpFolderOf(f) === folder), drop: [] as string[], keepTmp: true } : null;
+}
 
 
 export function InboxList({ items, picked, onPick }: { items: InboxItem[]; picked?: string; onPick: (id: string) => void }) {
@@ -243,6 +255,8 @@ export function InboxView({ item, session, plan, onOpenPlan, items = [], phone =
     setBusy(true);
     try {
       await answerItem(item.id, c, text.trim());
+      const gen = approvesNote(c, text.trim()) ? generatedApproval(item, plan) : null;
+      if (gen && plan) await sendApproveGenerated(plan, gen);
     } catch (e) {
       setError(String((e as { code?: string }).code ?? e));
     }
@@ -377,8 +391,13 @@ export function InboxView({ item, session, plan, onOpenPlan, items = [], phone =
                 </button>
               </>
             )}
+            {item.kind === "result" && generatedApproval(item, plan) && (
+              <button className="primary" disabled={busy} onClick={() => send("Approve")}>
+                Approve this file
+              </button>
+            )}
             {item.kind === "result" && (
-              <button className="primary" disabled={busy} onClick={() => send(text.trim() ? "Reviewed, see note" : "")}>
+              <button className={generatedApproval(item, plan) ? "" : "primary"} disabled={busy} onClick={() => send(text.trim() ? "Reviewed, see note" : "")}>
                 Mark reviewed
               </button>
             )}

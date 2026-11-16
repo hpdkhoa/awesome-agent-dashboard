@@ -1018,7 +1018,9 @@ class Runs:
         approved must stay in a tmp folder inside current folder structure of generated files; then when I approve the
         final result of the generated step then only approved items go to plan, tmp files need to be removed (tmp
         folder and dashboard)"). Moves the approved files from <version>/tmp/ to <version>/ (never overwriting); a ticked file already in <version>/ is approved where it is (2026-11-08),
-        removes the tmp folder, and deletes the plan session's "Generated" results that pointed into it."""
+        removes the tmp folder, and deletes the plan session's "Generated" results that pointed into it.
+        keepTmp (the owner's pick 2026-11-16, "Fix the dashboard": an approved answer on one Generated result approves
+        that result's files alone and keeps the rest of tmp/): the other files in tmp/ stay; tmp/ goes only when empty."""
         path, cwd = f"commands/{c['id']}", c.get("cwd", "")
         folder = str(c.get("folder") or "")
         plan = self.store.get(f"plans/{c.get('planId', '')}") or {}
@@ -1050,8 +1052,10 @@ class Runs:
                 n += 1
             shutil.move(str(src), str(dest))
             moved.append({"from": str(rel), "to": dest.relative_to(Path(cwd).resolve()).as_posix()})
-        if tmp.is_dir():
+        if tmp.is_dir() and not c.get("keepTmp"):
             shutil.rmtree(tmp)
+        elif tmp.is_dir() and not any(tmp.iterdir()):
+            tmp.rmdir()
         if moved:  # the plan's Generated section (the owner, 2026-11-04: "not new version because the generated just is
             # the artifact to visualize the plan, it is the supplement for the current version"): one small record per
             # plan, the approved files per version folder; never a plan version
