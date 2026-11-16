@@ -198,3 +198,22 @@ def test_approve_takes_subfolders_in_place_and_from_tmp(tmp_path, monkeypatch):
     gen = store.get("planGenerated/pl1")["versions"]["v5"]
     assert [g["kind"] for g in gen] == ["image", "screenshot"]
     assert generated_kind("mockup-prototype-3.html") == "mockup" and generated_kind("REPORT.md") == "docs"
+
+
+def test_approve_files_each_file_under_its_results_kind_the_owners_own_kinds_too(tmp_path, monkeypatch):
+    # the owner's picks, 2026-11-16: "Build S3" (feature + product map) and "Build S4" (the owner's own kind)
+    from agent_bridge.runs import generated_kind
+    from test_runs import cmd, setup
+    store, runs, work = setup(tmp_path, monkeypatch)
+    tmp = work / ".plan_data" / "pl1" / "v2" / "tmp"
+    tmp.mkdir(parents=True)
+    for name in ("riskmap-a.svg", "productmap-b.html", "x.svg"):
+        (tmp / name).write_text(name, encoding="utf-8")
+    store.put_many({"plans/pl1": {"id": "pl1", "sessionId": "s1"}})
+    keep = [f".plan_data/pl1/v2/tmp/{n}" for n in ("riskmap-a.svg", "productmap-b.html", "x.svg")]
+    cmd(store, "a1", action="approve_generated", planId="pl1", cwd=str(work), folder=".plan_data/pl1/v2", keep=keep, drop=[],
+        kinds={keep[0]: "risk map", keep[1]: "productmap", keep[2]: "../Bad Kind"})
+    runs.step()
+    gen = store.get("planGenerated/pl1")["versions"]["v2"]
+    assert [g["kind"] for g in gen] == ["risk map", "productmap", "image"]  # a kind that is not a plain name: by type
+    assert generated_kind("featuremap-x.html") == "featuremap" and generated_kind("compare-v3.svg") == "compare"

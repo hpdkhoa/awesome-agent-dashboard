@@ -1,6 +1,6 @@
 import type { Phase } from "./phases";
 import { checkHash, itemHash, type HarnessItem, type HarnessTicks } from "./harness";
-import type { Kind } from "./planCheck";
+import type { Base, Format, Kind } from "./planCheck";
 import { useEffect, useRef, useState } from "react";
 import { collection, doc, getDocs, limit, onSnapshot, orderBy, query, setDoc, startAfter, updateDoc, where, type QueryConstraint, type QueryDocumentSnapshot } from "./fs";
 import { db } from "./firebase";
@@ -188,7 +188,7 @@ export type Run = {
   stepId?: string; // a Run step message, or a message asked on one step (Ask, Change, Quote on the step)
   part?: string; // a message asked on one part of the plan (Ask or Quote on its header, or selected words in it)
   planCheck?: boolean; // sent by the plan's Check button (planCheck.ts)
-  generate?: { kinds: Kind[]; note?: string }; // the owner's Generate order (planCheck.ts)
+  generate?: { kinds: Kind[]; formats?: Format[]; base?: Base; note?: string }; // the owner's Generate order (planCheck.ts)
   phaseOrder?: boolean; // the owner's order to move the plan's phase (phases.ts)
   quotes?: { checked: number; marked: number }; // plan from a session: quotes in the notes not found on their page
   waitReason?: "turn" | "app" | "upgrade";
@@ -672,18 +672,19 @@ export const sendPhaseOrder = (plan: Plan, text: string, order: string) => {
 };
 
 // The owner's Generate order (planCheck.ts): a plain message to the plan's session, with the kinds asked.
-export const sendGenerate = (plan: Plan, kinds: string[], note: string, text: string, w?: RunWith) => {
+export const sendGenerate = (plan: Plan, kinds: string[], note: string, text: string, w?: RunWith,
+  formats: Format[] = [], base: Base = "last") => {
   const id = newId();
-  const order = `Generate: ${kinds.join(", ")}${note.trim() ? `. Note: ${note.trim()}` : ""}`;
+  const order = `Generate: ${kinds.join(", ")}${formats.length ? ` as ${formats.join(", ")}` : ""}${kinds.includes("compare") ? ` (compare with ${base})` : ""}${note.trim() ? `. Note: ${note.trim()}` : ""}`;
   return setDoc(doc(db, "commands", id), {
     id, action: "message", machine: plan.machine, sessionId: plan.sessionId, cwd: plan.cwd, prompt: text, ownerText: order,
-    planId: plan.id, generate: { kinds, note: note.trim() }, status: "new", createdAt: new Date().toISOString(), ...withRun(w),
+    planId: plan.id, generate: { kinds, formats, base, note: note.trim() }, status: "new", createdAt: new Date().toISOString(), ...withRun(w),
   });
 };
 
 // The owner's approval of a Generate result (planCheck.ts approvals): the bridge moves the ticked files out of tmp/,
 // removes tmp/ and deletes the "Generated" results that pointed into it.
-export const sendApproveGenerated = (plan: Plan, a: { folder: string; keep: string[]; drop: string[] }) => {
+export const sendApproveGenerated = (plan: Plan, a: { folder: string; keep: string[]; drop: string[]; kinds?: Record<string, string> }) => {
   const id = newId();
   return setDoc(doc(db, "commands", id), {
     id, action: "approve_generated", machine: plan.machine, cwd: plan.cwd, planId: plan.id, ...a,

@@ -1,6 +1,6 @@
 import { usePlanGenerated, type Plan, type PlanVersion } from "./data";
 import { LocalImg, openFile } from "./FileView";
-import { kindName, KINDS, type Kind } from "./planCheck";
+import { kindName, KINDS } from "./planCheck";
 import { FoldAll, Section } from "./Section";
 import { useContext } from "react";
 import { dt } from "./fmt";
@@ -10,6 +10,7 @@ import { dt } from "./fmt";
 // the other 6 or 7 header that collapsible and professional work for generated inside the plan and misc at the end").
 // The approved files of the version shown, from planGenerated/<plan id>, one fold per kind; pictures show inline.
 const PIC = /\.(png|jpe?g|gif|webp|svg|avif|bmp)$/i;
+const rank = (k: string) => { const i = KINDS.findIndex((x) => x.id === k); return i < 0 ? KINDS.length : i; };
 
 export function GeneratedSection({ plan, v, stale }: { plan: Plan; v: PlanVersion; stale?: string }) {
   const rec = usePlanGenerated(plan.id);
@@ -20,7 +21,7 @@ export function GeneratedSection({ plan, v, stale }: { plan: Plan; v: PlanVersio
     .filter(([key, fs]) => Number(key.slice(1)) < v.n && fs.length)
     .sort((a, b) => Number(b[0].slice(1)) - Number(a[0].slice(1)));
   const kinds = [...new Set(files.map((f) => f.kind))].sort(
-    (a, b) => KINDS.findIndex((k) => k.id === a) - KINDS.findIndex((k) => k.id === b));
+    (a, b) => rank(a) - rank(b) || a.localeCompare(b)); // the owner's own kinds after the listed ones
   return (
     <Section id="plan.generated" title="Generated" stale={stale} extra={files.length ? `${files.length} approved · supplement to v${v.n}` : `none for v${v.n}`}>
       {files.length === 0 && <p className="muted small">No approved files for this version. Generate, then approve the final result.</p>}
@@ -41,7 +42,7 @@ export function GeneratedSection({ plan, v, stale }: { plan: Plan; v: PlanVersio
         const mine = files.filter((f) => f.kind === k);
         return (
           <details key={k} className="gen-kind" open={!foldAll}>
-            <summary><b>{KINDS.some((x) => x.id === k) ? kindName(k as Kind) : k}</b> <span className="small muted">{mine.length}</span></summary>
+            <summary><b>{kindName(k)}</b> <span className="small muted">{mine.length}</span></summary>
             {mine.map((f) => (
               <figure key={f.file} className="gen-figure">
                 {PIC.test(f.file) && <LocalImg src={f.file} alt={f.file} cwd={plan.cwd} />}

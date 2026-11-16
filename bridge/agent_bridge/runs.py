@@ -312,14 +312,19 @@ def message_command(claude: str, message: str, session_id: str, mode: str = "man
             *model_args(model, effort)]
 
 
-GEN_KINDS = ("mockup", "diagram", "image", "chart", "screenshot", "data", "docs")  # web/src/planCheck.ts KINDS, and docs
+GEN_KINDS = ("compare", "featuremap", "productmap", "flow", "stories", "mockup", "numbers", "screenshot",  # web/src/planCheck.ts KINDS
+             "diagram", "image", "chart", "data", "docs")  # older orders' kinds, and docs
+OWN_KIND = re.compile(r"[a-z0-9][a-z0-9 _-]{0,39}")  # the owner's own kind (planCheck.ts ownKind), e.g. "risk map"
 GEN_BY_EXT = {".png": "image", ".jpg": "image", ".jpeg": "image", ".svg": "image", ".webp": "image", ".gif": "image",
               ".csv": "data", ".json": "data", ".html": "mockup", ".htm": "mockup", ".md": "docs"}
 
 
-def generated_kind(name: str) -> str:
-    """A generated file's kind: its name's first word when that is a kind (mockup-x.png), else by its type (a numbered
-    picture in a subfolder, 1-plans-board-PASS.png, is an image)."""
+def generated_kind(name: str, given: str = "") -> str:
+    """A generated file's kind: the kind of the result it came with (the approve order's kinds, the owner's own kinds
+    too, 2026-11-16 "Build S4"), else its name's first word when that is a kind (mockup-x.png), else by its type (a
+    numbered picture in a subfolder, 1-plans-board-PASS.png, is an image)."""
+    if given and OWN_KIND.fullmatch(given):
+        return given
     first = name.split("-", 1)[0].lower()
     return first if first in GEN_KINDS else GEN_BY_EXT.get(os.path.splitext(name)[1].lower(), "file")
 
@@ -1057,7 +1062,8 @@ class Runs:
                 name = m["to"].rsplit("/", 1)[-1]
                 if any(x.get("file") == m["to"] for x in rec["versions"][key]):
                     continue
-                rec["versions"][key].append({"file": m["to"], "kind": generated_kind(name), "at": now_iso()})
+                given = (c.get("kinds") or {}).get(m["from"], "")
+                rec["versions"][key].append({"file": m["to"], "kind": generated_kind(name, str(given)), "at": now_iso()})
             self.store.put_many({f"planGenerated/{plan['id']}": rec})
         removed = 0
         for item_id in c.get("drop") or []:

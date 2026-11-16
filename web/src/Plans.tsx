@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { isClosed, setPlanStatus, sendApproveGenerated, sendGenerate, usePlanGenerated, sendPhaseOrder, sendPlanCheck, usePlanVersions, type InboxItem, type Plan, type Run, type Session } from "./data";
-import { approvals, approvedFiles, checkGenerate, generateFolder, generatePrompt, relPath, versionFolderOf, KINDS, kindName, lastOrder, resumePrompt, type GenerateCheck, type Kind } from "./planCheck";
+import { isClosed, setPlanStatus, sendApproveGenerated, sendGenerate, usePlanGenerated, sendPhaseOrder, sendPlanCheck, usePlanVersions, type InboxItem, type Plan, type PlanVersion, type Run, type Session } from "./data";
+import { approvals, approvedFiles, checkGenerate, compareBase, FORMATS, generateFolder, generatePrompt, relPath, versionFolderOf, kindName, lastOrder, ownKind, PICK, resumePrompt, type Base, type Format, type GenerateCheck, type Kind } from "./planCheck";
 import { openFile } from "./FileView";
 import { HarnessSection } from "./HarnessView";
 import { GeneratedSection } from "./GeneratedView";
@@ -51,8 +51,20 @@ export function PlanList({ plans, items, picked, onPick }: { plans: Plan[]; item
 
 // Generate and check, on every plan (planCheck.ts): the owner ticks kinds and writes a note; Generate sends the order.
 // Check shows what came back for the last order; Make the missing sends the missing kinds again; else Resume.
-function GenerateBox({ plan, items, runs }: { plan: Plan; items: InboxItem[]; runs: Run[] }) {
+// What it shows x format, Compare's base and the owner's own kinds: the owner's picks 2026-11-16, S1 to S4 (planCheck.ts).
+function GenerateBox({ plan, items, runs, versions }: { plan: Plan; items: InboxItem[]; runs: Run[]; versions: PlanVersion[] | null }) {
   const [kinds, setKinds] = useState<Kind[]>([]);
+  const [formats, setFormats] = useState<Format[]>([]);
+  const [base, setBase] = useState<Base>("last");
+  const [own, setOwn] = useState<Kind[]>([]); // the owner's own kinds, typed in this box
+  const [typing, setTyping] = useState("");
+  const addOwn = () => {
+    const k = ownKind(typing);
+    if (k && !PICK.some((x) => x.id === k || x.name.toLowerCase() === k)) (setOwn((o) => (o.includes(k) ? o : [...o, k])), setKinds((ks) => (ks.includes(k) ? ks : [...ks, k])));
+    else if (k) { const p = PICK.find((x) => x.id === k || x.name.toLowerCase() === k)!; setKinds((ks) => (ks.includes(p.id) ? ks : [...ks, p.id])); }
+    setTyping("");
+  };
+  const tick = (k: Kind, on: boolean) => setKinds(on ? [...kinds, k] : kinds.filter((x) => x !== k));
   const [note, setNote] = useState("");
   const [c, setC] = useState<GenerateCheck | null>(null);
   const [error, setError] = useState("");
@@ -60,7 +72,12 @@ function GenerateBox({ plan, items, runs }: { plan: Plan; items: InboxItem[]; ru
   const order = lastOrder(plan, runs);
   const fail = (e: unknown) => setError(String((e as { code?: string })?.code ?? e));
   const [w, setW] = useState<RunWith>({});
-  const generate = (ks: Kind[], n: string) => sendGenerate(plan, ks, n, generatePrompt(ks, n, generateFolder(plan)), w).then(() => setC(null)).catch(fail);
+  const generate = (ks: Kind[], n: string, fs: Format[], b: Base) => {
+    const cb = compareBase(b, plan.current, versions);
+    const text = generatePrompt(ks, n, generateFolder(plan), { formats: fs, current: plan.current, base: b, baseSays: cb.says, baseDiff: cb.diff });
+    return sendGenerate(plan, ks, n, text, w, fs, b).then(() => setC(null)).catch(fail);
+  };
+  const bases: Base[] = ["last", "product", ...Array.from({ length: Math.max(0, plan.current - 1) }, (_, i) => `v${i}` as Base)];
   const [ticked, setTicked] = useState<string[]>([]);
   const done = approvedFiles(usePlanGenerated(plan.id));
   const pending = c ? approvals(c, ticked, plan.id, plan.cwd, done) : [];
@@ -71,18 +88,44 @@ function GenerateBox({ plan, items, runs }: { plan: Plan; items: InboxItem[]; ru
     Promise.all(pending.map((a) => sendApproveGenerated(plan, a))).then(() => (setC(null), setTicked([]))).catch(fail);
   return (
     <Section id="plan.generate" title="Generate and check" extra={order ? `last: ${order.kinds.map(kindName).join(", ")}` : ""} open>
+      <p className="small"><b>What it shows</b></p>
       <div className="chips">
-        {KINDS.map((k) => (
+        {PICK.map((k) => (
           <label key={k.id} className="chip" title={k.makes}>
-            <input type="checkbox" checked={kinds.includes(k.id)}
-              onChange={(e) => setKinds(e.target.checked ? [...kinds, k.id] : kinds.filter((x) => x !== k.id))} /> {k.name}
+            <input type="checkbox" checked={kinds.includes(k.id)} onChange={(e) => tick(k.id, e.target.checked)} /> {k.name}
+          </label>
+        ))}
+        {own.map((k) => (
+          <label key={k} className="chip" title="your own kind">
+            <input type="checkbox" checked={kinds.includes(k)} onChange={(e) => tick(k, e.target.checked)} /> {k}
+          </label>
+        ))}
+        <input className="chip" value={typing} placeholder="+ add your own…" size={16} onChange={(e) => setTyping(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addOwn())} onBlur={addOwn} />
+      </div>
+      {kinds.includes("compare") && (
+        <div className="chips">
+          <span className="small">Compare with</span>
+          <select value={base} onChange={(e) => setBase(e.target.value as Base)}>
+            {bases.map((b) => (
+              <option key={b} value={b}>{b === "last" ? `the version before (v${Math.max(0, plan.current - 1)})` : b === "product" ? "the product as it is now" : b}</option>
+            ))}
+          </select>
+        </div>
+      )}
+      <p className="small"><b>Format</b> <span className="muted">(none ticked: the format that shows it best)</span></p>
+      <div className="chips">
+        {FORMATS.map((f) => (
+          <label key={f.id} className="chip" title={f.makes}>
+            <input type="checkbox" checked={formats.includes(f.id)}
+              onChange={(e) => setFormats(e.target.checked ? [...formats, f.id] : formats.filter((x) => x !== f.id))} /> {f.name}
           </label>
         ))}
       </div>
       <textarea rows={2} value={note} placeholder="What it is for (optional), e.g. the delete flow, phone width" onChange={(e) => setNote(e.target.value)} />
       <div className="chips">
         <RunWithPicker value={w} onChange={setW} fresh />{" "}
-        <button className="primary" disabled={going || kinds.length === 0} onClick={() => generate(kinds, note)}>{going ? "Sent" : "Generate"}</button>
+        <button className="primary" disabled={going || kinds.length === 0} onClick={() => generate(kinds, note, formats, base)}>{going ? "Sent" : "Generate"}</button>
         <button className="chip" disabled={!order} onClick={() => order && setC(checkGenerate(plan, order, items))}>Check</button>
       </div>
       {c && (
@@ -118,7 +161,7 @@ function GenerateBox({ plan, items, runs }: { plan: Plan; items: InboxItem[]; ru
           })}
           <div className="chips">
             {c.missing.length > 0 ? (
-              <button className="primary" disabled={going} onClick={() => generate(c.missing, c.order.note)}>{going ? "Sent" : "Make the missing"}</button>
+              <button className="primary" disabled={going} onClick={() => generate(c.missing, c.order.note, c.order.formats, c.order.base)}>{going ? "Sent" : "Make the missing"}</button>
             ) : (
               <button className="chip" disabled={going} onClick={() => sendPlanCheck(plan, resumePrompt).catch(fail)}>{going ? "Sent" : "Resume the plan"}</button>
             )}
@@ -259,7 +302,7 @@ export function PlanView({ plan, items, session, runs = [], onOpenItem }: {
         ))}
       </div>
       <StatusBar plan={plan} runs={runs} />
-      <GenerateBox plan={plan} items={items} runs={runs} />
+      <GenerateBox plan={plan} items={items} runs={runs} versions={versions} />
       {versions && plan.kind !== "parts" && (() => {
         const cur = versions.find((x) => x.n === plan.current);
         return cur ? <HarnessSection plan={plan} v={cur} parent={versions.find((x) => x.n === (cur.parent ?? cur.n - 1))} /> : null;
