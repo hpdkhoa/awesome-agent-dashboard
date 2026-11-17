@@ -101,3 +101,50 @@ def test_list_shows_one_folder_inside_work_roots_for_the_file_picker(site):
     assert call(base, "/list", {"folder": str(root.parent)})[0] == 400  # outside WORK_ROOTS
     assert call(base, "/list", {"folder": str(root / "none")})[0] == 404
     assert call(base, "/list", {"folder": str(root)}, token="someone")[0] == 401
+
+
+def test_attached_picture_outside_roots_served_alone(tmp_path):
+    # the owner's pick 2026-11-16 "Phục vụ đúng ảnh đã đính kèm": only the exact attached picture, nothing beside it
+    root = tmp_path / "work"
+    root.mkdir()
+    out = tmp_path / "story" / "map"
+    out.mkdir(parents=True)
+    (out / "so-do.png").write_bytes(b"\x89PNG map")
+    (out / "other.png").write_bytes(b"\x89PNG other")
+    (out / "notes.txt").write_text("no")
+    (out / ".env").write_text("KEY=1")
+    attached = [f"`{out / 'so-do.png'}`", str(out / "notes.txt"), str(out / ".env")]
+    files = Files([("work", str(root))], verify, attached=lambda: attached)
+    srv = serve(files, ["https://agent.example.com"], 0)
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+    try:
+        st, _, body = call(base, "/ticket", {"path": str(out / "so-do.png")})
+        assert st == 200
+        url = json.loads(body)["url"]
+        assert call(base, url)[2] == b"\x89PNG map"
+        sib = url.rsplit("/", 1)[0] + "/other.png"
+        assert call(base, sib)[0] == 404  # the ticket covers that one file
+        assert call(base, url.rsplit("/", 1)[0] + "/..%2Fmap%2Fother.png")[0] == 404
+        assert call(base, "/ticket", {"path": str(out / "other.png")})[0] == 400  # not attached
+        assert call(base, "/ticket", {"path": str(out / ".env")})[0] == 400  # attached, but a secret: never
+        st, _, body = call(base, "/ticket", {"path": str(out / "notes.txt")})  # attached, not a picture: served too
+        assert st == 200 and call(base, json.loads(body)["url"])[2] == b"no"
+    finally:
+        srv.shutdown()
+
+
+def test_attached_list_read_again_on_miss():
+    now = [0.0]
+    lst: list[str] = []
+    calls = [0]
+
+    def att():
+        calls[0] += 1
+        return list(lst)
+
+    f = Files([], verify, clock=lambda: now[0], attached=att)
+    assert not f.is_attached("C:/x/a.png")
+    lst.append("C:/x/a.png")
+    assert not f.is_attached("C:/x/a.png")  # inside the 5 s window: not read again
+    now[0] = 6.0
+    assert f.is_attached("C:/x/a.png") and calls[0] == 2

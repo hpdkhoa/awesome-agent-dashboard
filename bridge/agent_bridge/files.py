@@ -9,7 +9,10 @@ the tunnel. Two calls:
   the owner's verified Google email, the same lock as the Firestore rules), resolves the path inside a WORK_ROOTS
   folder, and returns a ticket URL that works for 10 minutes.
 - GET /t/<ticket>/<path in that root>: the file's bytes. The ticket covers the file's root, so an html page also loads
-  its own images and css. Nothing outside WORK_ROOTS is ever served.
+  its own images and css. Nothing outside WORK_ROOTS is ever served, with one case (the owner's pick, 2026-11-16,
+  "Phục vụ đúng ảnh đã đính kèm"; widened 2026-11-17: "the image ... is coorect but the files is not, I check a md file
+  still not show"): a file outside WORK_ROOTS whose exact path a report attached (a step's evidence set or a result's
+  files), any kind but a secret, is served alone, on a ticket for that one file; its folder and siblings stay closed.
 - POST /usage with the owner's token and {what: "claude" | "firestore"}: the Claude plan windows or the bridge's
   Firestore counts for today (usage.py), never stored (the owner's pick, 2026-11-09: "Both ... two separated button
   for claude and firestore").
@@ -106,10 +109,16 @@ def firebase_verifier(project_id: str, owner_email: str):
     return verify
 
 
+ATTACHED_REFRESH = 5.0  # seconds between two reads of the attached list, at most
+
+
 class Files:
-    def __init__(self, roots: list[tuple[str, str]], verify, clock=time.time):
+    def __init__(self, roots: list[tuple[str, str]], verify, clock=time.time, attached=None):
         self.roots = [r for _, r in roots if r]
         self.verify, self.clock = verify, clock
+        self.attached = attached  # () -> the paths reports attached (evidence pictures, result files)
+        self._att: set[str] = set()
+        self._att_at = float("-inf")
         self.tickets: dict[str, tuple[str, float]] = {}  # ticket -> (root, expiry)
         self.lock = threading.Lock()
 
@@ -118,8 +127,29 @@ class Files:
         if root and root not in self.roots:
             self.roots.append(root)
 
+    def is_attached(self, full: str) -> bool:
+        """The exact file a report attached (the owner's pick "Phục vụ đúng ảnh đã đính kèm", widened to every file kind
+        on 2026-11-17). The list is read
+        again on a miss, at most every ATTACHED_REFRESH seconds, so a report just sent is found."""
+        if self.attached is None or secret(full):
+            return False
+        key = _norm(full)
+        if key not in self._att and self.clock() - self._att_at >= ATTACHED_REFRESH:
+            att = set()
+            try:
+                for p in self.attached() or []:
+                    p = clean(str(p or ""))
+                    if p and os.path.isabs(p):
+                        att.add(_norm(p))
+            except Exception:  # the store is busy: keep the last list
+                att = self._att
+            with self.lock:
+                self._att, self._att_at = att, self.clock()
+        return key in self._att
+
     def resolve(self, path: str, cwd: str) -> tuple[str, str]:
-        """(root, the file's path inside it, with /). Raises ValueError with the reason."""
+        """(root, the file's path inside it, with /). Raises ValueError with the reason. An attached picture outside
+        WORK_ROOTS comes back as (the file itself, its name): its ticket covers that one file."""
         p = clean(path)
         if not p:
             raise ValueError("no path")
@@ -127,9 +157,11 @@ class Files:
         if not os.path.isabs(full):
             raise ValueError("a relative path with no folder")
         root = next((r for r in self.roots if inside(full, r)), None)
-        if root is None:
-            raise ValueError("outside WORK_ROOTS")
         real = os.path.realpath(full)
+        if root is None:
+            if os.path.isfile(real) and not secret(real) and self.is_attached(real):
+                return real, os.path.basename(real)
+            raise ValueError("outside WORK_ROOTS")
         if not os.path.isfile(real):
             raise ValueError("no such file")
         if secret(real):
@@ -172,7 +204,7 @@ class Files:
         with self.lock:
             self.tickets = {k: v for k, v in self.tickets.items() if v[1] > now}
             self.tickets[t] = (root, now + TICKET_SECONDS)
-        full = os.path.join(os.path.realpath(root), rel)
+        full = root if os.path.isfile(root) else os.path.join(os.path.realpath(root), rel)
         return {"url": f"/t/{t}/{quote(rel)}", "name": os.path.basename(rel), "path": rel,
                 "kind": kind_of(rel), "size": os.path.getsize(full), "dir": os.path.dirname(full)}
 
@@ -182,6 +214,8 @@ class Files:
             root, exp = self.tickets.get(ticket, ("", 0.0))
         if not root or exp <= self.clock():
             return None
+        if os.path.isfile(root):  # a one-file ticket (an attached picture outside WORK_ROOTS): that file only
+            return root if unquote(rel) == os.path.basename(root) and not secret(root) else None
         full = os.path.join(os.path.realpath(root), unquote(rel))
         return full if inside(full, root) and os.path.isfile(full) and not secret(full) else None
 
