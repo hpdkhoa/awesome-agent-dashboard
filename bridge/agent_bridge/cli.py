@@ -236,15 +236,10 @@ def main(argv: list[str] | None = None) -> None:
                     time.sleep(600)
 
             threading.Thread(target=_local_loop, daemon=True).start()
-            def _attached():  # the owner's pick 2026-11-16 "Phục vụ đúng ảnh đã đính kèm": evidence + result files
-                for e in store.query("planEvidence"):
-                    for st in e.get("sets") or []:
-                        yield from st.get("pictures") or []
-                for it in store.where("inbox", "kind", "result"):
-                    yield from it.get("files") or []
+            from .filelinks import attached_paths
 
             files = Files([*cfg.roots, ("plans", str(plans))], firebase_verifier(cfg.project_id, cfg.owner_email),
-                          attached=lambda: list(_attached()))
+                          attached=lambda: list(attached_paths(store)))
             if runs is not None:  # step i4: a folder added on the page is served at once
                 runs.on_roots.append(lambda roots: [files.add_root(r) for _, r in roots])
             serve(files,

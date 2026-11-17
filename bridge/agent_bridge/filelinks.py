@@ -63,3 +63,49 @@ def refuse_dead_links(text: str, cwd: str, roots: list[str]) -> None:
             + (f"; and {len(dead) - 20} more" if len(dead) > 20 else "")
             + f". Give each its full path (K:\\...) or a path from the plan folder {cwd}; a file under a work folder "
             "only. A file that does not exist yet goes without backticks or a link.")
+
+
+def _strings(x):
+    if isinstance(x, str):
+        yield x
+    elif isinstance(x, dict):
+        for v in x.values():
+            yield from _strings(v)
+    elif isinstance(x, (list, tuple)):
+        for v in x:
+            yield from _strings(v)
+
+
+def attached_paths(store):
+    """The files the reports point to, absolute, for the file viewer's outside-WORK_ROOTS case (the owner's pick
+    2026-11-16 "Phục vụ đúng ảnh đã đính kèm"; 2026-11-17 every file kind, then "cover this too" for the links written
+    in a report's text): evidence pictures, a result's files, and every file link the page shows in a result's text or
+    a step report (reply and report fields). A relative link is read from the folder of the item that wrote it."""
+    def ab(ref: str, cwd: str) -> str | None:
+        p = clean(str(ref or ""))
+        if not p:
+            return None
+        full = p if os.path.isabs(p) else (os.path.join(cwd, p) if cwd else "")
+        return full or None
+
+    for e in store.query("planEvidence"):
+        for st in e.get("sets") or []:
+            yield from st.get("pictures") or []
+    for it in store.where("inbox", "kind", "result"):
+        cwd = it.get("cwd") or ""
+        for f in it.get("files") or []:
+            if (a := ab(f, cwd)):
+                yield a
+        for r in file_refs(it.get("text") or ""):
+            if (a := ab(r, cwd)):
+                yield a
+    cwds: dict[str, str] = {}
+    for sv in store.query("planSteps"):
+        pid = sv.get("planId") or str(sv.get("id", "")).split("_")[0]
+        if pid not in cwds:
+            cwds[pid] = (store.get(f"plans/{pid}") or {}).get("cwd", "") if pid else ""
+        for v in sv.get("versions") or []:
+            for t in _strings([v.get("reply"), v.get("report")]):
+                for r in file_refs(t):
+                    if (a := ab(r, cwds[pid])):
+                        yield a

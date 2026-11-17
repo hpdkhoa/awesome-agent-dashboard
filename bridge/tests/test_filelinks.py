@@ -34,3 +34,29 @@ def test_plan_version_refuses_dead_links_but_a_plain_version_keeps_old_text(tmp_
         inbox.plan_version("p1", "new text with `gone.png` and `a.png`")
     assert inbox.plan_version("p1", "new text with `a.png`") == 2
     assert inbox.plan_version("p1", "", phase="build", order="Move the plan to Build.") == 3  # copies v2: no check
+
+
+def test_attached_paths_takes_report_text_links():
+    # the owner, 2026-11-17: "cover this too" (links written in a report's text)
+    from agent_bridge.filelinks import attached_paths
+
+    class S:
+        docs = {"plans/p1": {"cwd": r"K:\work"}}
+
+        def query(self, coll):
+            return {"planEvidence": [{"sets": [{"pictures": [r"K:\out\a.png"]}]}],
+                    "planSteps": [{"planId": "p1", "versions": [{"reply": r"- wrote `K:\story\b.md` and `notes/c.md`",
+                                                                  "report": {"built": ["[map](K:/story/d.svg)"]}}]}]}[coll]
+
+        def where(self, coll, field, value):
+            return [{"cwd": r"K:\res", "files": ["e.png"], "text": r"see `K:\story\f.md`, not K:\plain.md"}]
+
+        def get(self, path):
+            return self.docs.get(path)
+
+    got = list(attached_paths(S()))
+    for want in (r"K:\out\a.png", r"K:\story\b.md", "K:/story/d.svg", r"K:\story\f.md"):
+        assert want in got
+    assert any(g.endswith("c.md") and g.startswith(r"K:\work") for g in got)  # relative: from the plan's folder
+    assert any(g.endswith("e.png") and g.startswith(r"K:\res") for g in got)
+    assert not any(g.endswith("plain.md") for g in got)  # plain text is no link on the page either
