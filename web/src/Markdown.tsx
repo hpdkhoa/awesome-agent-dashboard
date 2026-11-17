@@ -13,6 +13,11 @@ const unescape = (u: string) => {
   }
 };
 
+// In markdown "\." is an escape, so a link to "K:\cc\.plan_data\x.png" reached the bridge as "K:\cc.plan_data\x.png"
+// (the owner, 2026-11-17: "outside WORK_ROOTS"). A link or picture to a Windows path gets / before it is read.
+export const slashPaths = (t: string) =>
+  t.replace(/\]\((<?)([a-zA-Z]:\\[^)>\n]*)(>?)\)/g, (_m, a: string, p: string, b: string) => `](${a}${p.replace(/\\/g, "/")}${b})`);
+
 export function Md({ text, className = "", cwd }: { text?: string | null; className?: string; cwd?: string }) {
   if (!text) return <p className="muted small">none</p>;
   return (
@@ -51,7 +56,7 @@ export function Md({ text, className = "", cwd }: { text?: string | null; classN
           },
         }}
       >
-        {text}
+        {cwd !== undefined ? slashPaths(text) : text}
       </ReactMarkdown>
     </div>
   );

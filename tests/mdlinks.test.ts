@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { Md } from "../web/src/Markdown";
+import { Md, slashPaths } from "../web/src/Markdown";
 
 // The owner, 2026-11-17: "link and file preview in plan report is broken, everytime I click it then the page on mobile
 // phone reload and lost, no file or image show". A report link or picture with a PC path must open the file viewer
@@ -21,6 +21,10 @@ describe("report links to PC files", () => {
       expect(h).not.toContain('src=""');
     });
   }
+  it("a dot folder keeps its slash (a backslash dot is a markdown escape)", () => {
+    const t = slashPaths(String.raw`[a](<K:\Projects\Claude\cc\.plan_data\e\s2-04.png>) ![b](K:\cc\.plan_data\p.png) code K:\x`);
+    expect(t).toBe(String.raw`[a](<K:/Projects/Claude/cc/.plan_data/e/s2-04.png>) ![b](K:/cc/.plan_data/p.png) code K:\x`);
+  });
   it("web links stay web links", () => {
     expect(html("[a](https://example.com)")).toContain('href="https://example.com"');
   });
