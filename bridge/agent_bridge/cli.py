@@ -64,6 +64,13 @@ def patient(what: str, fn, sleep=time.sleep, wait: float = 60.0):
             sleep(wait)
 
 
+def _packs(store):
+    from .avatarpacks import Packs
+    from .config import data_dir
+
+    return Packs(store, data_dir() / "avatar-packs")
+
+
 def _data_api(store):
     from .dataapi import DataApi
 
@@ -244,7 +251,8 @@ def main(argv: list[str] | None = None) -> None:
                 runs.on_roots.append(lambda roots: [files.add_root(r) for _, r in roots])
             serve(files,
                   list(cfg.site_origins), cfg.files_port, Texts(cfg.logs, data_dir() / "runs", local), health=health,
-                  data=_data_api(store) if is_local(store) else None)
+                  data=_data_api(store) if is_local(store) else None,
+                  packs=_packs(store) if is_local(store) else None)
             store.put_many({"meta/files": {"url": cfg.files_url}})
             print(f"file viewer on 127.0.0.1:{cfg.files_port} for {cfg.files_url}", flush=True)
         from .status import Publisher, Status, serve as serve_status

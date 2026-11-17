@@ -49,6 +49,7 @@ function render(s, offline) {
         b.online ? `● ${st || "online"}` : `✕ ${b.seenAgoS == null ? "none" : "seen " + Math.round(b.seenAgoS / 60) + "m ago"}`);
     }
     if (authError) h += row("sign-in", "bad", esc(authError));
+    if (packMsg) h += row("avatar pack", packMsg.startsWith("✕") ? "bad" : "ok", esc(packMsg));
     if (keyErr) h += row("hotkey", "bad", esc(keyErr));   // s5: the saved key was taken at start
     for (const x of s.hosts || []) {
       const both = x.ssh && x.ollama;
@@ -212,6 +213,7 @@ async function poll() {
 const MACHINE_LIVE_S = 420;           // the bridge's keepalive (5 min) + 2 rounds: status.py MACHINE_LIVE_SECONDS
 let keyErr = "";   // s5
 let machines = null, signed = false, authError = "", localName = null, localSeen = false, localOk = false;
+let packList = [], packCur = null, packMsg = "";   // hayaku avatar packs (below the right-click menu)
 let follow = localStorage.getItem("follow") || "all";
 function merged() {
   const now = Date.now();
@@ -345,8 +347,72 @@ document.addEventListener("mouseup", (e) => {
 });
 document.addEventListener("contextmenu", (e) => {
   e.preventDefault();
-  invoke("menu", { zoom, bridges: machines ? machines.map((m) => m.name) : [], follow, signed });
+  invoke("menu", { zoom, bridges: machines ? machines.map((m) => m.name) : [], follow, signed,
+    packs: packList.map((p) => [p.id, p.name]), pack: packCur });
+  packSync();   // the list for the next right click
 });
+
+// hayaku avatar packs (the owner's picks 2026-11-17: "B+file", "only pictures", "Local only"). The bridge keeps named
+// sets of the four status pictures (bridge avatarpacks.py); the dashboard's Settings > hayaku avatar shows, shares and
+// picks them. Here: the right-click Avatar > Packs list (a tick on the one followed), a pick, "Save current as pack",
+// and a .hayaku file imported (menu or dropped on the badge) goes to the bridge too. Every 30 s, while signed in,
+// hayaku asks which pack is picked; a new pick is loaded once (its id and time kept in localStorage).
+let packMsgTimer = null, packBusy = false;   // packList, packCur, packMsg: declared with the sign-in state (the render reads them)
+const PACK_MS = 30000;
+const packBox = () => localName;
+function packSay(text) {
+  packMsg = text; clearTimeout(packMsgTimer);
+  packMsgTimer = setTimeout(() => { packMsg = ""; show(); }, 20000);
+  show();
+}
+async function packSync() {
+  if (!signed || !window.FB || packBusy) return;
+  packBusy = true;
+  try {
+    const r = await FB.packs(packBox(), { op: "list" });
+    packList = r.packs || [];
+    const cur = r.current && r.current.id ? r.current : null;
+    packCur = cur ? cur.id : null;
+    const key = cur ? `${cur.id}@${cur.at}` : "";
+    if (cur && localStorage.getItem("pack.applied") !== key) {
+      const g = await FB.packs(packBox(), { op: "get", id: cur.id });
+      const name = await invoke("pack_apply", { zip: g.zip });
+      localStorage.setItem("pack.applied", key);
+      packSay(`● ${name}`);
+    }
+  } catch (e) { packSay("✕ " + String(e && e.message || e)); }
+  finally { packBusy = false; }
+}
+async function packPut(zip, name) {
+  const r = await FB.packs(packBox(), name ? { op: "put", zip, name } : { op: "put", zip });
+  await FB.packs(packBox(), { op: "select", id: r.id });
+  const l = await FB.packs(packBox(), { op: "list" });   // the pick's time: hayaku shows it already, so no load again
+  if (l.current && l.current.id === r.id) localStorage.setItem("pack.applied", `${r.id}@${l.current.at}`);
+  packList = l.packs || []; packCur = r.id;
+  return r;
+}
+T.event.listen("pack-pick", async (e) => {
+  try { await FB.packs(packBox(), { op: "select", id: String(e.payload) }); await packSync(); }
+  catch (err) { packSay("✕ " + String(err && err.message || err)); }
+});
+T.event.listen("pack-save", async () => {
+  if (!signed || !window.FB) return packSay("✕ sign in first: packs live on the bridge");
+  try {
+    const d = new Date(), p2 = (n) => String(n).padStart(2, "0");
+    const name = `hayaku ${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
+    await packPut(await invoke("pack_current"), name);
+    packSay(`● saved as "${name}" (rename it on the dashboard)`);
+  } catch (err) { packSay("✕ save: " + String(err && err.message || err)); }
+});
+T.event.listen("pack-upload", async (e) => {
+  const { name, zip } = e.payload || {};
+  if (!signed || !window.FB) return packSay(`● ${name} (shown here only: sign in to add it to the bridge)`);
+  try { await packPut(zip); packSay(`● ${name}, added to the bridge`); }
+  catch (err) { packSay(`● ${name} shown; ✕ not added to the bridge: ${String(err && err.message || err)}`); }
+});
+T.event.listen("pack-msg", (e) => packSay(String(e.payload)));
+setInterval(packSync, PACK_MS);
+setTimeout(packSync, 5000);   // after the sign-in and the boxes start
 
 // Avatar per status (plan b73e97ad p7; the owner's picks: "Your files + built-in fallback", config "All 3"). The images
 // come from the avatar folder as data URLs (avatar.rs); a status with none, or a broken one, shows the robot.

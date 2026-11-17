@@ -2,6 +2,7 @@
 // browser only (prefs.ts); another browser or the phone keeps its own. A change repaints the page once and reads no
 // data. Shared settings (approvals, model, push, boxes) stay where they are, because the bridge reads them.
 import { useRef, useState, type ReactNode } from "react";
+import { AvatarPacks } from "./AvatarPacks";
 import { dt, nf } from "./fmt";
 import { DEFAULTS, HIDEABLE, LIMITS, diff, normalize, useSettings, type Settings, type TabId } from "./prefs";
 
@@ -10,7 +11,7 @@ export const TAB_NAME: Record<TabId, string> = {
 };
 const GROUPS = [
   ["set-text", "Text"], ["set-theme", "Theme"], ["set-layout", "Layout"], ["set-time", "Time and numbers"],
-  ["set-phone", "Phone"], ["set-speed", "Speed"], ["set-reset", "Reset and files"],
+  ["set-phone", "Phone"], ["set-speed", "Speed"], ["set-reset", "Reset and files"], ["set-avatar", "hayaku avatar"],
 ] as const;
 
 type Set = (p: Partial<Settings>) => void;
@@ -49,7 +50,7 @@ function Slide({ k, s, set, step, unit }: { k: keyof typeof LIMITS; s: Settings;
 export function SettingsSide({ onResetLayout }: { onResetLayout: () => void }) {
   return (
     <div className="pad">
-      <p className="small muted">Saved in this browser only. Nothing goes to Firestore or the bridge.</p>
+      <p className="small muted">Saved in this browser only. Nothing goes to Firestore or the bridge (except hayaku avatar packs: on the bridge PC).</p>
       <ul className="list">
         {GROUPS.map(([id, name]) => (
           <li key={id} className="row" onClick={() => document.getElementById(id)?.scrollIntoView({ block: "start" })}>{name}</li>
@@ -215,6 +216,11 @@ export function SettingsView({ onResetLayout }: { onResetLayout: () => void }) {
         </Row>
         {msg && <p className="small">{msg}</p>}
         <p className="small muted">Changed: {changed.length ? changed.map(([k, v]) => `${k} ${JSON.stringify(v)}`).join(" · ") : "none"}</p>
+      </section>
+
+      <section className="set-group" id="set-avatar">
+        <h2>hayaku avatar</h2>
+        <AvatarPacks />
       </section>
     </div>
   );

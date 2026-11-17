@@ -16,6 +16,7 @@ tauri-plugin-dialog = "2.8.4"
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-single-instance = "2.5.5"
 tauri-plugin-window-state = "2.5.0"
+zip = { version = "2", default-features = false, features = ["deflate"] } # hayaku avatar packs: .hayaku files (avatar.rs)
 ureq = "3" # p15: the RATES box asks the dashboard Worker (rustls, blocking, small)
 whisper-rs = "0.16"
 

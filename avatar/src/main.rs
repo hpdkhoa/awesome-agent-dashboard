@@ -5,6 +5,7 @@
 
 mod auth;
 mod avatar;
+mod packs;
 mod hotkey;
 mod voice;
 
@@ -99,6 +100,10 @@ fn post_box(url: &str, token: &str, body: &str, route: &str) -> Result<String, S
         if o.len() != 2 || !o.get("path").is_some_and(|x| x.is_string()) || !o.get("cwd").is_some_and(|x| x.is_string()) {
             return Err("only a picture's ticket".to_string());
         }
+    } else if route == "packs" {
+        if !is_pack_call(&v) {
+            return Err("only a pack list, load, add or pick".to_string());
+        }
     } else {
         let op = v.get("op").and_then(|o| o.as_str()).unwrap_or("");
         if !["find", "get", "count", "seq", "changes", "env_keys"].contains(&op) && !is_send(&v) && !is_answer(&v) && !is_ask_back(&v) && !is_env_set(&v) {
@@ -106,7 +111,7 @@ fn post_box(url: &str, token: &str, body: &str, route: &str) -> Result<String, S
         }
     }
     let agent: ureq::Agent = ureq::Agent::config_builder()
-        .timeout_global(Some(Duration::from_secs(35)))
+        .timeout_global(Some(Duration::from_secs(if route == "packs" { 180 } else { 35 })))
         .http_status_as_error(false)
         .build()
         .into();
@@ -117,11 +122,37 @@ fn post_box(url: &str, token: &str, body: &str, route: &str) -> Result<String, S
         .send(body)
         .map_err(|e| e.to_string())?;
     let code = r.status().as_u16();
-    let text = r.body_mut().read_to_string().map_err(|e| e.to_string())?;
+    // a pack (.hayaku as base64) is up to ~110 MB; every other answer keeps ureq's 10 MB cap
+    let cap = if route == "packs" { 120 * 1024 * 1024 } else { 10 * 1024 * 1024 };
+    let text = r.body_mut().with_config().limit(cap).read_to_string().map_err(|e| e.to_string())?;
     if code >= 400 {
-        return Err(format!("the box answered {code}"));
+        // the bridge's own reason for a pack ("no such pack", "not a gif file"), else the status
+        let why = (route == "packs").then(|| serde_json::from_str::<serde_json::Value>(&text).ok()
+            .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_string))).flatten();
+        return Err(why.unwrap_or_else(|| format!("the box answered {code}")));
     }
     Ok(text)
+}
+
+// hayaku avatar packs (the owner's picks 2026-11-17 "B+file", "only pictures"): the calls hayaku makes to the bridge's
+// /packs (bridge avatarpacks.py): the list, one pack's file, a new pack (Save current, Import), the pick. Rename and
+// delete stay on the dashboard page.
+fn is_pack_call(v: &serde_json::Value) -> bool {
+    let Some(o) = v.as_object() else { return false };
+    let id_ok = |k: &str| o.get(k).and_then(|x| x.as_str())
+        .is_some_and(|id| !id.is_empty() && id.len() <= 40 && id.chars().all(|c| c.is_ascii_alphanumeric()));
+    match o.get("op").and_then(|x| x.as_str()) {
+        Some("list") => o.len() == 1,
+        Some("get") | Some("select") => o.len() == 2 && id_ok("id"),
+        Some("put") => o.get("zip").is_some_and(|z| z.is_string())
+            && (o.len() == 2 || (o.len() == 3 && o.get("name").and_then(|n| n.as_str()).is_some_and(|n| (1..=60).contains(&n.chars().count())))),
+        _ => false,
+    }
+}
+
+#[tauri::command]
+async fn box_packs(url: String, token: String, body: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || post_box(&url, &token, &body, "packs")).await.map_err(|e| e.to_string())?
 }
 
 // plan c5cb9485 s2: the only write a box takes from the avatar: one new start or message command (s9: or search), set (not merged) at
@@ -319,7 +350,8 @@ const SIZES: [(&str, &str, f64); 4] = [("size-80", "S  80%", 0.8), ("size-100", 
 /// The right-click menu on the box: Size (a tick on the current zoom), Avatar, Follow (p11: All or one bridge, a tick
 /// on the current pick), Sign in / Sign out (p11, only when firebase.json is set up), Hide, Quit.
 #[tauri::command]
-fn menu(window: WebviewWindow, zoom: f64, bridges: Option<Vec<String>>, follow: Option<String>, signed: Option<bool>)
+fn menu(window: WebviewWindow, zoom: f64, bridges: Option<Vec<String>>, follow: Option<String>, signed: Option<bool>,
+    packs: Option<Vec<(String, String)>>, pack: Option<String>)
     -> Result<(), String> {
     let e = |e: tauri::Error| e.to_string();
     let app = window.app_handle();
@@ -331,7 +363,7 @@ fn menu(window: WebviewWindow, zoom: f64, bridges: Option<Vec<String>>, follow: 
     let size = Submenu::with_items(app, "Size", true, &refs).map_err(e)?;
     let hide = MenuItem::with_id(app, "hide", "Hide", true, None::<&str>).map_err(e)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>).map_err(e)?;
-    let av = avatar::submenu(app).map_err(e)?;
+    let av = avatar::submenu(app, &packs.unwrap_or_default(), pack.as_deref()).map_err(e)?;
     let sep = PredefinedMenuItem::separator(app).map_err(e)?;
     let follow = follow.unwrap_or_else(|| "all".into());
     let mut fitems = vec![CheckMenuItem::with_id(app, "follow:all", "All bridges", true, follow == "all", None::<&str>).map_err(e)?];
@@ -386,7 +418,7 @@ fn main() {
         .manage(voice::Voice::default())   // s6: the voice toggle
         .manage(Load { sys: Mutex::new(sys), nvml: nvml_wrapper::Nvml::init().ok() })
         .manage(avatar::Pending(Mutex::new(None)))
-        .invoke_handler(tauri::generate_handler![status, load, price, box_data, box_text, box_picture, open_run, open_item, hotkey::hotkey_get, hotkey::hotkey_set, voice::voice_start, voice::voice_stop, voice::voice_on, menu, avatar::avatars, avatar::drop_ask, auth::fb_config,
+        .invoke_handler(tauri::generate_handler![status, load, price, box_data, box_text, box_picture, open_run, open_item, hotkey::hotkey_get, hotkey::hotkey_set, voice::voice_start, voice::voice_stop, voice::voice_on, menu, avatar::avatars, avatar::drop_ask, box_packs, packs::pack_current, packs::pack_apply, auth::fb_config,
             auth::auth_get, auth::auth_set])
         .on_menu_event(|app, e| match e.id().as_ref() {
             "hide" => toggle(app, Some(false)),
@@ -462,7 +494,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{b64, is_answer, is_ask_back, is_env_set, is_run_text, is_send};
+    use super::{b64, is_answer, is_ask_back, is_env_set, is_pack_call, is_run_text, is_send};
     use serde_json::json;
     #[test]
     fn only_a_new_start_or_message_command_is_a_write() {
@@ -561,6 +593,19 @@ mod tests {
             json!({"op": "delete", "path": "inbox/abc123"}),
         ] {
             assert!(!is_answer(&bad), "{bad}");
+        }
+    }
+    #[test]
+    fn only_a_pack_list_load_add_or_pick_goes_to_packs() {
+        for ok in [json!({"op": "list"}), json!({"op": "get", "id": "ab12"}), json!({"op": "select", "id": "ab12"}),
+                   json!({"op": "put", "zip": "UEs="}), json!({"op": "put", "zip": "UEs=", "name": "Cats"})] {
+            assert!(is_pack_call(&ok), "{ok}");
+        }
+        for bad in [json!({"op": "delete", "id": "ab12"}), json!({"op": "rename", "id": "ab12", "name": "x"}),
+                    json!({"op": "get", "id": "../x"}), json!({"op": "select", "id": null}), json!({"op": "list", "x": 1}),
+                    json!({"op": "put", "zip": 5}), json!({"op": "put", "zip": "UEs=", "name": ""}),
+                    json!({"op": "put", "zip": "UEs=", "id": "ab"}), json!({"op": "pictures", "id": "ab12"})] {
+            assert!(!is_pack_call(&bad), "{bad}");
         }
     }
     #[test]

@@ -275,6 +275,15 @@ async function picture(name, path, cwd) {
   window.FB.boxAsks += 1; window.FB.pics += 1;
   return invoke("box_picture", { url: box.url, token, path, cwd });
 }
+// hayaku avatar packs (the owner's picks 2026-11-17 "B+file", "only pictures"): the bridge's /packs on the box named
+// (this PC's own box when it has one, else the first), through main.rs box_packs (list, get, put, select only)
+async function packs(name, body) {
+  const box = boxes.find((b) => b.name === name) || boxes[0];
+  if (!box) throw new Error("no box with a data API: packs live on a bridge");
+  const token = await auth.currentUser.getIdToken();
+  window.FB.boxAsks += 1;
+  return JSON.parse(await invoke("box_packs", { url: box.url, token, body: JSON.stringify(body) }));
+}
 // reads/writes: Firestore bills one read per changed record delivered (at least one per answer); counted for the checks
-window.FB = { start, stop, sessions, send, envKeys, envSet, runState, runText, replyText, needsOpen, needsClose, needsWrite, planTitle, picture, needAsks: 0, pics: 0, ratesOpen, ratesClose, saveFx, saveGold, signedIn: () => !!(auth && auth.currentUser), reads: 0, writes: 0,
+window.FB = { start, stop, sessions, send, packs, envKeys, envSet, runState, runText, replyText, needsOpen, needsClose, needsWrite, planTitle, picture, needAsks: 0, pics: 0, ratesOpen, ratesClose, saveFx, saveGold, signedIn: () => !!(auth && auth.currentUser), reads: 0, writes: 0,
   boxAsks: 0, boxes: () => boxes.map((b) => b.name) };

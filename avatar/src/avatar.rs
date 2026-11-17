@@ -11,14 +11,14 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use serde_json::{Map, Value};
-use tauri::menu::{IsMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
+use tauri::menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow, Wry};
 use tauri_plugin_dialog::DialogExt;
 
 pub const STATUSES: [(&str, &str); 4] =
     [("in_progress", "In progress"), ("done", "Done"), ("offline", "Offline"), ("needs_you", "Needs you")];
-const MAX_BYTES: u64 = 20 * 1024 * 1024;
-const EXTS: [&str; 8] = ["gif", "png", "apng", "webp", "jpg", "jpeg", "svg", "bmp"];
+pub const MAX_BYTES: u64 = 20 * 1024 * 1024;
+pub const EXTS: [&str; 8] = ["gif", "png", "apng", "webp", "jpg", "jpeg", "svg", "bmp"];
 
 pub fn dir() -> PathBuf {
     // Windows: %APPDATA%; macOS (p12): ~/Library/Application Support, never the temp folder macOS empties
@@ -33,7 +33,7 @@ pub fn dir() -> PathBuf {
     d
 }
 
-fn cfg() -> Map<String, Value> {
+pub fn cfg() -> Map<String, Value> {
     fs::read_to_string(dir().join("avatar.json"))
         .ok()
         .and_then(|s| serde_json::from_str::<Value>(s.trim_start_matches('\u{feff}')).ok())
@@ -41,7 +41,7 @@ fn cfg() -> Map<String, Value> {
         .unwrap_or_default()
 }
 
-fn save(m: &Map<String, Value>) -> Result<(), String> {
+pub fn save(m: &Map<String, Value>) -> Result<(), String> {
     let text = serde_json::to_string_pretty(&Value::Object(m.clone())).map_err(|e| e.to_string())?;
     fs::write(dir().join("avatar.json"), text).map_err(|e| e.to_string())
 }
@@ -134,8 +134,10 @@ pub fn set(app: &AppHandle, status: &str, src: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// The right-click Avatar submenu: one item per status (its file or "robot"), the folder, the robot for all.
-pub fn submenu(app: &AppHandle) -> tauri::Result<Submenu<Wry>> {
+/// The right-click Avatar submenu: one item per status (its file or "robot"), the folder, the robot for all; then the
+/// packs (the owner's picks 2026-11-17 "B+file", "only pictures"): the bridge's packs with a tick on the one hayaku
+/// follows, save the current pictures as a pack, export and import a .hayaku file.
+pub fn submenu(app: &AppHandle, packs: &[(String, String)], current: Option<&str>) -> tauri::Result<Submenu<Wry>> {
     let c = cfg();
     let mut items: Vec<MenuItem<Wry>> = Vec::new();
     for (k, label) in STATUSES {
@@ -145,10 +147,29 @@ pub fn submenu(app: &AppHandle) -> tauri::Result<Submenu<Wry>> {
     let sep = PredefinedMenuItem::separator(app)?;
     let open = MenuItem::with_id(app, "avatar-open", "Open avatar folder", true, None::<&str>)?;
     let robot = MenuItem::with_id(app, "avatar-robot", "Use built-in robot", true, None::<&str>)?;
+    let mut pitems: Vec<CheckMenuItem<Wry>> = Vec::new();
+    for (id, name) in packs.iter().take(40) {
+        pitems.push(CheckMenuItem::with_id(app, format!("pack:{id}"), name, true, current == Some(id.as_str()), None::<&str>)?);
+    }
+    let none = MenuItem::with_id(app, "pack-none", "No pack on the bridge (or not signed in)", false, None::<&str>)?;
+    let mut prefs: Vec<&dyn IsMenuItem<Wry>> = pitems.iter().map(|i| i as &dyn IsMenuItem<Wry>).collect();
+    if prefs.is_empty() {
+        prefs.push(&none);
+    }
+    let packs_menu = Submenu::with_items(app, "Packs", true, &prefs)?;
+    let save_pack = MenuItem::with_id(app, "pack-save", "Save current as pack", true, None::<&str>)?;
+    let export = MenuItem::with_id(app, "pack-export", "Export .hayaku…", true, None::<&str>)?;
+    let import = MenuItem::with_id(app, "pack-import", "Import .hayaku…", true, None::<&str>)?;
+    let sep2 = PredefinedMenuItem::separator(app)?;
     let mut refs: Vec<&dyn IsMenuItem<Wry>> = items.iter().map(|i| i as &dyn IsMenuItem<Wry>).collect();
     refs.push(&sep);
     refs.push(&open);
     refs.push(&robot);
+    refs.push(&sep2);
+    refs.push(&packs_menu);
+    refs.push(&save_pack);
+    refs.push(&export);
+    refs.push(&import);
     Submenu::with_items(app, "Avatar", true, &refs)
 }
 
@@ -158,8 +179,12 @@ pub struct Pending(pub Mutex<Option<PathBuf>>);
 #[tauri::command]
 pub fn drop_ask(window: WebviewWindow, path: String) -> Result<(), String> {
     let p = PathBuf::from(&path);
-    mime(&p).ok_or("not an image type")?;
     let app = window.app_handle();
+    if p.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("hayaku")) {
+        crate::packs::import_file(app, &p);   // a .hayaku file: shown and added to the packs, no status asked
+        return Ok(());
+    }
+    mime(&p).ok_or("not an image type")?;
     *app.state::<Pending>().0.lock().unwrap() = Some(p.clone());
     let e = |e: tauri::Error| e.to_string();
     let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("file").to_string();
@@ -205,6 +230,14 @@ pub fn on_menu(app: &AppHandle, id: &str) -> bool {
                 }
             }
         });
+    } else if let Some(pid) = id.strip_prefix("pack:") {
+        let _ = app.emit_to("main", "pack-pick", pid.to_string());
+    } else if id == "pack-save" {
+        let _ = app.emit_to("main", "pack-save", ());
+    } else if id == "pack-export" {
+        crate::packs::export(app);
+    } else if id == "pack-import" {
+        crate::packs::import(app);
     } else if id == "drop-cancel" {
         *app.state::<Pending>().0.lock().unwrap() = None;
     } else if let Some(k) = id.strip_prefix("drop-") {
