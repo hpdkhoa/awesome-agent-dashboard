@@ -198,6 +198,15 @@ async function runText(name, id, live) {
   window.FB.boxAsks += 1;
   return JSON.parse(await invoke("box_text", { url: box.url, token, body: JSON.stringify(live ? { live: id } : { run: id }) }));
 }
+// plan c5cb9485 s12: the k-th session reply on an ask (from 0), read from the session's log on the box that holds the ask,
+// as the page reads it (web FileView.tsx PcText reply); shown, never stored
+async function replyText(name, session, item, k) {
+  const box = boxes.find((b) => b.name === name);
+  if (!box) throw new Error("the box has no data API");
+  const token = await auth.currentUser.getIdToken();
+  window.FB.boxAsks += 1;
+  return JSON.parse(await invoke("box_text", { url: box.url, token, body: JSON.stringify({ reply: { session, item, k } }) }));   // {text, chars, k, of}
+}
 // plan c5cb9485 s4: the NEEDS YOU deck. The owner's open asks from every box (inbox status "open"), read only while the
 // deck is open: each registered box answers through its data API, then one open "changes" call per box re-reads its
 // inbox only when the inbox changed there (deck closed = nothing asked). No registered box: one Firestore listen.
@@ -267,5 +276,5 @@ async function picture(name, path, cwd) {
   return invoke("box_picture", { url: box.url, token, path, cwd });
 }
 // reads/writes: Firestore bills one read per changed record delivered (at least one per answer); counted for the checks
-window.FB = { start, stop, sessions, send, envKeys, envSet, runState, runText, needsOpen, needsClose, needsWrite, planTitle, picture, needAsks: 0, pics: 0, ratesOpen, ratesClose, saveFx, saveGold, signedIn: () => !!(auth && auth.currentUser), reads: 0, writes: 0,
+window.FB = { start, stop, sessions, send, envKeys, envSet, runState, runText, replyText, needsOpen, needsClose, needsWrite, planTitle, picture, needAsks: 0, pics: 0, ratesOpen, ratesClose, saveFx, saveGold, signedIn: () => !!(auth && auth.currentUser), reads: 0, writes: 0,
   boxAsks: 0, boxes: () => boxes.map((b) => b.name) };

@@ -194,6 +194,16 @@ html,body{margin:0;background:transparent;overflow:hidden;font-family:Tahoma,Ver
 .nact button{font:12px Tahoma;letter-spacing:1px;background:transparent;color:var(--green);border:1px solid var(--green);padding:2px 12px;cursor:pointer}
 .nact button.o{border-color:#888;color:#aaa}
 .nact button.no{border-color:var(--pink);color:var(--pink)}
+.nact button.ab{border-color:var(--orange);color:var(--orange)}
+/* s12: the ask's thread (you asked, the session's reply, a redraw) */
+.nthr{margin-top:6px;max-height:150px;overflow:auto}
+.nthh{font-size:9px;color:#6a7a80;letter-spacing:1px;margin-bottom:2px}
+.nth{border-left:2px solid #444;padding:2px 6px;margin:3px 0;font-size:11px;color:#f8f8f8;white-space:pre-wrap;word-break:break-word;user-select:text;cursor:text}
+.nth span{display:block;font-size:10px;color:#9ab}
+.nth.ask{border-color:var(--orange)}.nth.ask span{color:var(--orange)}
+.nth.ses{border-color:var(--green)}.nth.ses span{color:var(--green)}
+.nth.redraw{border-color:#e8f0ff}.nth.redraw span{color:#e8f0ff}
+.nth i{color:#7a8a90}
 .nact button:disabled{color:#6a7a80;border-color:#4a5a60;cursor:default}
 .nsay{font-size:11px;color:#9ab;margin-top:5px;white-space:normal}
 .nsay.bad{color:var(--orange)}

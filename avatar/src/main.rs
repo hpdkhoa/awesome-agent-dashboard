@@ -101,7 +101,7 @@ fn post_box(url: &str, token: &str, body: &str, route: &str) -> Result<String, S
         }
     } else {
         let op = v.get("op").and_then(|o| o.as_str()).unwrap_or("");
-        if !["find", "get", "count", "seq", "changes", "env_keys"].contains(&op) && !is_send(&v) && !is_answer(&v) && !is_env_set(&v) {
+        if !["find", "get", "count", "seq", "changes", "env_keys"].contains(&op) && !is_send(&v) && !is_answer(&v) && !is_ask_back(&v) && !is_env_set(&v) {
             return Err(format!("{op} is not a read"));
         }
     }
@@ -169,6 +169,23 @@ fn is_answer(v: &serde_json::Value) -> bool {
         && !f.is_empty() && f.keys().all(|k| ANSWER_FIELDS.contains(&k.as_str()))
         && f.get("status").map_or(true, |x| x == "answered" && f.get("answer").is_some_and(|a| a.is_object()))
         && f.get("error").map_or(true, |x| x.is_null())
+        && (!f.contains_key("thread") || f.contains_key("draft"))   // s12: a thread alone is an ask back (is_ask_back)
+}
+
+// plan c5cb9485 s12 (owner's pick "Add to the deck", preview "Approve"): ASK BACK, the page's askBack (web/src/data.ts):
+// one inbox record's thread, and nothing else, whose last line is the owner's question {who "owner", kind "ask", text,
+// at}. The session replies in the thread (inbox_reply), or redraws the question (inbox_redraw).
+fn is_ask_back(v: &serde_json::Value) -> bool {
+    let s = |o: &serde_json::Value, k: &str| o.get(k).and_then(|x| x.as_str()).map(str::to_string);
+    let (Some(path), Some(f)) = (s(v, "path"), v.get("fields").and_then(|f| f.as_object())) else { return false };
+    let id = path.strip_prefix("inbox/").unwrap_or("");
+    let Some(t) = f.get("thread").and_then(|t| t.as_array()) else { return false };
+    let last = t.last();
+    s(v, "op").as_deref() == Some("update") && v.as_object().is_some_and(|o| o.len() == 3)
+        && !id.is_empty() && id.len() <= 40 && id.chars().all(|c| c.is_ascii_alphanumeric())
+        && f.len() == 1 && t.iter().all(|x| x.is_object())
+        && last.is_some_and(|l| s(l, "who").as_deref() == Some("owner") && s(l, "kind").as_deref() == Some("ask")
+            && s(l, "text").is_some_and(|x| (1..=4000).contains(&x.trim().len())) && s(l, "at").is_some())
 }
 
 // s4: a picture of an ask, from the box that asked: its /ticket (the same route and lock as the page's file viewer),
@@ -220,10 +237,18 @@ async fn box_picture(url: String, token: String, path: String, cwd: String) -> R
 }
 
 // s3: {"run": id} or {"live": id}, one key, the run id letters and digits only
+// s12: or {"reply": {"session", "item", "k"}}: the k-th session reply on an ask, read from the session's log (texts.py)
 fn is_run_text(v: &serde_json::Value) -> bool {
     let Some(o) = v.as_object() else { return false };
-    o.len() == 1 && ["run", "live"].iter().any(|k| o.get(*k).and_then(|x| x.as_str())
-        .is_some_and(|id| !id.is_empty() && id.len() <= 40 && id.chars().all(|c| c.is_ascii_alphanumeric())))
+    let alnum = |id: &str| !id.is_empty() && id.len() <= 40 && id.chars().all(|c| c.is_ascii_alphanumeric());
+    if let Some(r) = o.get("reply").and_then(|r| r.as_object()) {
+        let sid = r.get("session").and_then(|x| x.as_str()).unwrap_or("");
+        return o.len() == 1 && r.len() == 3
+            && !sid.is_empty() && sid.len() <= 64 && sid.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+            && r.get("item").and_then(|x| x.as_str()).is_some_and(alnum)
+            && r.get("k").and_then(|x| x.as_u64()).is_some_and(|k| k < 1000);
+    }
+    o.len() == 1 && ["run", "live"].iter().any(|k| o.get(*k).and_then(|x| x.as_str()).is_some_and(alnum))
 }
 
 #[tauri::command]
@@ -437,7 +462,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{b64, is_answer, is_env_set, is_run_text, is_send};
+    use super::{b64, is_answer, is_ask_back, is_env_set, is_run_text, is_send};
     use serde_json::json;
     #[test]
     fn only_a_new_start_or_message_command_is_a_write() {
@@ -465,6 +490,35 @@ mod tests {
                     json!({"reply": {"session": "s"}}), json!({"run": 5})] {
             assert!(!is_run_text(&bad), "{bad}");
         }
+        assert!(is_run_text(&json!({"reply": {"session": "178b4429-f7c5-484f-a140-3eb7d4aa1b3f", "item": "abc123", "k": 0}})));
+        for bad in [json!({"reply": {"session": "s/../x", "item": "abc", "k": 0}}), json!({"reply": {"session": "s", "item": "a/b", "k": 0}}),
+                    json!({"reply": {"session": "s", "item": "abc", "k": -1}}), json!({"reply": {"session": "s", "item": "abc", "k": 0, "x": 1}}),
+                    json!({"reply": {"session": "s", "item": "abc", "k": 0}, "run": "abc"})] {
+            assert!(!is_run_text(&bad), "{bad}");
+        }
+    }
+    #[test]
+    fn only_an_ask_back_line_on_one_inbox_record() {
+        let ask = json!({"who": "owner", "kind": "ask", "text": "why?", "at": "2026-11-16T00:00:00Z"});
+        let old = json!({"who": "session", "kind": "reply", "chars": 5, "at": "2026-11-16T00:00:00Z"});
+        assert!(is_ask_back(&json!({"op": "update", "path": "inbox/abc123", "fields": {"thread": [old, ask]}})));
+        let ans = json!({"who": "owner", "kind": "answer", "choice": "A", "text": "", "at": "x"});
+        for bad in [
+            json!({"op": "update", "path": "inbox/abc123", "fields": {"thread": [ans]}}),
+            json!({"op": "update", "path": "inbox/abc123", "fields": {"thread": [{"who": "session", "kind": "ask", "text": "x", "at": "x"}]}}),
+            json!({"op": "update", "path": "inbox/abc123", "fields": {"thread": [{"who": "owner", "kind": "ask", "text": "  ", "at": "x"}]}}),
+            json!({"op": "update", "path": "inbox/abc123", "fields": {"thread": []}}),
+            json!({"op": "update", "path": "inbox/abc123", "fields": {"thread": [ask], "status": "answered"}}),
+            json!({"op": "update", "path": "inbox/abc123", "fields": {"thread": [ask], "title": "x"}}),
+            json!({"op": "update", "path": "commands/abc123", "fields": {"thread": [ask]}}),
+            json!({"op": "update", "path": "inbox/../x", "fields": {"thread": [ask]}}),
+            json!({"op": "set", "path": "inbox/abc123", "fields": {"thread": [ask]}}),
+            json!({"op": "update", "path": "inbox/abc123", "fields": {"thread": [ask]}, "merge": true}),
+        ] {
+            assert!(!is_ask_back(&bad), "{bad}");
+        }
+        // a thread alone is no longer an answer write: it must pass the ask back rule
+        assert!(!is_answer(&json!({"op": "update", "path": "inbox/abc123", "fields": {"thread": [ans]}})));
     }
     #[test]
     fn only_one_allowed_key_goes_to_the_env() {

@@ -799,6 +799,8 @@ function renderNeed() {
       act = `<button type="button" data-act="save">${q.draft ? "CHANGE, NEXT" : "SAVE, NEXT"}</button>`
         + (ready ? `<button type="button" data-act="sendall">SEND ${open.length} ANSWERS</button>` : "");
     }
+    if (pickable && q.via !== "hook") act += `<button type="button" class="ab" data-act="askback">ASK BACK</button>`;
+    h += nThread(q);
     act += dash;
   }
   if (nBusy) act = act.replace(/<button /g, "<button disabled ");
@@ -815,6 +817,39 @@ function renderNeed() {
   const boxesN = new Set((nItems || []).map((x) => x._box)).size;
   setText($("nfoot"), `${(nItems || []).length} waiting on ${boxesN} box${boxesN === 1 ? "" : "es"} · oldest first · click a picture: full size · listens only while open`);
   if (changed && shown === "need") fit();
+}
+// plan c5cb9485 s12 (preview "Approve"): the ask's thread under its options, as the page shows it (Inbox.tsx Thread):
+// you asked, you saved, the session's reply, a redraw. A reply made after 2026-11-08 keeps only its length in the record:
+// its words are read from the session's log on the box that holds the ask (main.rs box_text reply), shown, never stored.
+const nReply = new Map();
+function nThread(q) {
+  const t = q.thread || [];
+  if (!t.length) return "";
+  let k = 0, h = "";
+  for (const x of t) {
+    const who = x.who === "owner" ? (x.kind === "ask" ? "you asked" : "you saved") : x.kind === "redraw" ? "session redrew" : "session";
+    let body;
+    if (x.kind === "answer") body = `<b>${esc([x.choice, x.text].filter(Boolean).join(" · "))}</b>`;
+    else if (x.who === "session" && x.kind !== "redraw" && x.text == null) {
+      const key = `${q._box}|${q.id}|${k}`, got = nReply.get(key);
+      if (got === undefined && q.sessionId) {
+        nReply.set(key, null);
+        FB.replyText(q._box, q.sessionId, q.id, k).then((r) => nReply.set(key, (r && r.text) || ""), (e) => nReply.set(key, { err: String(e.message || e).slice(0, 80) }))
+          .then(() => { if (layer === "need") renderNeed(); });
+      }
+      body = typeof got === "string" ? esc(got) : got && got.err ? `<i>${esc(got.err)}</i>` : `<i>reading the reply from ${esc(q.machine || q._box)}...</i>`;
+    } else body = esc(x.text || "");
+    if (x.who === "session" && x.kind !== "redraw") k += 1;
+    const c = x.who === "owner" ? (x.kind === "ask" ? "ask" : "own") : x.kind === "redraw" ? "redraw" : "ses";
+    h += `<div class="nth ${c}"><span>${who} · ${esc(nAgo(x.at))}</span>${body}</div>`;
+  }
+  return `<div class="nthr"><div class="nthh">THREAD (${t.length})</div>${h}</div>`;
+}
+// the page's askBack (web/src/data.ts): the owner's question as one more thread line; the session replies in the thread
+async function nAskBack(q, text) {
+  const thread = [...(q.thread || []), { who: "owner", kind: "ask", text, at: new Date().toISOString() }];
+  await FB.needsWrite(q._box, q.id, { thread });
+  q.thread = thread;   // shown at once; the next read of the box brings the same
 }
 // the pictures of the shown ask, from the box that asked (main.rs box_picture); kept only while the deck is open
 function nFill() {
@@ -873,6 +908,12 @@ function needAct(el) {
       sel.choice = q.options.map((x) => x.label).filter((l) => next.includes(l)).join(", ");   // in the offered order, as the page joins it
     } else sel.choice = sel.choice === o ? "" : o;
     nSay = ""; nSayBad = false; return renderNeed();
+  }
+  if (a === "askback") {
+    if (q.kind !== "question" || !nOpen(q)) return;
+    if (!text) { nSay = "Write your question in the note first."; nSayBad = true; return renderNeed(); }
+    return nRun(async () => { await nAskBack(q, text); sel.text = ""; $("nnote").value = ""; })
+      .then(() => { if (!nSayBad) { nSay = "asked · the session replies in the thread"; renderNeed(); } });
   }
   if (a === "allow" || a === "deny") return nRun(() => nAnswer(q, a === "allow" ? "Allow" : "Deny", text));
   if (a === "accept" || a === "decline") return nRun(() => nAnswer(q, a === "accept" ? "Accept" : "Decline", text));
