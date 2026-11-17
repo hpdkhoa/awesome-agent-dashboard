@@ -25,7 +25,7 @@ import { Clamp } from "./Clamp";
 import { usePhone } from "./phone";
 import { StepEvidenceCard } from "./EvidenceView";
 import { keyNumber, openItems, sortCheck, sortReply, type Item, type Sorted } from "./reportSort";
-import { useStepEvidence, type StepEvidence, type StepReport } from "./data";
+import { useStepEvidence, type Material, type StepEvidence, type StepReport } from "./data";
 import { dt, tm } from "./fmt";
 
 // A plan with six parts (plan from a session; the owner's words, 2026-11-03, in cc/dashboard/SESSION_PLAN.md).
@@ -182,6 +182,10 @@ const FEATURE: Record<FeatureState, string> = {
   built: "built, no open item", open: "built, open item", doing: "being built", failed: "failed", next: "not built",
 };
 
+// The board's materials, grouped (the owner's pick: the recommended three groups); the session sends only the latest
+// version of each, and the bridge drops older vN of the same file.
+const MATERIAL_GROUPS: [Material["kind"], string][] = [["story", "Stories"], ["material", "Materials"], ["file", "Other files"]];
+
 function featureOf(ids: string[], steps: PlanStep[]) {
   const svs = ids.map((id) => steps.find((x) => x.stepId === id));
   const lasts = svs.map((sv) => lastOf(sv)).filter((x): x is NonNullable<typeof x> => !!x);
@@ -193,7 +197,7 @@ function featureOf(ids: string[], steps: PlanStep[]) {
   return { state, open, key: newest ? keyNumber(newest.reply, newest.report) : "" };
 }
 
-function ReportBoard({ plan, v, steps, evidence, asked, onOpenItem, stale }: {
+export function ReportBoard({ plan, v, steps, evidence, asked, onOpenItem, stale }: {
   plan: Plan; v: PlanVersion; steps: PlanStep[]; evidence: StepEvidence[]; asked: InboxItem[]; onOpenItem: (id: string) => void; stale?: string;
 }) {
   const b = v.parts?.board;
@@ -235,6 +239,20 @@ function ReportBoard({ plan, v, steps, evidence, asked, onOpenItem, stale }: {
               ))}
             </div>
           </div>
+          {(b.materials?.length ?? 0) > 0 && (
+            <div className="board-box">
+              <p className="board-lab">Materials · latest version of each ({b.materials!.length})</p>
+              {MATERIAL_GROUPS.map(([kind, label]) => {
+                const list = b.materials!.filter((m) => m.kind === kind);
+                return list.length > 0 && (
+                  <div key={kind} className="board-mats">
+                    <p className="small"><b>{label}</b> <span className="muted">({list.length})</span></p>
+                    {md(list.map((m) => `- ${m.path ? `[${m.name}](<${m.path}>)` : m.name}${m.note ? ` · ${m.note}` : ""}`).join("\n"), plan)}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </>
       )}
       <div className="board-row">

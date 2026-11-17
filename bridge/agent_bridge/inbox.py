@@ -219,7 +219,50 @@ def clean_parts(parts: dict) -> dict:
 # fields"): what the plan is for in one line, the idea in a few lines, and the final product as features, each naming
 # the steps that build it. The page colors each feature from its steps' states, so the board never goes stale.
 BOARD_SHAPE = ('{"what_for": one line, "idea": [short lines], "product": [{"feature": short name, '
-               '"steps": [the step ids that build it]}]}')
+               '"steps": [the step ids that build it]}], "materials": [{"name", "path" (a full path; none for a material '
+               'given as text), "kind": "story" | "material" | "file", "note"}] (optional)}')
+
+# Materials on the board (the owner's words, 2026-11-17: "Add material section in report board, in this section only
+# keep the latest version of each file/material and stories"; pick "sửa web + bridge chọn session ghi"): the session
+# lists the plan's files, materials and stories; one entry per family, the newest version kept (vN in the name).
+MATERIAL_KINDS = ("story", "material", "file")
+_VER = re.compile(r"[-_. ]?v(\d+)(?=\.[^.\\/]+$|$)", re.I)
+_SEP = re.compile(r"[\\/]")
+
+
+def material_family(m: dict) -> tuple[str, int]:
+    """(the family key, the version number) of a material: its file name or name without its -vN, and N (0 when none)."""
+    path = m.get("path") or ""
+    base = _SEP.split(path)[-1] or m.get("name", "")
+    hit = _VER.search(base)
+    n = int(hit.group(1)) if hit else 0
+    key = (base[:hit.start()] + base[hit.end():]) if hit else base
+    folder = _SEP.split(path.lower())[:-1]
+    folder = "/".join(folder)
+    return folder + "|" + key.lower().strip(), n
+
+
+def clean_materials(items) -> list[dict]:
+    """The board's materials, cleaned: a name, a kind, an optional path and note; for each family only the newest
+    version stays (the higher vN; the same N: the later entry)."""
+    keep: dict[str, tuple[int, int, dict]] = {}
+    for i, m in enumerate(items or []):
+        if not isinstance(m, dict):
+            continue
+        path = str(m.get("path") or "").strip().strip("`")
+        name = redact(str(m.get("name") or "").strip() or _SEP.split(path)[-1], 160)
+        if not name:
+            continue
+        kind = str(m.get("kind") or "file").strip().lower()
+        out = {"name": name, "kind": kind if kind in MATERIAL_KINDS else "file"}
+        if path:
+            out["path"] = redact(path, 400)
+        if str(m.get("note") or "").strip():
+            out["note"] = redact(str(m["note"]).strip(), 300)
+        key, n = material_family(out)
+        if key not in keep or (n, i) >= keep[key][:2]:
+            keep[key] = (n, i, out)
+    return [x[2] for x in sorted(keep.values(), key=lambda x: x[1])][:60]
 
 
 def clean_board(board, step_ids: list[str]) -> dict:
@@ -243,7 +286,8 @@ def clean_board(board, step_ids: list[str]) -> dict:
                          "builds (or a new feature), so the board follows the plan.")
     if not what or not product:
         raise ValueError("board needs what_for and product: " + BOARD_SHAPE)
-    return {"whatFor": what, "idea": idea, "product": product[:30]}
+    mats = clean_materials(board.get("materials"))
+    return {"whatFor": what, "idea": idea, "product": product[:30], **({"materials": mats} if mats else {})}
 
 
 NO_BOARD = (" This plan has no board yet: add parts.board (what_for, idea, product with step ids) in the next "
@@ -913,8 +957,13 @@ def server():
         markdown (cite log entries as #n), "rules": [{"rule", "source"}], "lessons": [{"lesson", "taught_by",
         "applied_in"}], "leftover": [text], "steps": [{"id", "title", "does", "check", "new": true for work the record does not hold}],
         "board": {"what_for": one line, what the plan is for, "idea": [short lines, how], "product": [{"feature": the
-        final product's feature, short, "steps": [the step ids that build it]}]}}. The board is the plan's main look:
-        the page colors each feature from its steps' states. source: the command id the dashboard gave you when it
+        final product's feature, short, "steps": [the step ids that build it]}], "materials": [{"name", "path": the
+        full path (none for a material the owner gave as text), "kind": "story" (story text), "material" (the
+        owner's material, references, logs) or "file" (maps, pictures, tools), "note"}]}}. The board is the plan's
+        main look: the page colors each feature from its steps' states. materials: the latest version of each file,
+        material and story of the plan, one entry each (the owner's words, 2026-11-17: "only keep the latest version
+        of each file/material and stories"); the bridge keeps the newest vN of a family. Send it again with every
+        version, updated. source: the command id the dashboard gave you when it
         asked for a plan from a session."""
         try:
             plan_id = await asyncio.to_thread(inbox.plan_start, title, text, note, parts, source, harness)

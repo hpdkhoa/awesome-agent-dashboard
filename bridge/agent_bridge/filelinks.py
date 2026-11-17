@@ -99,6 +99,13 @@ def attached_paths(store):
         for r in file_refs(it.get("text") or ""):
             if (a := ab(r, cwd)):
                 yield a
+    # the materials a plan's board lists (the owner, 2026-11-17: "Add material section in report board")
+    for plan in store.query("plans"):
+        pid, cur = plan.get("id") or plan.get("__id") or "", plan.get("current")
+        board = ((store.get(f"planVersions/{pid}_v{cur}") or {}).get("parts") or {}).get("board") or {} if pid else {}
+        for m in board.get("materials") or []:
+            if (a := ab(m.get("path") or "", plan.get("cwd") or "")):
+                yield a
     cwds: dict[str, str] = {}
     for sv in store.query("planSteps"):
         pid = sv.get("planId") or str(sv.get("id", "")).split("_")[0]

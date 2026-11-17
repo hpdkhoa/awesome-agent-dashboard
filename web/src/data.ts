@@ -116,7 +116,10 @@ export type Parts = {
   cite?: string; // the owner's words the plan reads, in log order (2026-11-05); part 1 says what the plan is for
   board?: Board; // the plan's main look (bridge inbox.py clean_board; the owner's pick, 2026-11-16, "Product board, new fields")
 };
-export type Board = { whatFor: string; idea: string[]; product: { feature: string; steps: string[] }[] };
+// materials (the owner's words, 2026-11-17: "Add material section in report board, in this section only keep the latest
+// version of each file/material and stories"; pick: the session writes the list; the bridge keeps the newest vN).
+export type Material = { name: string; kind: "story" | "material" | "file"; path?: string; note?: string };
+export type Board = { whatFor: string; idea: string[]; product: { feature: string; steps: string[] }[]; materials?: Material[] };
 // The message kinds on a plan: four change it (a new plan version), Q&A never does; Action does the work asked and makes
 // no version (step i11, the owner's words, 2026-11-16: "need action type to cover this case when I ask you to perform an action").
 export type PlanKind = "qa" | "goal" | "step" | "rule" | "lesson" | "action";

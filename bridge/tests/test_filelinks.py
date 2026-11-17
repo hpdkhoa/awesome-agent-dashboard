@@ -41,10 +41,11 @@ def test_attached_paths_takes_report_text_links():
     from agent_bridge.filelinks import attached_paths
 
     class S:
-        docs = {"plans/p1": {"cwd": r"K:\work"}}
+        docs = {"plans/p1": {"cwd": r"K:\work"}, "planVersions/p1_v2": {"parts": {"board": {"materials": [
+            {"name": "World", "path": r"K:\story\the-gioi-v1.md", "kind": "story"}, {"name": "Material #19", "kind": "material"}]}}}}
 
         def query(self, coll):
-            return {"planEvidence": [{"sets": [{"pictures": [r"K:\out\a.png"]}]}],
+            return {"plans": [{"id": "p1", "current": 2, "cwd": r"K:\work"}], "planEvidence": [{"sets": [{"pictures": [r"K:\out\a.png"]}]}],
                     "planSteps": [{"planId": "p1", "versions": [{"reply": r"- wrote `K:\story\b.md` and `notes/c.md`",
                                                                   "report": {"built": ["[map](K:/story/d.svg)"]}}]}]}[coll]
 
@@ -60,3 +61,4 @@ def test_attached_paths_takes_report_text_links():
     assert any(g.endswith("c.md") and g.startswith(r"K:\work") for g in got)  # relative: from the plan's folder
     assert any(g.endswith("e.png") and g.startswith(r"K:\res") for g in got)
     assert not any(g.endswith("plain.md") for g in got)  # plain text is no link on the page either
+    assert r"K:\story\the-gioi-v1.md" in got  # a board material opens too

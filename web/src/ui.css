@@ -204,3 +204,4 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
 .picks td { vertical-align: middle; }
 .picks { width: 100%; }
 .picks select { width: 100%; min-width: 5.5rem; }
+.board-mats { margin: 0.3rem 0 0.5rem; }

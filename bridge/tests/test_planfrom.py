@@ -430,3 +430,34 @@ def test_an_action_message_can_edit_its_scope_rides_in_the_message_and_it_never_
     q = ib.ask_switch("step", "add s2", "the work needs a step")
     store.update(f"inbox/{q}", {"status": "answered", "answer": {"choice": "Switch to Add step", "text": "", "at": "t"}})
     assert ib.confirm_switch(q) is True and ib.plan_version(pid, "", "added s2", parts=PARTS) == 2
+
+
+def test_board_materials_keep_only_the_latest_version():
+    # the owner, 2026-11-17: "Add material section in report board, in this section only keep the latest version of
+    # each file/material and stories"; pick: the session writes the list
+    from agent_bridge.inbox import clean_board
+
+    b = clean_board({"what_for": "x", "product": [{"feature": "f", "steps": ["s1"]}], "materials": [
+        {"name": "Canon map", "path": r"K:\story\map\so-do-canon-v1.png", "kind": "file"},
+        {"name": "World model", "path": r"K:\story\the-gioi-v1.md", "kind": "story"},
+        {"name": "Canon map", "path": r"K:\story\map\so-do-canon-v2.png", "kind": "file"},
+        {"name": "World model v3", "path": r"K:\story\the-gioi-v3.md", "kind": "story", "note": "after s4"},
+        {"name": "Material #19", "kind": "material", "note": "beasts"},
+        {"name": "", "path": r"K:\story\abyss.jpg", "kind": "odd"},
+        "not a dict",
+        {"name": "Same name, other folder", "path": r"K:\other\the-gioi-v1.md", "kind": "story"},
+    ]}, ["s1"])
+    m = b["materials"]
+    paths = [x.get("path") for x in m]
+    assert r"K:\story\map\so-do-canon-v2.png" in paths and r"K:\story\map\so-do-canon-v1.png" not in paths
+    assert r"K:\story\the-gioi-v3.md" in paths and r"K:\story\the-gioi-v1.md" not in paths
+    assert r"K:\other\the-gioi-v1.md" in paths  # another folder is another family
+    assert {"name": "Material #19", "kind": "material", "note": "beasts"} in m
+    assert {"name": "abyss.jpg", "kind": "file", "path": r"K:\story\abyss.jpg"} in m  # name from the path, odd kind -> file
+    assert len(m) == 5
+
+
+def test_board_without_materials_has_no_materials_key():
+    from agent_bridge.inbox import clean_board
+
+    assert "materials" not in clean_board({"what_for": "x", "product": [{"feature": "f", "steps": ["s1"]}]}, ["s1"])
