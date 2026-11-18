@@ -1242,6 +1242,16 @@ class Runs:
             return f"{c['id']}: stopping {target}"
         p = self.procs.get(target)
         if p is None or p.poll() is not None:
+            # No process here (the owner's words, 2026-11-18: "the stop button always show when run item is not done
+            # or stopped or canceled"): a run still new, waiting, paused or stuck in running/stopping ends as stopped;
+            # a failed or lost run keeps its status (its record says why it ended).
+            with self.auto_lock:
+                (self.auto or {}).pop(target, None)
+            old = (self.store.get(f"commands/{target}") or {}).get("status")
+            if old in ("new", "waiting", "paused", "running", "stopping"):
+                self.store.update(f"commands/{target}", {"status": "stopped", "endedAt": now_iso()})
+                self.store.update(f"commands/{c['id']}", {"status": "done", "endedAt": now_iso()})
+                return f"{c['id']}: stopped {target} ({old}, no process)"
             self.store.update(f"commands/{c['id']}", {"status": "failed", "error": "That run is not running on this machine."})
             return f"{c['id']}: nothing to stop"
         _kill_tree(p)

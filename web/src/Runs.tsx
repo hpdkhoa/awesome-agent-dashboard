@@ -575,7 +575,8 @@ export function RunList({ runs, title = "Runs from the dashboard", paged = false
               <LiveText run={r.id} cwd={r.cwd ?? r.folder ?? ""} />
             </>
           )}
-          {r.status === "running" && (
+          {/* the owner's words, 2026-11-18: "the stop button always show when run item is not done or stopped or canceled" */}
+          {r.status !== "done" && r.status !== "stopped" && r.status !== "cancelled" && (
             <div className="actions">
               <button onClick={() => stopRun(r.machine, r.id)}>Stop</button>
             </div>
