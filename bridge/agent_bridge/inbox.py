@@ -361,6 +361,33 @@ class Inbox:
         plans = [p for p in self.store.where("plans", "sessionId", self.session_id) if not p.get("upgradedTo")]
         return max(plans, key=lambda p: p.get("createdAt", ""), default=None)
 
+    def plan_get(self, plan_id: str, part: str = "") -> dict:
+        """G2 (the owner, 2026-11-18: "all 5 gap, fix one by one"): the plan as it is now, read from the store, so a fresh
+        session (a handoff, a Together step) reads the parts instead of guessing them: the current version's six parts,
+        the harness with the owner's ticks (approved: ticked and the text unchanged) and each step's last state.
+        part: one part only (goal, summary, rules, lessons, leftover, steps, board, harness), to keep the reply small."""
+        plan = self.store.get(f"plans/{plan_id}")
+        if not plan:
+            raise ValueError(f"no plan {plan_id}")
+        n = plan.get("current", 0)
+        v = self.store.get(f"planVersions/{plan_id}_v{n}") or {}
+        parts = v.get("parts") or {}
+        ticks = (self.store.get(f"planHarness/{plan_id}") or {}).get("items") or {}
+        harness = [{**h, "approved": bool((ticks.get(h["id"]) or {}).get("ok")) and ticks[h["id"]].get("hash") == item_hash(h)}
+                   for h in v.get("harness") or []]
+        states = {st["id"]: (self.store.get(f"planSteps/{plan_id}_{st['id']}") or {}).get("state", "next")
+                  for st in parts.get("steps") or []}
+        out = {"plan": plan_id, "title": plan.get("title", ""), "phase": plan.get("phase") or "explore", "version": n}
+        if part:
+            if part == "harness":
+                return {**out, "harness": harness}
+            if part not in parts:
+                raise ValueError(f"no part {part}: the parts are {', '.join(parts) or 'none'}, or harness")
+            return {**out, part: parts[part], **({"stepStates": states} if part == "steps" else {})}
+        if not parts:
+            out["text"] = v.get("text", "")
+        return {**out, "parts": parts, "harness": harness, "stepStates": states}
+
     def plan_start(self, title: str, text: str = "", note: str = "", parts: dict | None = None, source: str = "",
                    harness: list | None = None) -> str:
         """parts: the six parts of v1. source: the id of the dashboard command that read a session for this plan.
@@ -1040,6 +1067,21 @@ def server():
         except ValueError as e:
             return str(e)
         return f"Saved step version {n} of {step_id} ({state})."
+
+    @mcp.tool()
+    async def plan_get(plan_id: str = "", part: str = "") -> str:
+        """Read the plan as it is now: the current version's six parts, the harness (approved: the owner ticked it and
+        its text is unchanged) and each step's last state. Read it before changing the plan or working on a step when
+        the conversation does not hold it. plan_id: this session's plan when empty. part: one part only (goal,
+        summary, rules, lessons, leftover, steps, board, harness) to keep the reply small."""
+        plan_id = plan_id or ((await asyncio.to_thread(inbox.open_plan)) or {}).get("id", "")
+        if not plan_id:
+            return "No plan in this session."
+        try:
+            got = await asyncio.to_thread(inbox.plan_get, plan_id, part)
+        except ValueError as e:
+            return str(e)
+        return json.dumps(got, ensure_ascii=False, separators=(",", ":"))
 
     @mcp.tool()
     async def plan_switch(to: str, change: str, why: str, ctx: Context) -> str:

@@ -382,3 +382,24 @@ def test_board_is_kept_checked_and_never_dropped():
     assert store.docs[f"plans/{pid}"]["current"] == n
     # the stored camelCase board goes through again (a plain version or a resend of the read-back parts)
     assert ib.plan_version(pid, "", "resend", parts=saved["parts"]) == n + 1
+
+
+def test_plan_get_reads_the_current_parts_harness_and_step_states():
+    """G2 (the owner, 2026-11-18: "all 5 gap, fix one by one"): a fresh session reads the plan from the store."""
+    import pytest
+    from agent_bridge.inbox import item_hash
+    store = FakeStore()
+    ib = make(store)
+    pid = ib.plan_start("P", parts=PARTS)
+    h = [{"id": "h1", "kind": "tool", "item": "pytest"}, {"id": "h2", "kind": "check", "item": "ok"}]
+    ib.plan_version(pid, "", "harness", parts=PARTS, harness=h)
+    store.put_many({f"planHarness/{pid}": {"items": {"h1": {"ok": True, "hash": item_hash(h[0])}}}})
+    got = ib.plan_get(pid)
+    assert got["version"] == 2 and got["parts"]["steps"] == PARTS["steps"] and got["stepStates"] == {"s1": "next"}
+    assert [x["approved"] for x in got["harness"]] == [True, False]
+    assert ib.plan_get(pid, "rules") == {"plan": pid, "title": "P", "phase": "explore", "version": 2, "rules": []}
+    assert [x["id"] for x in ib.plan_get(pid, "harness")["harness"]] == ["h1", "h2"]
+    with pytest.raises(ValueError):
+        ib.plan_get(pid, "nope")
+    with pytest.raises(ValueError):
+        ib.plan_get("missing")

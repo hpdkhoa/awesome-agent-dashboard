@@ -76,7 +76,7 @@ def handoff_prompt(old_sid: str, old_log: str, turns: list[dict], message: str, 
     parts = head + ["## The last turns of the old session", *body]
     if plan_id:
         parts.append(f"## Plan\nPlan {plan_id} now belongs to this session: its tools (plan_version, step_update, the "
-                     f"inbox) work with plan_id=\"{plan_id}\" as before. Read the plan's parts from its current version before "
+                     f"inbox) work with plan_id=\"{plan_id}\" as before. Read the plan's parts with plan_get before "
                      f"changing anything.")
     parts.append(f"## The owner's message now\n{message}")
     return "\n\n".join(parts)
