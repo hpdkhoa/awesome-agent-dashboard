@@ -951,7 +951,9 @@ class Runs:
         turns = turns_of(path, 2000) if path else []
         new_sid = str(uuid.uuid4())
         plan_id = str(c.get("planId") or "")
-        prompt = handoff_prompt(sid, str(path or ""), turns, text, plan_id, context)
+        plan = self.store.get(f"plans/{plan_id}") if plan_id else None
+        parts = ((self.store.get(f"planVersions/{plan_id}_v{plan.get('current', 0)}") or {}).get("parts") if plan else None)
+        prompt = handoff_prompt(sid, str(path or ""), turns, text, plan_id, context, parts)
         mode, kind = self.mode(c), c.get("kind") if c.get("kind") in KINDS else ""
         model, effort = self.run_with(c)
         cmd = start_command(self.claude, prompt, new_sid, mode, model, effort, kind=kind, step=str(c.get("stepId") or "")[:20])

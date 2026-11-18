@@ -30,3 +30,14 @@ def test_handoff_prompt_holds_the_last_turns_the_plan_and_the_message():
     assert 'plan_id="plan1"' in text and text.rstrip().endswith("carry on with s3")
     assert len(text) < 30000
     assert "## Plan" not in handoff_prompt("s", "l", [], "m")
+
+
+def test_handoff_carries_the_plans_rules_lessons_and_the_feedback_log():
+    """G3 (the owner, 2026-11-18: "all 5 gap, fix one by one"): a fresh session keeps the plan's rules and lessons."""
+    parts = {"rules": [{"rule": "no clipping", "source": "owner 2026-10-22"}],
+             "lessons": [{"lesson": "measure, never guess", "taughtBy": "s4", "appliedIn": "s5"}]}
+    text = handoff_prompt("s", "l", [], "go", plan_id="p1", plan_parts=parts)
+    assert "- rule: no clipping (source: owner 2026-10-22)" in text
+    assert "- lesson: measure, never guess (taught by: s4)" in text
+    assert "OWNER_FEEDBACK.md" in text and text.endswith("## The owner's message now\ngo")
+    assert "rules and lessons" not in handoff_prompt("s", "l", [], "go", plan_id="p1", plan_parts={"rules": []})
