@@ -95,10 +95,10 @@ fn post_box(url: &str, token: &str, body: &str, route: &str) -> Result<String, S
             return Err("only a run's text".to_string());
         }
     } else if route == "ticket" {
-        // s4: a ticket for one picture of an ask (fetch_picture); {path, cwd} only
+        // s4: a ticket for one file of an ask (fetch_picture, fetch_text, box_open_file); {path, cwd} only
         let o = v.as_object().ok_or("not a ticket ask")?;
         if o.len() != 2 || !o.get("path").is_some_and(|x| x.is_string()) || !o.get("cwd").is_some_and(|x| x.is_string()) {
-            return Err("only a picture's ticket".to_string());
+            return Err("only a file's ticket".to_string());
         }
     } else if route == "packs" {
         if !is_pack_call(&v) {
@@ -241,25 +241,69 @@ fn b64(data: &[u8]) -> String {
     }
     out
 }
-fn fetch_picture(url: &str, token: &str, path: &str, cwd: &str) -> Result<String, String> {
-    let mime = pic_type(path).ok_or("not a picture")?;
+// a ticket for one file of an ask on its box (bridge files.py /ticket): (the box address of the bytes, kind, size)
+fn ticket_of(url: &str, token: &str, path: &str, cwd: &str) -> Result<(String, String, u64), String> {
     let body = serde_json::json!({"path": path, "cwd": cwd}).to_string();
     let t: serde_json::Value = serde_json::from_str(&post_box(url, token, &body, "ticket")?).map_err(|e| e.to_string())?;
     let rel = t.get("url").and_then(|x| x.as_str()).unwrap_or("");
-    if !rel.starts_with("/t/") || t.get("kind").and_then(|x| x.as_str()) != Some("image") {
-        return Err("the box has no such picture".to_string());
+    if !rel.starts_with("/t/") || rel.contains("..") {
+        return Err("the box has no such file".to_string());
     }
-    if t.get("size").and_then(|x| x.as_u64()).unwrap_or(u64::MAX) > PIC_MAX as u64 {
-        return Err("picture over 8 MB".to_string());
-    }
+    let kind = t.get("kind").and_then(|x| x.as_str()).unwrap_or("file").to_string();
+    Ok((format!("{}{rel}", url.trim_end_matches('/')), kind, t.get("size").and_then(|x| x.as_u64()).unwrap_or(u64::MAX)))
+}
+fn get_bytes(full: &str, max: usize) -> Result<Vec<u8>, String> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(35)))
         .build()
         .into();
-    let mut r = agent.get(&format!("{}{rel}", url.trim_end_matches('/'))).header("User-Agent", "agent-avatar").call()
-        .map_err(|e| e.to_string())?;
-    let bytes = r.body_mut().with_config().limit(PIC_MAX as u64).read_to_vec().map_err(|e| e.to_string())?;
-    Ok(format!("data:{mime};base64,{}", b64(&bytes)))
+    let mut r = agent.get(full).header("User-Agent", "agent-avatar").call().map_err(|e| e.to_string())?;
+    r.body_mut().with_config().limit(max as u64).read_to_vec().map_err(|e| e.to_string())
+}
+fn fetch_picture(url: &str, token: &str, path: &str, cwd: &str) -> Result<String, String> {
+    let mime = pic_type(path).ok_or("not a picture")?;
+    let (full, kind, size) = ticket_of(url, token, path, cwd)?;
+    if kind != "image" {
+        return Err("the box has no such picture".to_string());
+    }
+    if size > PIC_MAX as u64 {
+        return Err("picture over 8 MB".to_string());
+    }
+    Ok(format!("data:{mime};base64,{}", b64(&get_bytes(&full, PIC_MAX)?)))
+}
+// the owner's pick 2026-11-18 (Q2 "(a)"): md and text files of an ask are read in hayaku, up to 2 MB, as the page does
+const TEXT_MAX: usize = 2 * 1024 * 1024;
+fn fetch_text(url: &str, token: &str, path: &str, cwd: &str) -> Result<String, String> {
+    let (full, kind, size) = ticket_of(url, token, path, cwd)?;
+    if kind != "md" && kind != "text" {
+        return Err(format!("not a text file ({kind})"));
+    }
+    if size > TEXT_MAX as u64 {
+        return Err("text file over 2 MB: open it in the browser".to_string());
+    }
+    Ok(String::from_utf8_lossy(&get_bytes(&full, TEXT_MAX)?).into_owned())
+}
+
+#[tauri::command]
+async fn box_file_text(url: String, token: String, path: String, cwd: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || fetch_text(&url, &token, &path, &cwd)).await.map_err(|e| e.to_string())?
+}
+// html, pdf, video and any other file of an ask: its 10-minute ticket opens in the browser (Q2 "(a)")
+#[tauri::command]
+async fn box_open_file(url: String, token: String, path: String, cwd: String) -> Result<(), String> {
+    let full = tauri::async_runtime::spawn_blocking(move || ticket_of(&url, &token, &path, &cwd)).await.map_err(|e| e.to_string())??.0;
+    open_url(&full)
+}
+// a web link written in an ask: http or https only, opened in the browser (Q2 "(a)")
+fn is_web_link(u: &str) -> bool {
+    (u.starts_with("https://") || u.starts_with("http://")) && u.len() <= 2000 && !u.chars().any(|c| c.is_whitespace() || c.is_control() || c == '"')
+}
+#[tauri::command]
+fn open_web(url: String) -> Result<(), String> {
+    if !is_web_link(&url) {
+        return Err("only an http or https link".to_string());
+    }
+    open_url(&url)
 }
 
 #[tauri::command]
@@ -308,13 +352,15 @@ fn open_site(key: &str, id: &str) -> Result<(), String> {
     if id.is_empty() || id.len() > 40 || !id.chars().all(|c| c.is_ascii_alphanumeric()) {
         return Err(format!("not a {key} id"));
     }
-    let url = format!("{SITE}/?{key}={id}");
+    open_url(&format!("{SITE}/?{key}={id}"))
+}
+fn open_url(url: &str) -> Result<(), String> {
     #[cfg(target_os = "windows")]
-    let r = std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", &url]).spawn();
+    let r = std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", url]).spawn();
     #[cfg(target_os = "macos")]
-    let r = std::process::Command::new("open").arg(&url).spawn();
+    let r = std::process::Command::new("open").arg(url).spawn();
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    let r = std::process::Command::new("xdg-open").arg(&url).spawn();
+    let r = std::process::Command::new("xdg-open").arg(url).spawn();
     r.map(|_| ()).map_err(|e| e.to_string())
 }
 
@@ -418,7 +464,7 @@ fn main() {
         .manage(voice::Voice::default())   // s6: the voice toggle
         .manage(Load { sys: Mutex::new(sys), nvml: nvml_wrapper::Nvml::init().ok() })
         .manage(avatar::Pending(Mutex::new(None)))
-        .invoke_handler(tauri::generate_handler![status, load, price, box_data, box_text, box_picture, open_run, open_item, hotkey::hotkey_get, hotkey::hotkey_set, voice::voice_start, voice::voice_stop, voice::voice_on, menu, avatar::avatars, avatar::drop_ask, box_packs, packs::pack_current, packs::pack_apply, auth::fb_config,
+        .invoke_handler(tauri::generate_handler![status, load, price, box_data, box_text, box_picture, box_file_text, box_open_file, open_web, open_run, open_item, hotkey::hotkey_get, hotkey::hotkey_set, voice::voice_start, voice::voice_stop, voice::voice_on, menu, avatar::avatars, avatar::drop_ask, box_packs, packs::pack_current, packs::pack_apply, auth::fb_config,
             auth::auth_get, auth::auth_set])
         .on_menu_event(|app, e| match e.id().as_ref() {
             "hide" => toggle(app, Some(false)),
@@ -494,7 +540,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{b64, is_answer, is_ask_back, is_env_set, is_pack_call, is_run_text, is_send};
+    use super::{b64, is_web_link, is_answer, is_ask_back, is_env_set, is_pack_call, is_run_text, is_send};
     use serde_json::json;
     #[test]
     fn only_a_new_start_or_message_command_is_a_write() {
@@ -595,6 +641,16 @@ mod tests {
             assert!(!is_answer(&bad), "{bad}");
         }
     }
+    #[test]
+    fn only_http_links_open_in_the_browser() {
+        for ok in ["https://example.com/a?b=1", "http://x.co"] {
+            assert!(is_web_link(ok), "{ok}");
+        }
+        for bad in ["file:///C:/x", "javascript:alert(1)", "https://a b", r"C:\x.html", "ms-settings:", "https://a\"&calc"] {
+            assert!(!is_web_link(bad), "{bad}");
+        }
+    }
+
     #[test]
     fn only_a_pack_list_load_add_or_pick_goes_to_packs() {
         for ok in [json!({"op": "list"}), json!({"op": "get", "id": "ab12"}), json!({"op": "select", "id": "ab12"}),

@@ -76,6 +76,9 @@ def _strings(x):
             yield from _strings(v)
 
 
+_DRIVE = re.compile(r"""(?:^|(?<=[\s(\["']))([A-Za-z]:[\\/][^\s`"'<>|*?()\[\]]+)""")
+
+
 def attached_paths(store):
     """The files the reports point to, absolute, for the file viewer's outside-WORK_ROOTS case (the owner's pick
     2026-11-16 "Phục vụ đúng ảnh đã đính kèm"; 2026-11-17 every file kind, then "cover this too" for the links written
@@ -91,14 +94,19 @@ def attached_paths(store):
     for e in store.query("planEvidence"):
         for st in e.get("sets") or []:
             yield from st.get("pictures") or []
-    for it in store.where("inbox", "kind", "result"):
+    # every inbox ask, not only results (the owner, 2026-11-18: "yes widen it"): its files, and the file links and the
+    # plain drive paths written in its text, its option details and its thread (what hayaku's FILES + LINKS lists)
+    for it in store.query("inbox"):
         cwd = it.get("cwd") or ""
         for f in it.get("files") or []:
             if (a := ab(f, cwd)):
                 yield a
-        for r in file_refs(it.get("text") or ""):
-            if (a := ab(r, cwd)):
-                yield a
+        texts = [it.get("text") or ""] + [str(o.get("detail") or "") for o in it.get("options") or [] if isinstance(o, dict)]
+        texts += [str(x.get("text") or "") for x in it.get("thread") or [] if isinstance(x, dict)]
+        for t in texts:
+            for r in file_refs(t) + _DRIVE.findall(t):
+                if (a := ab(r.rstrip(".,;:"), cwd)):
+                    yield a
     # the materials a plan's board lists (the owner, 2026-11-17: "Add material section in report board")
     for plan in store.query("plans"):
         pid, cur = plan.get("id") or plan.get("__id") or "", plan.get("current")

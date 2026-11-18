@@ -314,6 +314,8 @@ window.addEventListener("wheel", (e) => {
 let press = null;
 document.addEventListener("mousedown", (e) => {
   if (e.button !== 0 || e.target === grip || e.target.closest(".btn.empty")) return;
+  const rz = e.target.closest(".nctx, .ncards, .nfiles, .nthr");   // Q1 "(a) All": a box's drag edge resizes it, not the window
+  if (rz) { const r = rz.getBoundingClientRect(); if (e.clientX > r.right - 18 && e.clientY > r.bottom - 18) return; }
   if (e.target.closest("select, textarea, option, input")) return;   // s1: the pickers and the message take the mouse, no drag (s10: the key field)
   press = { x: e.screenX, y: e.screenY, t: e.target };
 });
@@ -821,6 +823,57 @@ function nExample(q, e) {
   }
   return "";
 }
+// the owner's pick 2026-11-18 (Q2 "(a)"): "the inbox don't show all the files and links so I can review directly in
+// hayaku". FILES lists the ask's files (as the page's Files section, Inbox.tsx) plus every path and link written in its
+// text, its option details and its thread: pictures, md and text open full size here; html, pdf, video and any other
+// file open in the browser from the box's ticket; web links open in the browser.
+const NTEXT = /\.(md|markdown|txt|log|json|jsonl|csv|tsv|py|ts|tsx|js|mjs|go|rs|c|h|cpp|cu|css|ya?ml|toml|ini|sh|ps1|sql|xml)$/i;
+const NFILE = /^[\w.\-\\/:~ ]+\.[a-z0-9]{1,8}$/i;
+function nRefs(q) {
+  const out = new Map();
+  const add = (raw, web) => {
+    const p = String(raw || "").trim().replace(/^<|>$/g, "").replace(/[.,;:]+$/, "").replace(/:\d+$/, "");
+    if (!p || (!web && !NFILE.test(p))) return;
+    const k = web ? p : p.replace(/\\/g, "/").toLowerCase();
+    if (!out.has(k)) out.set(k, { path: p, web });
+  };
+  for (const f of q.files || []) add(f, false);
+  const texts = [q.text, ...(q.options || []).map((o) => o.detail), ...(q.thread || []).map((x) => x.text)];
+  for (const [key, got] of nReply) if (key.startsWith(`${q._box}|${q.id}|`) && typeof got === "string") texts.push(got);
+  for (const t of texts) {
+    const s = String(t || "");
+    for (const m of s.matchAll(/\]\(\s*(<[^>\n]+>|[^)\s]+)\s*\)/g)) {
+      const u = m[1].replace(/^<|>$/g, "");
+      if (/^https?:\/\//i.test(u)) add(u, true);
+      else if (/^file:/i.test(u)) add(u.replace(/^file:\/+/i, ""), false);
+      else if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(u) && !u.startsWith("#")) add(u, false);
+    }
+    for (const m of s.matchAll(/https?:\/\/[^\s)<>\]"'`]+/g)) add(m[0], true);
+    for (const m of s.matchAll(/`([^`\n]+)`/g)) if (/[\\/]/.test(m[1])) add(m[1], false);
+    for (const m of s.matchAll(/(?:^|[\s(\["'])([A-Za-z]:[\\/][^\s`"'<>|*?()\[\]]+)/g)) add(m[1], false);
+  }
+  return [...out.values()];
+}
+function nFiles(q) {
+  const refs = nRefs(q);
+  if (!refs.length) return "";
+  const rows = refs.map((r) => {
+    const how = r.web ? "web" : NIMG.test(r.path) ? "picture" : NTEXT.test(r.path) ? "text" : "browser";
+    const f = nFull.push({ how, box: q._box, cwd: q.cwd, path: r.path, pic: `${q._box}|${q.cwd}|${r.path}`, label: r.web ? r.path : base(r.path) || r.path }) - 1;
+    const tag = { web: "WEB", picture: "PIC", text: "TXT", browser: "OPEN" }[how];
+    return `<div class="nfile" data-act="file" data-f="${f}" title="${esc(r.path)}"><b>${tag}</b><span>${esc(r.web ? r.path : base(r.path) || r.path)}</span></div>`;
+  }).join("");
+  return `<div class="nfiles"><div class="nthh">FILES + LINKS (${refs.length})</div>${rows}</div>`;
+}
+async function nOpenFile(x) {
+  if (x.how === "web") return invoke("open_web", { url: x.path });
+  if (x.how === "browser") return FB.fileOpen(x.box, x.path, x.cwd);
+  if (x.how === "picture") {
+    if (typeof nPicSrc.get(x.pic) !== "string") nPicSrc.set(x.pic, await FB.picture(x.box, x.path, x.cwd));
+    return nShowFull({ pic: x.pic, path: x.path, label: x.label });
+  }
+  nShowFull({ text: await FB.fileText(x.box, x.path, x.cwd), path: x.path, label: x.label });
+}
 function renderNeed() {
   if (layer !== "need") return;
   const { list, i, b, k, q } = nNow();
@@ -843,6 +896,7 @@ function renderNeed() {
     h += `<div class="nmeta">${esc(meta.filter(Boolean).join(" · "))}</div><div class="nq">${esc(q.title)}</div>`;
     if (q.kind === "approval") h += `<div class="nctx call">${esc(q.text)}</div>`;
     else if (q.text && q.text !== q.title) h += `<div class="nctx">${esc(q.text)}</div>`;
+    h += nFiles(q);
     if (b.length > 1) h += `<div class="ndots">${b.map((x, n) => `<i data-act="q" data-i="${n}" class="${n === k ? "now" : x.draft ? "saved" : ""}" title="question ${n + 1}${x.draft ? ": saved" : ""}"></i>`).join("")}</div>`;
     const sel = nSelOf(q), picks = sel.choice.split(", ");
     const pickable = q.kind === "question" && nOpen(q);
@@ -871,7 +925,7 @@ function renderNeed() {
   }
   if (nBusy) act = act.replace(/<button /g, "<button disabled ");
   let changed = false;
-  if (h !== nHtml) { $("nbody").innerHTML = nHtml = h; changed = true; nFill(); }
+  if (h !== nHtml) { const keep = nKeep(); $("nbody").innerHTML = nHtml = h; nRestore(keep); changed = true; nFill(); }
   if (act !== nActHtml) { $("nact").innerHTML = nActHtml = act; changed = true; }
   const note = $("nnote");
   if (note.hidden !== !q) { note.hidden = !q; changed = true; }
@@ -884,6 +938,38 @@ function renderNeed() {
   setText($("nfoot"), `${(nItems || []).length} waiting on ${boxesN} box${boxesN === 1 ? "" : "es"} · oldest first · click a picture: full size · listens only while open`);
   if (changed && shown === "need") fit();
 }
+// the owner, 2026-11-18: "the needs got refresh after a while which make a long report need many scroll": a redraw
+// (any inbox change on a box, a new "Xm ago") put every box back at the top. The same ask now keeps each box's scroll.
+// Q1 "(a) All": details, options, files, thread and the note have a drag edge; each height is kept in this hayaku.
+const NBOXES = ["nctx", "ncards", "nfiles", "nthr"];
+function nKeep() {
+  const b = $("nbody"), k = { id: nCur };
+  for (const c of NBOXES) { const el = b.querySelector("." + c); if (el) k[c] = el.scrollTop; }
+  return k;
+}
+function nRestore(k) {
+  const b = $("nbody"), { q } = nNow(), same = !!q && k.id === q.id;
+  for (const c of NBOXES) {
+    const el = b.querySelector("." + c);
+    if (!el) continue;
+    const hgt = Number(localStorage.getItem("need.h." + c));
+    if (hgt > 0) { el.style.height = hgt + "px"; el.style.maxHeight = "none"; }
+    if (same && k[c]) el.scrollTop = k[c];
+  }
+}
+function nSaveHeights() {
+  for (const el of [...NBOXES.map((c) => $("nbody").querySelector("." + c)), $("nnote")]) {
+    if (!el || !el.style.height) continue;
+    const key = "need.h." + (el.id === "nnote" ? "nnote" : NBOXES.find((c) => el.classList.contains(c)));
+    const hgt = Math.round(parseFloat(el.style.height));
+    if (hgt > 0 && String(hgt) !== localStorage.getItem(key)) { localStorage.setItem(key, String(hgt)); el.style.maxHeight = "none"; }
+  }
+}
+document.addEventListener("mouseup", () => { if (layer === "need") nSaveHeights(); });
+{ const hgt = Number(localStorage.getItem("need.h.nnote")); if (hgt > 0) $("nnote").style.height = hgt + "px"; }
+// the window follows the deck while a box is dragged taller or shorter
+let nFitAsk = 0;
+new ResizeObserver(() => { if (shown === "need" && !nFitAsk) nFitAsk = requestAnimationFrame(() => { nFitAsk = 0; fit(); }); }).observe($("nbox"));
 // plan c5cb9485 s12 (preview "Approve"): the ask's thread under its options, as the page shows it (Inbox.tsx Thread):
 // you asked, you saved, the session's reply, a redraw. A reply made after 2026-11-08 keeps only its length in the record:
 // its words are read from the session's log on the box that holds the ask (main.rs box_text reply), shown, never stored.
@@ -961,6 +1047,13 @@ function needAct(el) {
   const a = el.dataset.act, { list, i, b, k, q } = nNow();
   if (a === "close") return nShowFull(null);
   if (a === "full") return nShowFull(nFull[Number(el.dataset.f)]);
+  if (a === "file") {
+    const x = nFull[Number(el.dataset.f)];
+    if (!x) return;
+    nSay = `opening ${x.label}...`; nSayBad = false; setText($("nsay"), nSay);
+    return void nOpenFile(x).then(() => { nSay = x.how === "web" || x.how === "browser" ? `${x.label}: opened in the browser` : ""; renderNeed(); },
+      (e) => { nSay = `${x.label}: ${String(e && e.message || e).slice(0, 90)}`; nSayBad = true; renderNeed(); });
+  }
   if (a === "prev" || a === "next") { const j = i + (a === "next" ? 1 : -1); if (list[j]) { nKey = nKeyOf(list[j]); nSay = ""; nShowFull(null); renderNeed(); } return; }
   if (!q || nBusy) return;
   if (a === "open") return void invoke("open_item", { id: q.id }).catch(() => {});

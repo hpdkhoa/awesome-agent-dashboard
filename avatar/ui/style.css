@@ -164,12 +164,12 @@ html,body{margin:0;background:transparent;overflow:hidden;font-family:Tahoma,Ver
 .npg b.off{color:#555;cursor:default}
 .nmeta{color:var(--orange);font-size:12px;margin-top:4px}
 .nq{color:#fff;font-size:13px;margin:3px 0 5px;white-space:normal;word-break:break-word}
-.nctx{color:#9ab;font-size:11px;border-left:2px solid #444;padding-left:6px;margin-bottom:6px;white-space:pre-wrap;word-break:break-word;max-height:84px;overflow:auto;user-select:text;cursor:text}
+.nctx{color:#9ab;font-size:11px;border-left:2px solid #444;padding-left:6px;margin-bottom:6px;white-space:pre-wrap;word-break:break-word;max-height:84px;overflow:auto;user-select:text;cursor:text;resize:vertical;min-height:24px}
 .nctx.call{font-family:Consolas,monospace;font-size:10px;color:#cfc}
 .ndots{display:flex;gap:4px;margin:0 0 6px}
 .ndots i{width:9px;height:9px;border-radius:50%;background:#3a4a50;cursor:pointer}
 .ndots i.saved{background:var(--green)}.ndots i.now{background:var(--blue);box-shadow:0 0 5px var(--blue)}
-.ncards{max-height:300px;overflow:auto}
+.ncards{max-height:300px;overflow:auto;resize:vertical;min-height:40px}
 .ncard{border:1px solid #333;padding:5px 7px;margin-bottom:5px;display:flex;gap:8px;align-items:center;cursor:pointer}
 .ncard:hover{border-color:#555}
 .ncard.sel{border-color:var(--green);box-shadow:0 0 6px var(--green) inset}
@@ -188,7 +188,7 @@ html,body{margin:0;background:transparent;overflow:hidden;font-family:Tahoma,Ver
 .nvis{width:150px;height:63px;border:1px solid #444;object-fit:contain;background:#05080a;cursor:zoom-in;flex:none}
 .ndraft{width:186px;height:63px;border:1px solid #444;font-family:Consolas,monospace;font-size:10px;color:#cfc;padding:3px;white-space:pre-wrap;overflow:hidden;flex:none;cursor:zoom-in}
 .ndraft .add{color:var(--green)}.ndraft .del{color:var(--pink)}
-#nnote{width:100%;resize:none;background:#03070a;color:#dfe;border:1px solid #444;font:12px Tahoma;padding:4px 6px;outline:none;user-select:text;margin:4px 0 6px}
+#nnote{width:100%;resize:vertical;min-height:30px;background:#03070a;color:#dfe;border:1px solid #444;font:12px Tahoma;padding:4px 6px;outline:none;user-select:text;margin:4px 0 6px}
 #nnote:focus{border-color:var(--orange)}
 .nact{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .nact button{font:12px Tahoma;letter-spacing:1px;background:transparent;color:var(--green);border:1px solid var(--green);padding:2px 12px;cursor:pointer}
@@ -196,7 +196,12 @@ html,body{margin:0;background:transparent;overflow:hidden;font-family:Tahoma,Ver
 .nact button.no{border-color:var(--pink);color:var(--pink)}
 .nact button.ab{border-color:var(--orange);color:var(--orange)}
 /* s12: the ask's thread (you asked, the session's reply, a redraw) */
-.nthr{margin-top:6px;max-height:150px;overflow:auto}
+.nthr{margin-top:6px;max-height:150px;overflow:auto;resize:vertical;min-height:30px}
+.nfiles{margin:4px 0 6px;max-height:96px;overflow:auto;resize:vertical;min-height:24px}
+.nfile{display:flex;gap:6px;align-items:baseline;font-size:11px;color:#9cf;cursor:pointer;padding:1px 0;white-space:nowrap}
+.nfile:hover span{text-decoration:underline}
+.nfile b{font:9px Consolas,monospace;color:#000;background:#9cf;padding:0 3px;flex:none}
+.nfile span{overflow:hidden;text-overflow:ellipsis}
 .nthh{font-size:9px;color:#6a7a80;letter-spacing:1px;margin-bottom:2px}
 .nth{border-left:2px solid #444;padding:2px 6px;margin:3px 0;font-size:11px;color:#f8f8f8;white-space:pre-wrap;word-break:break-word;user-select:text;cursor:text}
 .nth span{display:block;font-size:10px;color:#9ab}

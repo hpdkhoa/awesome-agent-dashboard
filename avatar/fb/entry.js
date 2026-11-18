@@ -275,6 +275,17 @@ async function picture(name, path, cwd) {
   window.FB.boxAsks += 1; window.FB.pics += 1;
   return invoke("box_picture", { url: box.url, token, path, cwd });
 }
+// the owner's pick 2026-11-18 (Q2 "(a)"): an ask's md or text file read in hayaku (main.rs box_file_text, 2 MB), and
+// any other file opened in the browser from its 10-minute ticket (main.rs box_open_file)
+async function boxFile(cmd, name, path, cwd) {
+  const box = boxes.find((b) => b.name === name);
+  if (!box) throw new Error("no box address to load it from");
+  const token = await auth.currentUser.getIdToken();
+  window.FB.boxAsks += 1;
+  return invoke(cmd, { url: box.url, token, path, cwd });
+}
+const fileText = (name, path, cwd) => boxFile("box_file_text", name, path, cwd);
+const fileOpen = (name, path, cwd) => boxFile("box_open_file", name, path, cwd);
 // hayaku avatar packs (the owner's picks 2026-11-17 "B+file", "only pictures"): the bridge's /packs on the box named
 // (this PC's own box when it has one, else the first), through main.rs box_packs (list, get, put, select only)
 async function packs(name, body) {
@@ -285,5 +296,5 @@ async function packs(name, body) {
   return JSON.parse(await invoke("box_packs", { url: box.url, token, body: JSON.stringify(body) }));
 }
 // reads/writes: Firestore bills one read per changed record delivered (at least one per answer); counted for the checks
-window.FB = { start, stop, sessions, send, packs, envKeys, envSet, runState, runText, replyText, needsOpen, needsClose, needsWrite, planTitle, picture, needAsks: 0, pics: 0, ratesOpen, ratesClose, saveFx, saveGold, signedIn: () => !!(auth && auth.currentUser), reads: 0, writes: 0,
+window.FB = { start, stop, sessions, send, packs, envKeys, envSet, runState, runText, replyText, needsOpen, needsClose, needsWrite, planTitle, picture, fileText, fileOpen, needAsks: 0, pics: 0, ratesOpen, ratesClose, saveFx, saveGold, signedIn: () => !!(auth && auth.currentUser), reads: 0, writes: 0,
   boxAsks: 0, boxes: () => boxes.map((b) => b.name) };

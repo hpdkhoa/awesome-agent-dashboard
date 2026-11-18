@@ -46,11 +46,14 @@ def test_attached_paths_takes_report_text_links():
 
         def query(self, coll):
             return {"plans": [{"id": "p1", "current": 2, "cwd": r"K:\work"}], "planEvidence": [{"sets": [{"pictures": [r"K:\out\a.png"]}]}],
+                    "inbox": [{"kind": "result", "cwd": r"K:\res", "files": ["e.png"], "text": r"see `K:\story\f.md`, and K:\plain.md."},
+                              {"kind": "question", "cwd": r"K:\q", "files": [r"K:\ask\g.png"], "text": "q",
+                               "options": [{"label": "a", "detail": "look at `K:/ask/h.html`"}], "thread": [{"text": r"reply K:\ask\i.txt"}]}],
                     "planSteps": [{"planId": "p1", "versions": [{"reply": r"- wrote `K:\story\b.md` and `notes/c.md`",
                                                                   "report": {"built": ["[map](K:/story/d.svg)"]}}]}]}[coll]
 
         def where(self, coll, field, value):
-            return [{"cwd": r"K:\res", "files": ["e.png"], "text": r"see `K:\story\f.md`, not K:\plain.md"}]
+            raise AssertionError("every inbox ask is read, not only results")
 
         def get(self, path):
             return self.docs.get(path)
@@ -60,5 +63,7 @@ def test_attached_paths_takes_report_text_links():
         assert want in got
     assert any(g.endswith("c.md") and g.startswith(r"K:\work") for g in got)  # relative: from the plan's folder
     assert any(g.endswith("e.png") and g.startswith(r"K:\res") for g in got)
-    assert not any(g.endswith("plain.md") for g in got)  # plain text is no link on the page either
+    assert r"K:\plain.md" in got  # 2026-11-18 "yes widen it": a plain drive path in an ask opens too
+    for want in (r"K:\ask\g.png", "K:/ask/h.html", r"K:\ask\i.txt"):  # a question's files, option details, thread
+        assert want in got
     assert r"K:\story\the-gioi-v1.md" in got  # a board material opens too
