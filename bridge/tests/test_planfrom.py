@@ -4,7 +4,7 @@ import pytest
 
 from agent_bridge.digest import chain, records, session_record, write_pages
 from agent_bridge.inbox import Inbox, check_example
-from agent_bridge.planfrom import kind_args, mark_quotes
+from agent_bridge.planfrom import mark_quotes
 from agent_bridge.runs import message_command
 from test_inbox import FakeStore
 from test_runs import cmd, setup, wait_done
@@ -146,7 +146,7 @@ def test_a_plan_message_kind_goes_as_a_system_prompt_and_qa_cannot_edit():
     assert qa[qa.index("--disallowedTools") + 1] == "Edit,Write,NotebookEdit"
     from agent_bridge.planfrom import STYLE
     plain = message_command("claude", "hi", "sid")
-    assert kind_args("bogus") == [] and plain[plain.index("--append-system-prompt") + 1] == STYLE  # only the reply style
+    assert plain[plain.index("--append-system-prompt") + 1] == STYLE  # only the reply style
 
 
 def test_plan_from_a_session_reads_pages_writes_notes_then_starts_the_plan_session(tmp_path, monkeypatch):

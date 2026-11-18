@@ -154,13 +154,6 @@ def scoped(prompt: str, kind: str = "", step: str = "") -> str:
     return f"<run-scope>\nThis message's scope replaces any earlier one.\n{s}\n</run-scope>\n\n{prompt}" if s else prompt
 
 
-def kind_args(kind: str) -> list[str]:
-    if kind not in KIND_PROMPTS:
-        return []
-    out = ["--append-system-prompt", KIND_PROMPTS[kind] + EXAMPLES]
-    return out + (["--disallowedTools", NO_EDITS] if kind == "qa" else [])
-
-
 # The quote check (the owner's words, 2026-11-03: "Add a quote check: the bridge compares each quote in the notes with
 # the page and marks any that differ"). A quote is text in straight or curly double quotes; "..." inside it skips
 # words, so each piece between skips must be on the page. Spaces and quote marks are compared loosely, words exactly.
