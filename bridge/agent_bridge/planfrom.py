@@ -153,10 +153,6 @@ def scoped(prompt: str, kind: str = "", step: str = "") -> str:
     s = scope_text(kind, step)
     return f"<run-scope>\nThis message's scope replaces any earlier one.\n{s}\n</run-scope>\n\n{prompt}" if s else prompt
 
-def step_args(step_id: str) -> list[str]:
-    """A Run step message: the scope goes as an appended system prompt."""
-    return ["--append-system-prompt", STEP_SCOPE.format(step=step_id)] if step_id else []
-
 
 def kind_args(kind: str) -> list[str]:
     if kind not in KIND_PROMPTS:
