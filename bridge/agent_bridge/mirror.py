@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-SKIP = {"liveSessions"}
+SKIP = {"liveSessions", "recordVecs"}  # recordVecs: the records' vectors (records.py), remade from the records on any box
 MONEY = {"moneyEntries", "fxRates", "goldPrices"}  # stay on Firestore: the page reads and writes them there
 KEY = "mirror_seq"
 COLLECTIONS = ["commands", "inbox", "liveSessions", "machines", "meta", "planChains", "planChecks", "planEvidence", "planGenerated",

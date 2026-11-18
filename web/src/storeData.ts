@@ -17,6 +17,7 @@ export const COLLECTIONS: { name: string; label: string; order?: string; bridge?
   { name: "planGenerated", label: "Generated files (approved)", show: ["planId"] },
   { name: "planVersions", label: "Plan versions", order: "createdAt", show: ["planId", "n", "note", "createdAt"] },
   { name: "pushSubs", label: "Phones for notifications", order: "createdAt", show: ["device", "createdAt"] },
+  { name: "records", label: "Records (KB)", order: "updatedAt", show: ["id", "title", "status", "updatedAt"] },
   { name: "commands", label: "Runs and messages", order: "createdAt", show: ["action", "status", "prompt", "createdAt"] },
   { name: "sessions", label: "Sessions", order: "lastAt", bridge: true, show: ["title", "workType", "lastAt"] },
   { name: "usage", label: "Spend by day", order: "day", bridge: true, show: ["day", "total", "costUsd"] },

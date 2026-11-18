@@ -33,6 +33,7 @@ const PUSH_LABEL: Record<PushState, string> = {
 import { Md } from "./Markdown";
 import { Section } from "./Section";
 import { DigestView, LocalSearch } from "./LocalSearch";
+import { RecordsSide, RecordsView, useRecords } from "./Records";
 import { InboxList, InboxView, isWaiting } from "./Inbox";
 import { usePhone } from "./phone";
 import { useEntries, useFx, useGold } from "./moneyData";
@@ -142,6 +143,9 @@ export function Dashboard() {
   const [health, restartBridge] = useHealth();
   // Money data loads only while the Money or Rates tab is open.
   const entries = useEntries(tab === "money");
+  // Records (plan bf73af63 F1): loaded only while the Records tab is open
+  const [pickedRecord, setPickedRecord] = useState<string | undefined>();
+  const records = useRecords(tab === "records");
   const fx = useFx(tab === "money" || tab === "rates");
   const gold = useGold(tab === "money" || tab === "rates");
 
@@ -233,6 +237,9 @@ export function Dashboard() {
           <button className={tab === "runs" ? "tab on" : "tab"} onClick={() => setTab("runs")}>
             Runs {(runs ?? []).some((r) => r.status === "running") && <span className="dot live inline" />}
           </button>
+          <button className={tab === "records" ? "tab on" : "tab"} onClick={() => setTab("records")} title="Records with ids: decisions, attempts, lessons, rules, findings">
+            Records
+          </button>
           {shownTab("money") && (
           <button className={tab === "money" ? "tab on" : "tab"} onClick={() => setTab("money")}>
             Money
@@ -256,6 +263,8 @@ export function Dashboard() {
           <SettingsSide onResetLayout={resetLayout} />
         ) : tab === "storage" ? (
           <StorageSide picked={store} onPick={setStore} />
+        ) : tab === "records" ? (
+          <RecordsSide rows={records} picked={pickedRecord} onPick={setPickedRecord} />
         ) : tab === "money" ? (
           <EntryForm fx={fx} gold={gold} />
         ) : tab === "rates" ? (
@@ -309,6 +318,8 @@ export function Dashboard() {
           <SettingsView onResetLayout={resetLayout} />
         ) : tab === "storage" ? (
           <StorageView name={store} />
+        ) : tab === "records" ? (
+          <RecordsView rows={records} picked={pickedRecord} onPick={setPickedRecord} />
         ) : tab === "money" ? (
           entries && fx && gold ? <MoneyView entries={entries} fx={fx} gold={gold} /> : <p className="muted">Loading</p>
         ) : tab === "rates" ? (
@@ -439,3 +450,4 @@ function SessionView({ s, runs }: { s: Session; runs: Run[] }) {
     </article>
   );
 }
+

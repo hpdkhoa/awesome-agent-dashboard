@@ -795,6 +795,24 @@ class Runs:
         self.procs[cid] = p
         return p
 
+    def kb_first(self, c: dict, text: str, claude_md: Path | None = None) -> tuple[str, dict]:
+        """KB first, the gate on every run (plan bf73af63 F1; the approved mockup: "records go into every run, citing is
+        checked"; F3 inside it: "each run records the rule version it ran under"). The owner's CLAUDE.md sections are
+        synced to rule records first (a changed one makes its next version), then the records that match this run (its
+        plan step's own, then the message's strongest matches) go into the message, and the run row keeps their ids
+        and the rule versions. The KB never stops a run: a KB that fails is written on the row and the run goes."""
+        from .records import Records, ollama_embed
+
+        rec = Records(self.store, lambda t, k="document": ollama_embed(t, k, timeout=30), by="bridge")
+        try:
+            rules = rec.sync_rules(claude_md or Path.home() / ".claude" / "CLAUDE.md")
+            got = rec.gate_for_run(text, str(c.get("planId") or ""), str(c.get("stepId") or ""))
+        except Exception as e:  # noqa: BLE001: the run goes on, the row says why it got no records
+            return text, {"kb": {"given": [], "error": f"{type(e).__name__}: {str(e)[:200]}", "at": now_iso()}}
+        fields = {"kb": {"given": got["ids"], "how": got["how"], "at": now_iso()},
+                  "rulesAt": rules["versions"], "rulesChanged": rules["changed"]}
+        return (text + "\n\n" + got["block"] if got["block"] else text), fields
+
     def _start(self, c: dict) -> str:
         path = f"commands/{c['id']}"
         wt = folder_ok(c.get("folder", ""), self.roots)
@@ -811,9 +829,10 @@ class Runs:
         sid, mode = str(uuid.uuid4()), self.mode(c)
         model, effort = self.run_with(c)
         keep = not c.get("noSession")
+        prompt, kb = self.kb_first(c, prompt)
         p = self._spawn(c["id"], start_command(self.claude, prompt, sid, mode, model, effort, keep), c["folder"])
         self.store.update(path, {"status": "running", "sessionId": sid, "workType": wt, "pid": p.pid,
-                                 "startedAt": now_iso(), "permissionMode": mode, "model": model, "effort": effort})
+                                 "startedAt": now_iso(), "permissionMode": mode, "model": model, "effort": effort, **kb})
         return f"{c['id']}: started {'one-off (not kept) ' if not keep else ''}session {sid} in {c['folder']}"
 
     def wait_reason(self, session_id: str, force: bool = False) -> str | None:
@@ -915,9 +934,10 @@ class Runs:
             except OSError:
                 pass  # a read-only .gitignore never stops the order; the session's files still go to .plan_data
         model, effort = self.run_with(c)
+        text, kb = self.kb_first(c, text)
         p = self._spawn(c["id"], message_command(self.claude, text, sid, mode, kind, str(c.get("stepId") or "")[:20], model, effort), cwd)
         self.store.update(path, {"status": "running", "workType": wt, "pid": p.pid, "startedAt": now_iso(),
-                                 "permissionMode": mode, "model": model, "effort": effort})
+                                 "permissionMode": mode, "model": model, "effort": effort, **kb})
         self._answer_back(c, {"waitReason": None})
         if self.archiver.of(c["id"]) == "archived":
             self.archiver.ask_unarchive(c["id"])
@@ -953,6 +973,7 @@ class Runs:
         plan_id = str(c.get("planId") or "")
         plan = self.store.get(f"plans/{plan_id}") if plan_id else None
         parts = ((self.store.get(f"planVersions/{plan_id}_v{plan.get('current', 0)}") or {}).get("parts") if plan else None)
+        text, kb = self.kb_first(c, text)
         prompt = handoff_prompt(sid, str(path or ""), turns, text, plan_id, context, parts)
         mode, kind = self.mode(c), c.get("kind") if c.get("kind") in KINDS else ""
         model, effort = self.run_with(c)
@@ -960,7 +981,7 @@ class Runs:
         p = self._spawn(c["id"], cmd, cwd)
         self.store.update(f"commands/{c['id']}", {"status": "running", "workType": wt, "pid": p.pid, "startedAt": now_iso(),
                                                   "permissionMode": mode, "model": model, "effort": effort,
-                                                  "sessionId": new_sid, "freshFrom": sid, "contextTokens": context, "waitReason": None})
+                                                  "sessionId": new_sid, "freshFrom": sid, "contextTokens": context, "waitReason": None, **kb})
         self._answer_back(c, {"waitReason": None})
         # a step run beside others (chain.py, async) works in its own session; the plan keeps its session
         if plan_id and not c.get("side") and self.store.get(f"plans/{plan_id}"):

@@ -7,7 +7,7 @@ import { dt, nf } from "./fmt";
 import { DEFAULTS, HIDEABLE, LIMITS, diff, normalize, useSettings, type Settings, type TabId } from "./prefs";
 
 export const TAB_NAME: Record<TabId, string> = {
-  inbox: "Inbox", plans: "Plans", sessions: "Sessions", runs: "Runs", money: "Money", rates: "Rates", storage: "Storage", settings: "Settings",
+  inbox: "Inbox", plans: "Plans", sessions: "Sessions", runs: "Runs", records: "Records", money: "Money", rates: "Rates", storage: "Storage", settings: "Settings",
 };
 const GROUPS = [
   ["set-text", "Text"], ["set-theme", "Theme"], ["set-layout", "Layout"], ["set-time", "Time and numbers"],

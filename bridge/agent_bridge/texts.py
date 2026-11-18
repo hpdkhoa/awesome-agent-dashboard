@@ -124,9 +124,10 @@ def replies_of(path: Path, item_id: str) -> list[str]:
 
 
 class Texts:
-    def __init__(self, logs: Path | None, out_dir: Path | None, local=None):
+    def __init__(self, logs: Path | None, out_dir: Path | None, local=None, store=None):
         self.logs, self.out_dir = logs, out_dir
         self.local = local  # localsearch.LocalSearch (step i6), or None
+        self.store = store  # the records' search and human copy (plan bf73af63 F1)
 
     def log_of(self, session_id: str) -> Path | None:
         if not self.logs or not self.logs.is_dir() or not session_id or "/" in session_id or "\\" in session_id:
@@ -195,6 +196,12 @@ class Texts:
                 return self.local.digest(str(body["digest"]))
             except OSError:
                 raise ValueError("Ollama does not answer on this PC: is it running?") from None
+        if "records" in body or "recordsCopy" in body:  # F1: the Records tab's search and human copy (records.py)
+            if self.store is None:
+                raise ValueError("records are off on this PC")
+            from .records import Records
+
+            return Records(self.store).answer(body)
         if body.get("run"):
             return self.run(str(body["run"]))
         raise ValueError("ask for a session or a run")

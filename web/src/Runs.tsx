@@ -550,6 +550,7 @@ export function RunList({ runs, title = "Runs from the dashboard", paged = false
           }
         >
           <div {...quoteTarget(r)}>
+          <KbLine r={r} />
           <p className="label">Prompt</p>
           <Md text={r.prompt} cwd={r.cwd ?? r.folder ?? ""} />
           {r.action === "local" && (r.context ?? []).length > 0 && (
@@ -600,5 +601,27 @@ export function RunList({ runs, title = "Runs from the dashboard", paged = false
         </button>
       )}
     </div>
+  );
+}
+
+
+// KB first on each run (plan bf73af63 F1): the records the bridge gave the run, which its report cited, and the rule
+// versions it ran under (F3). A rule above v1 is named with its version, so an edited rule shows on the next run.
+function KbLine({ r }: { r: Run }) {
+  if (!r.kb && !r.rulesAt) return null;
+  const given = r.kb?.given ?? [];
+  const cited = new Set(r.kb?.cited ?? []);
+  const rules = Object.entries(r.rulesAt ?? {});
+  const moved = rules.filter(([, v]) => v > 1).sort((a, b) => b[1] - a[1]);
+  return (
+    <p className="small kb-line" data-kb-line>
+      <b>KB</b>{" "}
+      {r.kb?.error ? <span className="bad">records failed: {r.kb.error}</span>
+        : given.length === 0 ? <span className="muted">no record matched</span>
+        : <>{given.length} given ({given.map((g, i) => <span key={g}>{i ? ", " : ""}<span className={cited.has(g) ? "good" : ""}>{g}</span></span>)})
+            {" · "}{r.kb?.cited ? `${cited.size} cited` : "not cited yet"}{r.kb?.how && r.kb.how !== "meaning+words" ? ` · ${r.kb.how}` : ""}</>}
+      {rules.length > 0 && <>{" · "}<b>rules</b> {rules.length}{moved.length > 0 && <> ({moved.map(([k, v]) => `${k} v${v}`).join(", ")})</>}
+        {(r.rulesChanged ?? []).length > 0 && <span className="warn"> · new version: {r.rulesChanged!.join(", ")}</span>}</>}
+    </p>
   );
 }

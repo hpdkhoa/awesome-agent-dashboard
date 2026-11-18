@@ -13,6 +13,7 @@ import os
 import sys
 import threading
 import time
+from pathlib import Path
 
 from .auth import Session, sign_in
 from .config import Config, data_dir
@@ -105,6 +106,9 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("push-test", help="send a test notification to every subscribed phone")
     sub.add_parser("import-firestore", help="copy Firestore into the local database once; from then the bridge uses the local file")
     sub.add_parser("init-local", help="a new box: make an empty local database; the bridge then registers this box by itself")
+    r = sub.add_parser("records-import", help="F1: import the owner feedback logs, the plans' lessons and CLAUDE.md into the records, once")
+    r.add_argument("--log", action="append", default=[], metavar="PATH=AREA", help="an owner feedback log and its area")
+    r.add_argument("--claude-md", default=str(Path.home() / ".claude" / "CLAUDE.md"))
     a = p.parse_args(argv)
 
     if a.cmd == "inbox":
@@ -153,6 +157,24 @@ def main(argv: list[str] | None = None) -> None:
             raise SystemExit("Set FILES_URL in .env first: this box's own tunnel address, so the page can reach it.")
         LocalStore(db_path())
         print(f"made {db_path()}. Start the bridge: it registers this box as {cfg.machine} at {cfg.files_url}, and the dashboard shows it.")
+        return
+
+    if a.cmd == "records-import":
+        # plan bf73af63 F1 (the owner, 2026-11-18: "I pick best"): the one-time import of the md feedback logs and more
+        from .records import Records, import_feedback, import_lessons
+        from .store import open_store
+
+        store = open_store(cfg)
+        rec = Records(store, by="import")
+        for item in a.log:
+            path, _, area = item.partition("=")
+            made, skipped = import_feedback(rec, Path(path), area or "general")
+            print(f"{path}: {made} decisions made, {skipped} already there")
+        made, skipped = import_lessons(rec, store)
+        print(f"plan lessons: {made} lessons made, {skipped} already there")
+        got = rec.sync_rules(Path(a.claude_md))
+        print(f"CLAUDE.md: {len(got['new'])} rules made, {len(got['changed'])} new versions, {len(got['versions'])} rules in all")
+        print(f"embedded: {rec.reindex()} records")
         return
 
     if a.cmd == "import-firestore":
@@ -250,7 +272,7 @@ def main(argv: list[str] | None = None) -> None:
             if runs is not None:  # step i4: a folder added on the page is served at once
                 runs.on_roots.append(lambda roots: [files.add_root(r) for _, r in roots])
             serve(files,
-                  list(cfg.site_origins), cfg.files_port, Texts(cfg.logs, data_dir() / "runs", local), health=health,
+                  list(cfg.site_origins), cfg.files_port, Texts(cfg.logs, data_dir() / "runs", local, store), health=health,
                   data=_data_api(store) if is_local(store) else None,
                   packs=_packs(store) if is_local(store) else None)
             store.put_many({"meta/files": {"url": cfg.files_url}})

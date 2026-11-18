@@ -205,3 +205,11 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
 .picks { width: 100%; }
 .picks select { width: 100%; min-width: 5.5rem; }
 .board-mats { margin: 0.3rem 0 0.5rem; }
+
+/* Records (plan bf73af63 F1) */
+.rec-id { display: inline-block; border: 2px solid; border-radius: 0.4rem; padding: 0 0.35rem; font-size: 0.75rem; font-weight: bold; margin-right: 0.4rem; white-space: nowrap; }
+.records-side select { width: 100%; margin: 0.3rem 0; }
+.rec-versions li { margin-bottom: 0.4rem; }
+.linkish { background: none; border: none; padding: 0; color: var(--accent, #5aa9e6); text-decoration: underline; cursor: pointer; font: inherit; }
+.kb-line .good { color: #2fbf9b; font-weight: bold; }
+.kb-line .warn { color: var(--wait-fg); font-weight: bold; }

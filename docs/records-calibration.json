@@ -1,0 +1,452 @@
+{
+ "measured": "2026-11-18",
+ "model": "nomic-embed-text",
+ "records": 546,
+ "paraphrase_same_fact": {
+  "n": 60,
+  "min": 0.8467,
+  "p05": 0.9025,
+  "p50": 0.9657,
+  "max": 0.9958
+ },
+ "unrelated_random": {
+  "records": 546,
+  "samePairs": 0,
+  "same": [],
+  "sameMin": null,
+  "unrelatedPairs": 4000,
+  "unrelatedP50": 0.627,
+  "unrelatedP95": 0.7276,
+  "unrelatedP99": 0.7748,
+  "unrelatedP999": 0.8241,
+  "unrelatedMax": 0.8568
+ },
+ "nearest_other": {
+  "n": 546,
+  "top20": [
+   [
+    1.0,
+    "dec:464",
+    "dec:463"
+   ],
+   [
+    1.0,
+    "dec:463",
+    "dec:464"
+   ],
+   [
+    1.0,
+    "dec:458",
+    "dec:457"
+   ],
+   [
+    1.0,
+    "dec:457",
+    "dec:458"
+   ],
+   [
+    1.0,
+    "dec:231",
+    "dec:230"
+   ],
+   [
+    1.0,
+    "dec:230",
+    "dec:231"
+   ],
+   [
+    1.0,
+    "dec:229",
+    "dec:231"
+   ],
+   [
+    0.9562,
+    "dec:53",
+    "dec:52"
+   ],
+   [
+    0.9562,
+    "dec:52",
+    "dec:53"
+   ],
+   [
+    0.9503,
+    "rule:13",
+    "dec:409"
+   ],
+   [
+    0.9503,
+    "dec:409",
+    "rule:13"
+   ],
+   [
+    0.9444,
+    "dec:46",
+    "dec:45"
+   ],
+   [
+    0.9444,
+    "dec:45",
+    "dec:46"
+   ],
+   [
+    0.9351,
+    "dec:444",
+    "dec:443"
+   ],
+   [
+    0.9351,
+    "dec:443",
+    "dec:444"
+   ],
+   [
+    0.9347,
+    "dec:216",
+    "dec:215"
+   ],
+   [
+    0.9347,
+    "dec:215",
+    "dec:216"
+   ],
+   [
+    0.9251,
+    "dec:447",
+    "dec:446"
+   ],
+   [
+    0.9251,
+    "dec:446",
+    "dec:447"
+   ],
+   [
+    0.9231,
+    "dec:217",
+    "dec:216"
+   ]
+  ],
+  "p50": 0.8174
+ },
+ "same_samples": [
+  {
+   "id": "les:10",
+   "cos": 0.9554,
+   "para": "After placement, moves that affect the entire hand cancel each other out: steps 3, 4, 6, and 8 of the market solver each involve a full-hand movement."
+  },
+  {
+   "id": "les:23",
+   "cos": 0.8998,
+   "para": "Changes occurring frequently during each run, without a baseline, cause the fixes to deteriorate."
+  },
+  {
+   "id": "les:9",
+   "cos": 0.945,
+   "para": "The owner's position was taken over by an older assistant (seed_hold), and subsequent actions removed the hand from the touch points."
+  },
+  {
+   "id": "rule:13",
+   "cos": 0.9759,
+   "para": "The hand gate: every hold is assessed prior to being displayed.\n\nThe owner's words (2026-10-26): \"Set up a gate to automatically verify and compute the finger position, touch point, and all related as"
+  },
+  {
+   "id": "dec:196",
+   "cos": 0.9954,
+   "para": "No data must be lost. Preview of plan c5cb9485 from real records: cc/tmp/review/preview_avatar.html; 97/97 lines, 0/142 numbers lost; approximately 12 lines sorted to the wrong field. Inquired in inbo"
+  },
+  {
+   "id": "dec:191",
+   "cos": 0.9708,
+   "para": "Money flow tracking in VND, USD, and gold, using rates exclusively from Vietnam-based sources, obtained legally. Synchronized every 15 minutes or manually. All data stored in Firestore. A rate report "
+  },
+  {
+   "id": "rule:17",
+   "cos": 0.9726,
+   "para": "Web pages: each new page adopts the owner's style settings.\n\nOwner's instructions (2026-11-03): \"Use Tahoma as font, with 30px for normal body text; scale up the rest of the text. Line height: 1.8. Da"
+  },
+  {
+   "id": "les:37",
+   "cos": 0.9644,
+   "para": "Deleted records were recovered: a PATCH operation generated missing documents, and the heartbeat utilized put_many."
+  },
+  {
+   "id": "dec:192",
+   "cos": 0.9659,
+   "para": "Waiter script cc/dashboard/sync100.ps1 initiated: pauses until no active execution (this run), then terminates, performs sync --days 100, and begins; records in cc/dashboard/sync100.log"
+  },
+  {
+   "id": "dec:98",
+   "cos": 0.9586,
+   "para": "Review settings, sessions, and tool definitions only; no actions are executed. Identified: archive_session terminates the process according to its definition, send_message deposits a message into an a"
+  },
+  {
+   "id": "les:4",
+   "cos": 0.8467,
+   "para": "The chart figures are based on the actual data, not manually entered."
+  },
+  {
+   "id": "dec:323",
+   "cos": 0.9693,
+   "para": "Step 2 closes the middle, ring, pinky, and thumb fingers; the index finger remains aligned with line B. Step 3 moves the closed hand up the backstrap to the highest no-clip position (now point A). Ste"
+  },
+  {
+   "id": "dec:147",
+   "cos": 0.9663,
+   "para": "Phones: iOS standard settings (SF, 17px, 1.3, #1C1C1E/#FFFFFF), instead of 20px. Desktop: Tahoma at 30px, 1.8, #1a1a1a/#f8f8f-8. Applies only to new pages. In global CLAUDE.md and responsive-web-style"
+  },
+  {
+   "id": "dec:94",
+   "cos": 0.9638,
+   "para": "Yes, a model turning once per minute results in approximately 1,440 turns per day; a free Python check was provided in the bridge, with the archiver activated only when a message had been pending for "
+  },
+  {
+   "id": "dec:43",
+   "cos": 0.9475,
+   "para": "Build: Add model and effort selectors next to Manual/Auto on the Runs tab (meta/runs model, effort; \"default\" refers to the CLI's default setting). These selectors are set to the default value at Star"
+  },
+  {
+   "id": "dec:418",
+   "cos": 0.9784,
+   "para": "Decoupled construction: the per-gun overlay, the wrap curl (disabled by default: it rotated the index end joint by 32), the gate palm-in. The gate still rejects all holds except the bolt catch (AR15 g"
+  },
+  {
+   "id": "dec:163",
+   "cos": 0.9284,
+   "para": "Developed the Start a plan form. Reviewed one session: identical id, but delayed responses continued within the bridge loop, lacking an approval tool and a Runs row."
+  },
+  {
+   "id": "dec:16",
+   "cos": 0.9672,
+   "para": "Ticks: responded (per the steps; summary maintains the count). Avatar: three regressions in my code identified and resolved: keepalive set to 900 seconds versus the avatar's 420-second online threshol"
+  },
+  {
+   "id": "dec:65",
+   "cos": 0.9604,
+   "para": "Caps identified (last reply 3,000, run result 4,000, follow-up and thread reply 2,000); CV scan missing 658 characters. Conclusion: the page retrieves the complete text from the PC via the bridge (no "
+  },
+  {
+   "id": "dec:61",
+   "cos": 0.9139,
+   "para": "- When asked what a file contains, show its content, not its history.  \n- If a run is lost, finish from the .out file.  \n- If two capital letters are present, it came from the PC too.  \n- SESSION_PLAN"
+  },
+  {
+   "id": "dec:37",
+   "cos": 0.9416,
+   "para": "Summary of previous session: no action required, it was a note. Reason for not applying: the global CLAUDE.md specifies minimal verbosity but does not include bullet points (which existed only in my m"
+  },
+  {
+   "id": "dec:255",
+   "cos": 0.9734,
+   "para": "Change to Add step. Plan b73e97ad: step p5 (resize) along with harnesses h7, h8 included; phase remains Verify."
+  },
+  {
+   "id": "dec:31",
+   "cos": 0.9709,
+   "para": "Spend: within today's range, the usage query retrieves only the selected range (today = 1 read). Sync writes: the bridge updates every modified session document, today's usage, and work types each min"
+  },
+  {
+   "id": "les:22",
+   "cos": 0.9391,
+   "para": "Digits and words alone concealed flaws; standalone word-step boxes were difficult to envision."
+  },
+  {
+   "id": "dec:347",
+   "cos": 0.9958,
+   "para": "The TM 10698A-10/1 (USMC M1014 manual) from archive.org is labeled \"distribution limited to U.S. Government agencies only, for official use only\": it was removed and never utilized."
+  },
+  {
+   "id": "dec:464",
+   "cos": 0.9756,
+   "para": "Meaning: A new plan (docs/SOLVER_PLAN.md) has been created with local rules (docs/SOLVER_RULES.md: Rule V pictures, Rule C after compact). Completed: the rules file, a SessionStart compact hook in cc/"
+  },
+  {
+   "id": "dec:202",
+   "cos": 0.9555,
+   "para": "Async built: Shared/Heavy ticks, maximum concurrent (default 2), side steps occur in a new session, plan retains its session; failure halts further initiations. Shipped."
+  },
+  {
+   "id": "dec:247",
+   "cos": 0.9645,
+   "para": "If the table has too many columns, enable text wrapping and limit each column to a few characters. Use the iPhone 13 screen size as the standard for mobile screens."
+  },
+  {
+   "id": "dec:314",
+   "cos": 0.9788,
+   "para": "views_index_only now displays only no_gun_top_down and no_gun_left_to_right, at a scale of 0.12, centered on the index."
+  },
+  {
+   "id": "rule:4",
+   "cos": 0.9701,
+   "para": "If the owner's choice contradicts a rule, state it clearly before acting.  \nThe owner's words (2026-10-22): \"If my decision conflicts with a rule, tell me before executing.\"  \nBefore making a decision"
+  },
+  {
+   "id": "dec:5",
+   "cos": 0.9553,
+   "para": "Resolved a2ef5dc and the relocated files were accepted. Restart and push have not been instructed; requested."
+  },
+  {
+   "id": "dec:89",
+   "cos": 0.9824,
+   "para": "Live test on LEADER: initiated with send_message (\"OK 1\"), waited for dashboard message, archiver performed archive, bridge transmitted (\"OK 2\") and unarchived; 47 seconds after the correction. Bug id"
+  },
+  {
+   "id": "les:15",
+   "cos": 0.9746,
+   "para": "The gun frame (forward, up, left) is left-handed; the standard cross product produced an incorrect sign."
+  },
+  {
+   "id": "dec:294",
+   "cos": 0.9162,
+   "para": "Both arms exert a backward force; the glove alters only the friction."
+  },
+  {
+   "id": "dec:429",
+   "cos": 0.9473,
+   "para": "Move the thumb line further to the left side... align the thumb properly and position the root of the"
+  },
+  {
+   "id": "dec:87",
+   "cos": 0.9859,
+   "para": "s10 \"both\" conflicts with the Approvals setting (a bridge-run command bypasses Manual approval): raised, waiting. A read counter has been added to the bridge (firestore.READS → reads.json), a 10-minut"
+  },
+  {
+   "id": "dec:268",
+   "cos": 0.9735,
+   "para": "Execute now and then restart the bridge. Executed 681d04d (29396d2..681d04d). Restart awaits completion of this run (pid 4312), then halts the bridge; watchdog resumes it (log tmp/p3/restart-after-run"
+  },
+  {
+   "id": "dec:335",
+   "cos": 0.9951,
+   "para": "fakepose-mcp: the market's hold (presets on sockets, fingers curl to contact, two-bone IK, parts attached); clipping rule enforces zero clipping observed from first-person view (hidden contact recorde"
+  },
+  {
+   "id": "dec:243",
+   "cos": 0.9483,
+   "para": "Progress on step s2: Code, tests, bridge integration. Completed: bridge pytest 125, rules 114, build, secrets validation; live execution of \"hi\" took 11.1 seconds ($0.17), test records removed; push-t"
+  },
+  {
+   "id": "rule:18",
+   "cos": 0.9754,
+   "para": "User-stories diagrams: a single style, applied consistently across all sessions.\n\nOwner's statement (2026-11-06): \"I want the rules for generating user stories diagrams in plan sessions to be a perman"
+  },
+  {
+   "id": "dec:306",
+   "cos": 0.9196,
+   "para": "Attempted; neither satisfied the built condition."
+  },
+  {
+   "id": "dec:73",
+   "cos": 0.9681,
+   "para": "Create the plan format number (six parts make one; below the current number is reconstructed on resume), assign and commit, and push (with a and b), then restart the bridge last."
+  },
+  {
+   "id": "dec:112",
+   "cos": 0.9617,
+   "para": "s2 executed in the browser pane at 1280, 900, and 375px—all passed, with marked images in cc/dashboard/s2-check/; s2 status updated to done."
+  },
+  {
+   "id": "dec:423",
+   "cos": 0.948,
+   "para": "Meaning: poor: the M24 grip's index lay along the top of the stock, not near line B (the owner's Pose Lab)"
+  },
+  {
+   "id": "dec:308",
+   "cos": 0.9551,
+   "para": "The index pad is on the gun's right side, and the thumb pad is on the gun's left side."
+  },
+  {
+   "id": "dec:408",
+   "cos": 0.9913,
+   "para": "Captured holds maintain position only (fingers aligned within their planes, no twisting); a pinch extends until the index tip contacts (M16A2 handle 1.25 cm, gap 0.09); digits inside the mesh at a hol"
+  },
+  {
+   "id": "dec:70",
+   "cos": 0.9477,
+   "para": "\"Approved\" is only valid if there is a genuine, recorded approval; all other files have the checkbox enabled but not ticked; the final Approve button remains available after Check (it becomes active o"
+  },
+  {
+   "id": "dec:18",
+   "cos": 0.9851,
+   "para": "No (only install-task.ps1, install-service.sh, README steps). Created bridge/setup-box.sh and setup-box.ps1: 8 steps, each skipped if already completed, dry-run mode; dry-run succeeds on this PC for b"
+  },
+  {
+   "id": "dec:1",
+   "cos": 0.9588,
+   "para": "Plan v6 is approved. It is not being implemented due to: moving to the build phase, approving the KB compare in tmp/, or restoring the cut F1 line."
+  },
+  {
+   "id": "dec:221",
+   "cos": 0.9925,
+   "para": "Cloudflare deployment failed (wrangler autoconfig requires Vite 6) and \"Does this project deploy the same way as playground? Because the webpage I see only shows 'hello world'\". Response: yes, it's a "
+  },
+  {
+   "id": "dec:216",
+   "cos": 0.9657,
+   "para": "Meaning: bridge signs in as owner; site hosted at agent.500kv.co; Cloudflare Access implemented; GitHub repository configured with Cloudflare Pages for auto-deployment. Documented in PLAN.md under Dec"
+  },
+  {
+   "id": "dec:54",
+   "cos": 0.9699,
+   "para": "A dedicated Check usage button in the right spend panel, placed in a separate section beside Spend by day. The specific usage—whether Firestore quota, Claude plan limit, or both—was determined in the "
+  },
+  {
+   "id": "les:30",
+   "cos": 0.9025,
+   "para": "The previous plan did not work when subjected to the new rule example."
+  },
+  {
+   "id": "dec:397",
+   "cos": 0.9578,
+   "para": "Keep the handle movement. The support thumb is too widely separated; it should move to close against the gun (either over or along the rail), not remain suspended in space."
+  },
+  {
+   "id": "dec:419",
+   "cos": 0.9464,
+   "para": "Each author handles one gun in the overlay, making a single attempt at a time, evaluated by the gate displaying a picture."
+  },
+  {
+   "id": "dec:442",
+   "cos": 0.9819,
+   "para": "Completed: fakepose src reverted to 9a42a2b (plan16, the plan11 hand the owner referred to as \"hand look good\"). weaponlab remains at 8285d65 code. No execution performed."
+  },
+  {
+   "id": "dec:76",
+   "cos": 0.9852,
+   "para": "Cause identified: KPI plan 6d5d3d3b lacks a kind (either plain or opened with text); dashboard plan 94d6777a has kind=parts. A plan from the KPI session was initiated. A rule was added to global CLAUD"
+  },
+  {
+   "id": "dec:205",
+   "cos": 0.8595,
+   "para": "The board serves as the central representation: defining the purpose, the concept, and the progression from initial construction to the final outcome. No repetition of Steps. Identify the absence of l"
+  },
+  {
+   "id": "dec:284",
+   "cos": 0.9839,
+   "para": "\"commit and push\" results in \"yes\" (the .plan_data link fix)."
+  },
+  {
+   "id": "dec:357",
+   "cos": 0.9472,
+   "para": "The M1911A1 is the standard for acceptable quality. All other firearms must meet or exceed M1911A1 standards. The newer models (M16A2, M82A2, Benelli) appear inferior. Issue: my finish inspection fail"
+  }
+ ],
+ "query_to_record": {
+  "queries": 80,
+  "pairs": 43680,
+  "q_doc_p50": 0.5923,
+  "p90": 0.6672,
+  "p95": 0.6887,
+  "p99": 0.7262,
+  "max": 0.9102,
+  "own_plan_lessons": 406,
+  "own_p50": 0.5752,
+  "own_p90": 0.6532
+ },
+ "chosen": {
+  "DUP": 0.9,
+  "DUP_from": "paraphrase same-fact p05 0.9025 (60 records paraphrased by qwen3:4b-instruct); above every unrelated random pair (max 0.8568 of 4000)",
+  "MATCH": 0.73,
+  "MATCH_from": "query-to-record cosine p99 0.7262 (80 plan-step messages x 546 records = 43,680 pairs)",
+  "GIVE": 6,
+  "GIVE_from": "1% of 546 records pass MATCH on average = 5.5 per run"
+ }
+}

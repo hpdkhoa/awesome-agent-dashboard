@@ -526,6 +526,7 @@ class Inbox:
         steps = {st["id"]: st for st in (v.get("parts") or {}).get("steps") or []}
         if step_id not in steps:
             raise ValueError(f"plan v{plan.get('current', 0)} has no step {step_id}; its steps: " + ", ".join(steps))
+        cited = self.check_cites(state, reply, rep)
         path = f"planSteps/{plan_id}_{step_id}"
         versions = list((self.store.get(path) or {}).get("versions") or [])
         n = len(versions) + 1
@@ -550,6 +551,27 @@ class Inbox:
             self.post("result", f"Step {state}: {step_id} · {steps[step_id]['title']}", report_text(rep) or reply, files=evidence or [],
                       extra={"planId": plan_id, "stepId": step_id, "round": int(plan.get("current", 0)), "stepVersion": n})
         return n
+
+    def check_cites(self, state: str, reply: str, rep: dict) -> list[str]:
+        """KB first (plan bf73af63 F1, the mockup: "run must cite them"): a done or failed report of a run that was given
+        records must cite every one of them (how it was used, or why it does not apply). Refused otherwise, with the ids.
+        Returns the given ids (each counted as cited once on its record)."""
+        if state not in ("done", "failed"):
+            return []
+        run = self.running_command() or {}
+        given = list((run.get("kb") or {}).get("given") or [])
+        if not given:
+            return []
+        from .records import Records
+
+        rec = Records(self.store)
+        missing = rec.check_cites(given, reply + " " + report_text(rep))
+        if missing:
+            raise ValueError(f"This run was given records {', '.join(given)} (KB first). Cite each in the reply: how it was "
+                             f"used, or why it does not apply. Not cited: {', '.join(missing)}.")
+        rec.count_cites(given)
+        self.store.update(f"commands/{run['id']}", {"kb": {**run["kb"], "cited": given, "citedAt": now_iso()}})
+        return given
 
     def ask_switch(self, to: str, change: str, why: str) -> str:
         """A Q&A or an Action run asks the owner to switch to a kind that changes the plan. Returns the question's id."""
@@ -1067,6 +1089,54 @@ def server():
         except ValueError as e:
             return str(e)
         return f"Saved step version {n} of {step_id} ({state})."
+
+    # Records with ids (plan bf73af63 F1, the owner's pick "Best"): the knowledge base sessions write and read.
+    from .records import Records, Refused, TYPES as RECORD_TYPES
+
+    records = Records(store, by=inbox.session_id)
+
+    @mcp.tool()
+    async def record_add(type: str, text: str, words: str = "", why: str = "", outcome: str = "", source: str = "",
+                         area: str = "", plan: str = "", step: str = "", files: list[str] | None = None,
+                         supersedes: list[str] | None = None, duplicate_of: str = "", new: bool = False,
+                         new_reason: str = "") -> str:
+        """Add a record to the knowledge base; returns its id (dec:N, att:N, les:N, rule:N, find:N).
+        type: dec (a decision given to you: put the owner's exact words in words), att (an attempt: record it when you
+        build a design and again with outcome accepted or rejected and why), les (a lesson), rule, find (a finding).
+        Read near records first (record_query). The KB refuses: a repeat of a rejected attempt without new_reason (the
+        refusal names its id); a near-duplicate unless duplicate_of=<id> (the same fact, conditions and outcome) or
+        new=true (a distinct one). supersedes: ids this record replaces. plan, step, files: what it applies to."""
+        try:
+            rid = await asyncio.to_thread(records.add, type, text, words_=words, why=why, outcome=outcome, source=source,
+                                          area=area, plan=plan, step=step, files=files, supersedes=supersedes,
+                                          duplicate_of=duplicate_of, new=new, new_reason=new_reason)
+        except (Refused, ValueError) as e:
+            return str(e)
+        return f"Saved {rid}."
+
+    @mcp.tool()
+    async def record_query(about: str = "", type: str = "", id: str = "", status: str = "", k: int = 10) -> str:
+        """Find records: about (words or a question; ranked by meaning and words, Ollama on the PC), type (dec, att,
+        les, rule, find), status (att: open, accepted, rejected). id: one record whole, with its versions and links.
+        Cite the ids you reuse (dec:41) in your reports."""
+        if id:
+            r = await asyncio.to_thread(records.get, id)
+            return json.dumps(r, ensure_ascii=False) if r else f"No record {id}."
+        got = await asyncio.to_thread(records.search, about, type, max(1, min(k, 50)), status)
+        rows = [{"id": r["id"], "type": RECORD_TYPES[r["type"]], "status": r.get("status"), "v": len(r.get("versions") or [1]),
+                 "text": r["text"][:500], "words": r.get("words", "")[:300], "why": r.get("why", ""), "source": r.get("source", ""),
+                 "meaning": r.get("meaning")} for r in got["results"]]
+        return json.dumps({"how": got["how"], "results": rows}, ensure_ascii=False)
+
+    @mcp.tool()
+    async def record_edit(id: str, text: str = "", words: str = "", note: str = "", outcome: str = "", why: str = "") -> str:
+        """A new version of a record, v(n+1); the old versions stay. A rule or a decision needs the owner's exact words
+        for this version (words). An attempt's outcome: open, accepted or rejected, with why."""
+        try:
+            n = await asyncio.to_thread(records.edit, id, text, words, note, outcome, why)
+        except ValueError as e:
+            return str(e)
+        return f"Saved {id} v{n}."
 
     @mcp.tool()
     async def plan_get(plan_id: str = "", part: str = "") -> str:

@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 
 export const SETTINGS_KEY = "aad.settings";
 
-export type TabId = "inbox" | "plans" | "sessions" | "runs" | "money" | "rates" | "storage" | "settings";
+export type TabId = "inbox" | "plans" | "sessions" | "runs" | "records" | "money" | "rates" | "storage" | "settings";
 export const HIDEABLE: TabId[] = ["money", "rates", "storage"];
 
 export type Settings = {

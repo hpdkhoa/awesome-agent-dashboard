@@ -203,6 +203,9 @@ export type Run = {
   model?: string; effort?: string; // what the run went with: its own choice, else the setting in meta/runs (RunWith)
   noSession?: boolean; // a one-off start: its session is never saved, so no messages can follow
   freshFrom?: string; contextTokens?: number; // the message went to a fresh session with a handoff from this one (handoff.py)
+  // KB first (plan bf73af63 F1, bridge records.py gate_for_run): the records the run was given and the ones its report cited
+  kb?: { given: string[]; cited?: string[]; how?: string; error?: string };
+  rulesAt?: Record<string, number>; rulesChanged?: string[]; // F3: each rule record's version this run ran under
   // "Check now": what the bridge's wait rule saw for the session (bridge runs.py session_status)
   check?: { turn: boolean; lastFrom: string; open: boolean | null; openSince: string | null; openIn: "app" | "terminal" | null };
   createdAt: string;
