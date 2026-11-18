@@ -32,10 +32,12 @@ export function harnessCount(list: HarnessItem[], ticks?: HarnessTicks | null) {
 }
 
 // What Run step tells the session (the owner's words, 2026-11-04: "the unticked item won't be used or added into build
-// phase"): only the approved items go into the work.
+// phase"): only the approved items go into the work. G4 (the owner, 2026-11-18: "all 5 gap, fix one by one"): each
+// approved item goes with its kind and text, so a fresh session knows what it is; a left-out item stays an id only.
+// The same words as the bridge's chain.py harness_note.
 export function buildNote(list: HarnessItem[] | undefined, ticks?: HarnessTicks | null): string {
   if (!list?.length) return "";
-  const ok = list.filter((h) => approved(h, ticks)).map((h) => h.id);
-  const left = list.filter((h) => !ok.includes(h.id)).map((h) => h.id);
-  return ` Use only the approved harness items: ${ok.join(", ") || "none"}.` + (left.length ? ` Not approved, left out: ${left.join(", ")}.` : "");
+  const ok = list.filter((h) => approved(h, ticks));
+  const left = list.filter((h) => !ok.includes(h)).map((h) => h.id);
+  return ` Use only the approved harness items: ${ok.map(harnessLine).join("; ") || "none"}.` + (left.length ? ` Not approved, left out: ${left.join(", ")}.` : "");
 }

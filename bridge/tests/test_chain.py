@@ -44,7 +44,7 @@ def test_runs_the_steps_not_done_in_order_then_done():
     c = store.get("planChains/p1")
     run = store.get(f"commands/{c['runId']}")
     assert c["stepId"] == "S2" and run["stepId"] == "S2" and run["sessionId"] == "s1" and run["model"] == "opus"
-    assert run["prompt"] == "Work on step S2: step 2. Report it with step_update. Use only the approved harness items: h1. Not approved, left out: h2."
+    assert run["prompt"] == "Work on step S2: step 2. Report it with step_update. Use only the approved harness items: h1 [tool] pytest. Not approved, left out: h2."
     assert ch.resume() == []  # the run is new: wait
     report(store, "S2", "done")
     end(store, ch, "done")
@@ -154,7 +154,7 @@ def test_the_harness_note_matches_the_page_and_is_read_at_each_step():
     end(store, ch, "done")
     ch.resume()
     run = store.get(f"commands/{store.get('planChains/p1')['runId']}")
-    assert run["stepId"] == "S2" and run["prompt"].endswith("approved harness items: h1, h2.")
+    assert run["stepId"] == "S2" and run["prompt"].endswith("approved harness items: h1 [tool] pytest; h2 [check] build passes.")
 
 
 def test_each_step_runs_with_its_own_pick():
@@ -272,3 +272,9 @@ def test_step_text_carries_the_step_and_its_check():
     assert step_text(st, " H.") == ("Work on step s3: Add plan_get. The step: Return the current version's parts and harness."
                                     " Its check: pytest passes. Report it with step_update. H.")
     assert step_text({"id": "s1", "title": "x", "does": " ", "check": ""}) == "Work on step s1: x. Report it with step_update."
+
+
+def test_harness_note_sends_the_approved_items_text():
+    """G4 (the owner, 2026-11-18: "all 5 gap, fix one by one"): approved items with kind and text; left out as ids."""
+    both = {"items": {h["id"]: {"ok": True, "hash": item_hash(h)} for h in HARNESS}}
+    assert harness_note(HARNESS, both) == " Use only the approved harness items: h1 [tool] pytest; h2 [check] build passes."

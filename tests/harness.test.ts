@@ -31,8 +31,8 @@ describe("harness ticks", () => {
 
   it("tells Run step to use only the approved items", () => {
     const ticks: HarnessTicks = { planId: "p", items: { h1: tick(h1) } };
-    expect(buildNote([h1, h2], ticks)).toBe(" Use only the approved harness items: h1. Not approved, left out: h2.");
-    expect(buildNote([h1], ticks)).toBe(" Use only the approved harness items: h1.");
+    expect(buildNote([h1, h2], ticks)).toBe(" Use only the approved harness items: h1 [check] tests/test_delete.py written, fails now. Not approved, left out: h2.");
+    expect(buildNote([h1], ticks)).toBe(" Use only the approved harness items: h1 [check] tests/test_delete.py written, fails now.");
     expect(buildNote([], ticks)).toBe("");
   });
 });

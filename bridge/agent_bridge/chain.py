@@ -35,13 +35,15 @@ def item_hash(h: dict) -> str:
 def harness_note(items: list[dict] | None, ticks: dict | None) -> str:
     """The same note as the page's buildNote (web/src/harness.ts), made when each step starts, from the harness of the
     plan's current version and the owner's ticks then (the owner's words, 2026-11-04: "the unticked item won't be used
-    or added into build phase")."""
+    or added into build phase"). G4 (the owner, 2026-11-18: "all 5 gap, fix one by one"): each approved item goes with
+    its kind and text (the page's harnessLine), so a fresh session knows what it is; a left-out item stays an id only."""
     if not items:
         return ""
     t = (ticks or {}).get("items") or {}
-    ok = [h["id"] for h in items if (t.get(h["id"]) or {}).get("ok") and t[h["id"]].get("hash") == item_hash(h)]
-    left = [h["id"] for h in items if h["id"] not in ok]
-    return f" Use only the approved harness items: {', '.join(ok) or 'none'}." + (f" Not approved, left out: {', '.join(left)}." if left else "")
+    ok = [h for h in items if (t.get(h["id"]) or {}).get("ok") and t[h["id"]].get("hash") == item_hash(h)]
+    left = [h["id"] for h in items if h not in ok]
+    lines = "; ".join(f"{h['id']} [{h.get('kind', '')}] {h.get('item', '')}" for h in ok)
+    return f" Use only the approved harness items: {lines or 'none'}." + (f" Not approved, left out: {', '.join(left)}." if left else "")
 
 
 def _sentence(label: str, text) -> str:
