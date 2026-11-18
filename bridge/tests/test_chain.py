@@ -263,3 +263,12 @@ def test_a_fail_stops_new_starts_and_the_running_ones_finish():
     c = store.get("planChains/p1")
     assert c["state"] == "stopped" and c["stepId"] == "S1" and "reported it failed" in c["reason"]
     assert not any(k.startswith("commands/") and v.get("stepId") == "S3" for k, v in store.docs.items())
+
+
+def test_step_text_carries_the_step_and_its_check():
+    """G1 (the owner, 2026-11-18: "all 5 gap, fix one by one"): the message has the step's text and check, not only the title."""
+    from agent_bridge.chain import step_text
+    st = {"id": "s3", "title": "Add plan_get", "does": "Return the current version's parts\n and harness", "check": "pytest passes."}
+    assert step_text(st, " H.") == ("Work on step s3: Add plan_get. The step: Return the current version's parts and harness."
+                                    " Its check: pytest passes. Report it with step_update. H.")
+    assert step_text({"id": "s1", "title": "x", "does": " ", "check": ""}) == "Work on step s1: x. Report it with step_update."

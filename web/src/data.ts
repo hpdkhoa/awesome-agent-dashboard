@@ -630,9 +630,17 @@ export const sendPlanMessage = (plan: Plan, kind: PlanKind, text: string, on?: {
 };
 
 // Run step (the owner's words, 2026-11-03: "Add Ren step button"): a plain message to the plan's session.
+// G1 (the owner, 2026-11-18: "all 5 gap, fix one by one"): the step's text and its check go in the message; the same
+// words as the bridge's chain.py step_text.
+const sentence = (label: string, text?: string) => {
+  const t = (text ?? "").split(/\s+/).filter(Boolean).join(" ");
+  return t ? ` ${label}: ${t}${/[.!?]$/.test(t) ? "" : "."}` : "";
+};
+export const stepText = (step: Parts["steps"][number], harness = "") =>
+  `Work on step ${step.id}: ${step.title}.${sentence("The step", step.does)}${sentence("Its check", step.check)} Report it with step_update.${harness}`;
 export const runStep = (plan: Plan, step: Parts["steps"][number], harness = "", w?: RunWith) => {
   const id = newId();
-  const text = `Work on step ${step.id}: ${step.title}. Report it with step_update.${harness}`;
+  const text = stepText(step, harness);
   return setDoc(doc(db, "commands", id), {
     id, action: "message", machine: plan.machine, sessionId: plan.sessionId, cwd: plan.cwd, prompt: text, ownerText: text,
     planId: plan.id, stepId: step.id, status: "new", createdAt: new Date().toISOString(), ...withRun(w),

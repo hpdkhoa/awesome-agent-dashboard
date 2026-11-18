@@ -44,9 +44,17 @@ def harness_note(items: list[dict] | None, ticks: dict | None) -> str:
     return f" Use only the approved harness items: {', '.join(ok) or 'none'}." + (f" Not approved, left out: {', '.join(left)}." if left else "")
 
 
+def _sentence(label: str, text) -> str:
+    t = " ".join(str(text or "").split())
+    return f" {label}: {t}{'' if t[-1:] in '.!?' else '.'}" if t else ""
+
+
 def step_text(step: dict, harness: str = "") -> str:
-    """The same words as the page's Run step (web/src/data.ts runStep)."""
-    return f"Work on step {step['id']}: {step['title']}. Report it with step_update.{harness}"
+    """The same words as the page's Run step (web/src/data.ts stepText). G1 (the owner, 2026-11-18: "all 5 gap, fix one
+    by one"): the step's own text (does) and its check go in the message, so a fresh session has the step, not only its
+    title; an empty one is left out."""
+    return (f"Work on step {step['id']}: {step['title']}.{_sentence('The step', step.get('does'))}"
+            f"{_sentence('Its check', step.get('check'))} Report it with step_update.{harness}")
 
 
 class Chains:
