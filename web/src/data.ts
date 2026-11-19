@@ -130,7 +130,9 @@ export type Parts = {
 // materials (the owner's words, 2026-11-17: "Add material section in report board, in this section only keep the latest
 // version of each file/material and stories"; pick: the session writes the list; the bridge keeps the newest vN).
 export type Material = { name: string; kind: "story" | "material" | "file"; path?: string; note?: string };
-export type Board = { whatFor: string; idea: string[]; product: { feature: string; steps: string[] }[]; materials?: Material[] };
+// src (plan 44fc4979 s3, the owner's pick "Source field per line"): the source ids of What for and of each Idea line
+export type Board = { whatFor: string; idea: string[]; product: { feature: string; steps: string[] }[]; materials?: Material[];
+  src?: { whatFor?: string[]; idea?: string[][] } };
 // The message kinds on a plan: four change it (a new plan version), Q&A never does; Action does the work asked and makes
 // no version (step i11, the owner's words, 2026-11-16: "need action type to cover this case when I ask you to perform an action").
 export type PlanKind = "qa" | "goal" | "step" | "rule" | "lesson" | "action";

@@ -234,3 +234,26 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
 .run-head .headline.stale { color: var(--wait-fg); }
 .run-head .end-guard { display: block; flex-basis: 100%; font-size: 0.8rem; font-weight: bold; margin-top: 0.15rem; white-space: normal; overflow-wrap: anywhere; color: var(--wait-fg); }
 .sec-title:has(.headline) { white-space: normal; }
+
+/* Source chips on the report board (plan 44fc4979 s3; the owner's picks 2026-11-19 "Source chip per line", "Open under
+   the line", "Red chip now, refuse after s6"): chips on the same line (rule B5), full text opens under it (rule B6). */
+.src-line { margin: 0.15rem 0; }
+.src-row { display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; }
+.src-text { flex: 1 1 0; min-width: 0; }
+.src-text p { margin: 0; }
+.src-text > p, .src-text p:only-child { margin: 0; display: inline; }
+.src-bullet > .src-row::before { content: "•"; color: var(--second); flex: 0 0 auto; }
+.src-chips { display: inline-flex; flex-wrap: wrap; gap: 0.25rem; }
+.src-chip { font: inherit; font-size: 0.72rem; line-height: 1.5; padding: 0 0.5rem; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--accent); background: var(--accent-bg); color: var(--fg); }
+.src-chip.on { background: var(--accent); color: var(--card); }
+.src-chip.none { border-color: var(--bad); background: var(--danger-bg); color: var(--bad); cursor: default; }
+.src-chip.k-bad { border-color: var(--bad); }
+.src-open { margin: 0.3rem 0 0.5rem 0.6rem; padding: 0.4rem 0.7rem; border-left: 3px solid var(--accent); background: var(--bg);
+  border-radius: 0 6px 6px 0; font-size: 0.88rem; }
+.src-head { font-weight: bold; color: var(--second); margin: 0 0 0.2rem; overflow-wrap: anywhere; }
+.src-lines { white-space: pre-wrap; font-size: 0.8rem; margin: 0.2rem 0; max-height: 22rem; overflow: auto; }
+.src-lines .hit { background: var(--wait); display: block; }
+.board-feat .src-row { flex-direction: column; align-items: stretch; gap: 0.2rem; }
+.board-feat .src-text { display: flex; flex-direction: column; }
+.board-need .src-line { padding: 0.1rem 0; }

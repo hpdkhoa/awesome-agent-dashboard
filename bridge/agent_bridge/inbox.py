@@ -265,11 +265,76 @@ def clean_materials(items) -> list[dict]:
     return [x[2] for x in sorted(keep.values(), key=lambda x: x[1])][:60]
 
 
+# Sources on the board's lines (plan 44fc4979 s3; the owner's picks, 2026-11-19: "Source chip per line", truth "both a
+# and c" = plan, KB, feedback log and project files, "Source field per line", "Red chip now, refuse after s6"): What for
+# and each Idea line may come as {"text", "src": [ids]}. An id is a plan part (goal, summary, rules, lessons, leftover,
+# steps), a step id (s3 or step:s3), a KB record (dec:470, att:1, les:2, rule:24, find:6) or a full file path, with
+# #"quoted words" for the row that holds them (a feedback log row: the owner's pick, 2026-11-19, "Anchor by quoted
+# text", since the log grows at the top and line numbers drift) or :line for one line. Each id must exist; a line with no id is kept and shows a red "no source"
+# chip on the page (no refusal until s6 rolls every plan onto sources).
+SRC_PARTS = ("goal", "summary", "rules", "lessons", "leftover", "steps")
+SRC_RECORD = re.compile(r"^(dec|att|les|rule|find):\d+$")
+SRC_FILE = re.compile(r"^(?P<path>[A-Za-z]:[\\/][^#]+?)(?::(?P<line>\d+)|#(?P<quote>.+))?$")
+
+
+def src_quote(m) -> str:
+    """The quoted words of a path#"words" id, without their quote marks."""
+    return (m.group("quote") or "").strip().strip('"').strip()
+
+
+def src_kind(sid: str) -> str:
+    """part, step, record or file; '' for an id of no known form."""
+    if sid in SRC_PARTS:
+        return "part"
+    if SRC_RECORD.match(sid):
+        return "record"
+    if SRC_FILE.match(sid):
+        return "file"
+    if re.match(r"^(step:)?s\w{0,18}$", sid):
+        return "step"
+    return ""
+
+
+def board_line(x) -> tuple[str, list[str]]:
+    """A board line as (text, source ids): a plain string, or {"text", "src"}."""
+    if isinstance(x, dict):
+        text = str(x.get("text", "") or "").strip()
+        src = x.get("src") or []
+        src = [src] if isinstance(src, str) else src
+        return text, [str(s).strip().strip("`") for s in src if str(s).strip()][:8]
+    return str(x or "").strip(), []
+
+
+def check_sources(ids: list[str], step_ids: list[str]) -> list[str]:
+    """The ids of no known form or naming a step the plan does not have (records and files are checked by the Inbox,
+    which reads the store and the disk)."""
+    bad = []
+    for sid in ids:
+        kind = src_kind(sid)
+        if not kind or (kind == "step" and sid.removeprefix("step:") not in step_ids):
+            bad.append(sid)
+    return bad
+
+
 def clean_board(board, step_ids: list[str]) -> dict:
     if not isinstance(board, dict):
         raise ValueError("board is " + BOARD_SHAPE)
-    what = redact(str(board.get("what_for", board.get("whatFor", "")) or "").strip(), 300)
-    idea = [redact(str(x).strip(), 300) for x in board.get("idea") or [] if str(x).strip()][:8]
+    what, what_src = board_line(board.get("what_for", board.get("whatFor", "")))
+    what = redact(what, 300)
+    ideas = [board_line(x) for x in board.get("idea") or []]
+    kept = board.get("src") if isinstance(board.get("src"), dict) else {}  # a board cleaned before (a plain version)
+    if kept:
+        what_src = what_src or [str(s) for s in kept.get("whatFor") or []]
+        old = kept.get("idea") or []
+        ideas = [(t, s or ([str(x) for x in old[i]] if i < len(old) else [])) for i, (t, s) in enumerate(ideas)]
+    ideas = [(redact(t, 300), s) for t, s in ideas if t][:8]
+    idea = [t for t, _ in ideas]
+    src = {"whatFor": what_src, "idea": [s for _, s in ideas]}
+    wrong = check_sources(what_src + [x for s in src["idea"] for x in s], step_ids)
+    if wrong:
+        raise ValueError("board source ids not understood or naming no step of this plan: " + ", ".join(wrong) + ". Use a "
+                         "part (" + ", ".join(SRC_PARTS) + "), a step id, a record id (dec:N, rule:N, find:N ...) or a full "
+                         "file path (path#\"quoted words\" for a log row, path:line for one line).")
     product, bad = [], []
     for f in board.get("product") or []:
         if not isinstance(f, dict) or not str(f.get("feature", "")).strip():
@@ -287,7 +352,9 @@ def clean_board(board, step_ids: list[str]) -> dict:
     if not what or not product:
         raise ValueError("board needs what_for and product: " + BOARD_SHAPE)
     mats = clean_materials(board.get("materials"))
-    return {"whatFor": what, "idea": idea, "product": product[:30], **({"materials": mats} if mats else {})}
+    has_src = bool(src["whatFor"]) or any(src["idea"])
+    return {"whatFor": what, "idea": idea, "product": product[:30], **({"materials": mats} if mats else {}),
+            **({"src": src} if has_src else {})}
 
 
 NO_BOARD = (" This plan has no board yet: add parts.board (what_for, idea, product with step ids) in the next "
@@ -295,7 +362,12 @@ NO_BOARD = (" This plan has no board yet: add parts.board (what_for, idea, produ
 
 
 def board_markdown(b: dict) -> str:
-    lines = [f"- What for: {b['whatFor']}"] + [f"- Idea: {x}" for x in b.get("idea", [])]
+    src = b.get("src") or {}
+    def tag(ids):  # the sources ride in the raw text too, so a session reading the plan sees them
+        return f" [src: {', '.join(ids)}]" if ids else " [src: none]" if src else ""
+    ideas = src.get("idea") or []
+    lines = [f"- What for: {b['whatFor']}{tag(src.get('whatFor') or [])}"]
+    lines += [f"- Idea: {x}{tag(ideas[i] if i < len(ideas) else [])}" for i, x in enumerate(b.get("idea", []))]
     lines += [f"- Feature: {f['feature']} (steps {', '.join(f['steps']) or 'none'})" for f in b.get("product", [])]
     return "\n".join(lines)
 
@@ -387,6 +459,33 @@ class Inbox:
         if not parts:
             out["text"] = v.get("text", "")
         return {**out, "parts": parts, "harness": harness, "stepStates": states}
+
+    def refuse_bad_sources(self, parts: dict) -> None:
+        """Each board source id points to something real (plan 44fc4979 s3): a KB record in the store, a file on this
+        PC (with :line, a line it has). Nothing is saved when one does not."""
+        src = ((parts or {}).get("board") or {}).get("src") or {}
+        ids = list(dict.fromkeys([*(src.get("whatFor") or []), *[x for s in src.get("idea") or [] for x in s]]))
+        bad = []
+        for sid in ids:
+            kind = src_kind(sid)
+            if kind == "record" and not self.store.get(f"records/{sid}"):
+                bad.append(f"{sid} (no such record)")
+            elif kind == "file":
+                m = SRC_FILE.match(sid)
+                path, line, quote = m.group("path"), m.group("line"), src_quote(m)
+                if not os.path.isfile(path):
+                    bad.append(f"{sid} (no such file)")
+                elif quote:
+                    with open(path, encoding="utf-8", errors="replace") as fh:
+                        if quote not in fh.read():
+                            bad.append(f"{sid} (the file does not hold these words)")
+                elif line:
+                    with open(path, encoding="utf-8", errors="replace") as fh:
+                        count = sum(1 for _ in fh)
+                    if not 1 <= int(line) <= count:
+                        bad.append(f"{sid} (the file has {count} lines)")
+        if bad:
+            raise ValueError("board sources that point to nothing: " + "; ".join(bad) + ". Nothing was saved.")
 
     def plan_start(self, title: str, text: str = "", note: str = "", parts: dict | None = None, source: str = "",
                    harness: list | None = None) -> str:
@@ -494,6 +593,7 @@ class Inbox:
         checks = None
         if parts is not None:
             parts = clean_parts(parts)
+            self.refuse_bad_sources(parts)
             # a version never loses the board its parent had (the owner's words, 2026-11-12: "I don't want to meet
             # this kind of mistake and lost my progress")
             had = ((self.store.get(f"planVersions/{plan_id}_v{parent}") or {}).get("parts") or {}).get("board") if current else None
@@ -1184,8 +1284,11 @@ def server():
         main look: the page colors each feature from its steps' states. materials: the latest version of each file,
         material and story of the plan, one entry each (the owner's words, 2026-11-17: "only keep the latest version
         of each file/material and stories"); the bridge keeps the newest vN of a family. Send it again with every
-        version, updated. source: the command id the dashboard gave you when it
-        asked for a plan from a session."""
+        version, updated. Sources (the owner's picks, 2026-11-19: "Source chip per line", "Source field per line"):
+        what_for and each idea line may be {"text", "src": [ids]}; an id is a part (goal, summary, rules, lessons,
+        leftover, steps), a step id, a KB record (dec:N, rule:N, find:N, att:N, les:N) or a full file path
+        (path#"quoted words" for a feedback log row, which never drifts; path:line for one line). Each id must exist; a line with no src shows a red "no source" chip.
+        source: the command id the dashboard gave you when it asked for a plan from a session."""
         try:
             plan_id = await asyncio.to_thread(inbox.plan_start, title, text, note, parts, source, harness)
         except ValueError as e:

@@ -30,6 +30,7 @@ import { keyNumber, openItems, sortCheck, sortReply, type Item, type Sorted } fr
 import { useStepEvidence, type Material, type StepEvidence, type StepReport } from "./data";
 import { dt, tm } from "./fmt";
 import { boardMaterials, gathered } from "./materials";
+import { SrcLine, type SrcCtx } from "./SourceChip";
 
 // A plan with six parts (plan from a session; the owner's words, 2026-11-03, in cc/dashboard/SESSION_PLAN.md).
 // Plan versions change only with the plan's data; each step shows its own versions, the last reply like a message.
@@ -218,13 +219,23 @@ export function ReportBoard({ plan, v, steps, evidence, asked, onOpenItem, stale
   const title = (id: string) => rows.find((st) => st.id === id)?.title ?? id;
   // the session's list plus the files the reports point to (the owner's pick "Cả hai", 2026-11-17), newest of each
   const mats = b ? boardMaterials(b.materials ?? [], gathered(plan.cwd, steps, evidence, asked)) : [];
+  // source chips (plan 44fc4979 s3): What for and Idea name their sources; the other lines take theirs from the data
+  const ctx: SrcCtx = { parts: v.parts, steps, cwd: plan.cwd };
+  const ideaSrc = b?.src?.idea ?? [];
+  const noSrc = b ? (b.src?.whatFor?.length ? 0 : 1) + b.idea.filter((_, i) => !ideaSrc[i]?.length).length : 0;
   return (
-    <Section id="plan.board" main stale={stale} title="Report board" extra={b ? `${count("built") + count("open")} of ${feats.length} features built` : "no board yet"}>
+    <Section id="plan.board" main stale={stale} title="Report board"
+      extra={b ? `${count("built") + count("open")} of ${feats.length} features built${noSrc ? ` · ${noSrc} lines without source` : ""}` : "no board yet"}>
       {!b && <p className="small muted">This plan has no board yet: its session adds What for, Idea and the product list with the next plan version.</p>}
       {b && (
         <>
-          <div className="board-box"><p className="board-lab">What for</p><p>{b.whatFor}</p></div>
-          {b.idea.length > 0 && <div className="board-box"><p className="board-lab">The idea</p>{md(b.idea.map((x) => `- ${x}`).join("\n"), plan)}</div>}
+          <div className="board-box"><p className="board-lab">What for</p><SrcLine ids={b.src?.whatFor ?? null} ctx={ctx}><p>{b.whatFor}</p></SrcLine></div>
+          {b.idea.length > 0 && (
+            <div className="board-box">
+              <p className="board-lab">The idea</p>
+              {b.idea.map((x, i) => <SrcLine key={i} ids={ideaSrc[i] ?? null} ctx={ctx} className="src-bullet">{md(x, plan)}</SrcLine>)}
+            </div>
+          )}
           <div className="board-box">
             <p className="board-lab">Progress vs the final product</p>
             <div className="board-bar" role="img" aria-label={order.map((s) => `${FEATURE[s]} ${count(s)}`).join(", ")}>
@@ -237,9 +248,11 @@ export function ReportBoard({ plan, v, steps, evidence, asked, onOpenItem, stale
             <div className="board-feats">
               {feats.map((f) => (
                 <div key={f.feature} className={"board-feat f-" + f.state} title={f.steps.map(title).join(" · ")}>
-                  <b>{f.feature}</b>
-                  <span className="board-key">{f.state === "next" ? FEATURE.next : f.key || FEATURE[f.state]}</span>
-                  <span className="small muted">{f.steps.join(" ") || "no step"}{f.open ? ` · ${f.open} open` : ""}</span>
+                  <SrcLine ids={f.steps.length ? f.steps : null} ctx={ctx}>
+                    <b>{f.feature}</b>
+                    <span className="board-key">{f.state === "next" ? FEATURE.next : f.key || FEATURE[f.state]}</span>
+                    {f.open > 0 && <span className="small muted">{f.open} open</span>}
+                  </SrcLine>
                 </div>
               ))}
             </div>
@@ -252,7 +265,11 @@ export function ReportBoard({ plan, v, steps, evidence, asked, onOpenItem, stale
                 return list.length > 0 && (
                   <div key={kind} className="board-mats">
                     <p className="small"><b>{label}</b> <span className="muted">({list.length})</span></p>
-                    {md(list.map((m) => `- ${m.path ? `[${m.name}](<${m.path}>)` : m.name}${m.note ? ` · ${m.note}` : ""}${m.auto ? " · *tự gom*" : ""}`).join("\n"), plan)}
+                    {list.map((m, i) => (
+                      <SrcLine key={i} ids={m.path ? [m.path] : null} ctx={ctx} className="src-bullet">
+                        {md(`${m.path ? `[${m.name}](<${m.path}>)` : m.name}${m.note ? ` · ${m.note}` : ""}${m.auto ? " · *tự gom*" : ""}`, plan)}
+                      </SrcLine>
+                    ))}
                   </div>
                 );
               })}
@@ -264,16 +281,22 @@ export function ReportBoard({ plan, v, steps, evidence, asked, onOpenItem, stale
         <div className="board-box">
           <p className="board-lab">Needs you ({failed.length + waiting.length + (openTotal ? 1 : 0)})</p>
           {failed.length + waiting.length + openTotal === 0 && <p className="small muted">Nothing waits for you.</p>}
-          <ul className="board-need">
-            {failed.map((st) => <li key={st.id} className="bad">✖ {st.id} {st.title} failed</li>)}
-            {waiting.map((q) => <li key={q.id} className="wait-fg">? <button className="link" onClick={() => onOpenItem(q.id)}>{q.title}</button></li>)}
-            {openTotal > 0 && <li>○ {openTotal} open items: Leftover section</li>}
-          </ul>
+          <div className="board-need">
+            {failed.map((st) => <SrcLine key={st.id} ids={[st.id]} ctx={ctx}><span className="bad">✖ {st.id} {st.title} failed</span></SrcLine>)}
+            {waiting.map((q) => (
+              <SrcLine key={q.id} ids={q.stepId ? [q.stepId] : null} ctx={ctx} own={{ label: "inbox", open: () => onOpenItem(q.id) }}>
+                <span className="wait-fg">? <button className="link" onClick={() => onOpenItem(q.id)}>{q.title}</button></span>
+              </SrcLine>
+            ))}
+            {openTotal > 0 && <SrcLine ids={["leftover"]} ctx={ctx}>○ {openTotal} open items</SrcLine>}
+          </div>
         </div>
         {latest && (
           <div className="board-box">
             <p className="board-lab">Latest result · {latest.sv.stepId} {title(latest.sv.stepId)}</p>
-            <p className="small"><span className={"status " + latest.sv.state}>{latest.sv.state}</span> {keyNumber(latest.last.reply, latest.last.report)} <span className="muted">· {when(latest.last.at)}</span></p>
+            <SrcLine ids={[latest.sv.stepId]} ctx={ctx}>
+              <p className="small"><span className={"status " + latest.sv.state}>{latest.sv.state}</span> {keyNumber(latest.last.reply, latest.last.report)} <span className="muted">· {when(latest.last.at)}</span></p>
+            </SrcLine>
             {latestPic ? <LocalImg src={latestPic} alt={latestPic.split(/[\/]/).pop()} cwd={plan.cwd} /> : <p className="small muted">no picture</p>}
           </div>
         )}

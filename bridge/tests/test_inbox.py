@@ -384,6 +384,38 @@ def test_board_is_kept_checked_and_never_dropped():
     assert ib.plan_version(pid, "", "resend", parts=saved["parts"]) == n + 1
 
 
+def test_board_sources_are_checked_kept_and_shown(tmp_path):
+    """Plan 44fc4979 s3 (the owner's picks, 2026-11-19: "Source chip per line", "Source field per line", "Red chip now,
+    refuse after s6"): each id must exist; a line with none is kept; a plain version keeps the sources."""
+    import pytest
+    from agent_bridge.inbox import parts_markdown
+    store = FakeStore()
+    store.put_many({"records/dec:470": {"id": "dec:470", "text": "agreed"}})
+    log = tmp_path / "LOG.md"
+    log.write_text("a\nb\nc\n", encoding="utf-8")
+    ib = make(store)
+    pid = ib.plan_start("Src", parts=PARTS)
+    good = {**BOARD, "what_for": {"text": "Run boxes", "src": ["goal", "dec:470"]},
+            "idea": [{"text": "SEND node", "src": ["s1", f"{log}:2", f'{log}#"b"']}, "no source here"]}
+    for bad, why in [("dec:999", "no such record"), (f"{log}:9", "has 3 lines"), (str(tmp_path / "x.md"), "no such file"),
+                     ("s9", "naming no step"), ("whatever", "not understood"),
+                     (f'{log}#"zzz"', "does not hold these words")]:
+        with pytest.raises(ValueError, match=why):
+            ib.plan_version(pid, "", "bad src", parts={**PARTS, "board": {**good, "what_for": {"text": "W", "src": [bad]}}})
+    n = ib.plan_version(pid, "", "sources", parts={**PARTS, "board": good})
+    b = store.docs[f"planVersions/{pid}_v{n}"]["parts"]["board"]
+    assert b["whatFor"] == "Run boxes" and b["idea"] == ["SEND node", "no source here"]
+    assert b["src"] == {"whatFor": ["goal", "dec:470"], "idea": [["s1", f"{log}:2", f'{log}#"b"'], []]}
+    md = parts_markdown(store.docs[f"planVersions/{pid}_v{n}"]["parts"])
+    assert "[src: goal, dec:470]" in md and "no source here [src: none]" in md
+    # a resend of the read-back parts (a plain version) keeps the sources
+    m = ib.plan_version(pid, "", "resend", parts=store.docs[f"planVersions/{pid}_v{n}"]["parts"])
+    assert store.docs[f"planVersions/{pid}_v{m}"]["parts"]["board"]["src"] == b["src"]
+    # a board with no sources at all stays as it was (old plans until s6)
+    k = ib.plan_version(pid, "", "old shape", parts={**PARTS, "board": BOARD})
+    assert "src" not in store.docs[f"planVersions/{pid}_v{k}"]["parts"]["board"]
+
+
 def test_plan_get_reads_the_current_parts_harness_and_step_states():
     """G2 (the owner, 2026-11-18: "all 5 gap, fix one by one"): a fresh session reads the plan from the store."""
     import pytest
