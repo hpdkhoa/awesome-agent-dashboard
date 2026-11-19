@@ -5,6 +5,7 @@
 import { Clamp } from "./Clamp";
 import { checkTicked, type PlanStep, type Receipt, type StepCheck } from "./data";
 import { dt } from "./fmt";
+import { Findings } from "./Findings";
 
 export type ReceiptView = { r: Receipt; old?: boolean } | null;
 
@@ -53,6 +54,7 @@ export function ReceiptBox({ sv, c }: { sv?: PlanStep; c?: StepCheck }) {
         </ul>
       )}
       {r.note && <p className="small muted">{r.note}</p>}
+      {r.kind === "pictures" && <Findings findings={r.findings} />}
     </div>
   );
 }

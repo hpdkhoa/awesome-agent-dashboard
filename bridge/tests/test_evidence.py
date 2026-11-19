@@ -132,3 +132,43 @@ def test_marks_are_read_from_the_last_json_line_and_cleaned():
     m = parse_marks(text, [])
     assert m["overall"] == "pass" and m["pictures"][0]["verdict"] == "unclear"
     assert parse_marks("no json here", []) is None
+
+
+# F5: findings with dispositions (plan bf73af63; rules-review.md: "Validate each finding first, fix every confirmed
+# one ... and record each disposition")
+from agent_bridge.evidence import check_prompt, merge_findings, open_findings
+
+
+def _line(findings, overall="fail"):
+    return json.dumps({"overall": overall, "pictures": [], "note": "", "findings": findings})
+
+
+def test_findings_get_ids_and_dispositions_with_reasons():
+    m = parse_marks(_line([{"text": "no ETA shown", "picture": "a.png", "disposition": "confirmed", "why": "row has no clock"},
+                           {"text": "bar looks cut", "disposition": "REJECTED", "why": "it is the 83% fill"},
+                           {"text": "", "disposition": "confirmed"},
+                           {"text": "odd one", "disposition": "maybe"}]), [], None, "T1")
+    f = m["findings"]
+    assert [x["id"] for x in f] == ["f1", "f2", "f3"]
+    assert [x["disposition"] for x in f] == ["confirmed", "rejected", "confirmed"]
+    assert f[0]["why"] == "row has no clock" and f[0]["picture"] == "a.png" and f[0]["raised"] == "T1"
+
+
+def test_the_next_check_gets_confirmed_findings_and_can_mark_them_fixed():
+    first = parse_marks(_line([{"text": "no ETA shown", "disposition": "confirmed", "why": "x"},
+                               {"text": "bar cut", "disposition": "rejected", "why": "y"}]), [], None, "T1")
+    assert [f["id"] for f in open_findings(first)] == ["f1"]
+    p = check_prompt({"_v": {}}, {"id": "S1", "check": "c"}, ["a.png"], first)
+    assert "- f1: no ETA shown" in p and "f2" not in p and '"disposition": "confirmed|rejected|fixed"' in p
+    second = parse_marks(_line([{"id": "f1", "disposition": "fixed", "why": "ETA 14:05 on the row"},
+                                {"text": "new: stale label", "disposition": "fixed", "why": "z"}], "pass"), [], first, "T2")
+    f = {x["id"]: x for x in second["findings"]}
+    assert f["f1"]["disposition"] == "fixed" and f["f1"]["why"] == "ETA 14:05 on the row" and f["f1"]["raised"] == "T1"
+    assert f["f2"]["disposition"] == "rejected"  # left out by the check: stays as it was
+    assert f["f3"]["disposition"] == "confirmed"  # a new finding cannot start as fixed
+    assert open_findings(second) == [f["f3"]]
+
+
+def test_no_findings_key_gives_an_empty_list():
+    assert parse_marks(json.dumps({"overall": "pass"}), [])["findings"] == []
+    assert merge_findings(None, None, "T") == []

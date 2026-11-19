@@ -93,6 +93,7 @@ def test_pictures_only_the_llm_check_pass_gives_the_receipt(tmp_path):
     st = store.get("planSteps/p1_S1")
     r = st["versions"][-1]["receipt"]
     assert st["state"] == "done" and r["kind"] == "pictures" and r["overall"] == "pass" and r["pictures"][0].endswith("a.png")
+    assert r["findings"] == store.get("planEvidence/p1_S1")["check"]["findings"]  # F5: the receipt keeps the findings
 
 
 def test_pictures_only_the_llm_check_fail_turns_failed(tmp_path):

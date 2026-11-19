@@ -2,6 +2,7 @@ import { useState } from "react";
 import { askEvidence, type EvidenceSet, type Plan, type PlanStep, type PlanVersion, type StepEvidence } from "./data";
 import { LocalImg } from "./FileView";
 import { Section } from "./Section";
+import { Findings, findingCount } from "./Findings";
 import { dt } from "./fmt";
 
 // 8. Evidence, after 7. Results (the owner's words, 2026-11-12: "I need the plan when done will have an evidence section
@@ -51,6 +52,8 @@ export function StepEvidenceCard({ plan, id, title, done, e }: { plan: Plan; id:
         <b>{id} · {title}</b>
         <span className="small muted">{last ? `${last.pictures.length} picture${last.pictures.length === 1 ? "" : "s"}` : "no pictures"}</span>
         {checkedLast && <span className={"check-chip " + ck!.overall}>LLM {ck!.overall}</span>}
+        {ck?.findings && ck.findings.length > 0 && <span className="small muted">
+          {(({ confirmed, fixed, rejected }) => `findings ${confirmed} confirmed · ${fixed} fixed · ${rejected} rejected`)(findingCount(ck.findings))}</span>}
         {busy && <span className="status running">{label}</span>}
       </span>}>
       <div className="evidence-tools">
@@ -66,6 +69,7 @@ export function StepEvidenceCard({ plan, id, title, done, e }: { plan: Plan; id:
           <p className="small muted">{source(last)} · {when(last.at)}{last.stepVersion ? ` · step version ${last.stepVersion}` : ""}</p>
           {checkedLast && <p className="small"><span className={"check-chip " + ck!.overall}>LLM {ck!.overall}</span> {ck!.note} <span className="muted">· {when(ck!.at)}</span></p>}
           {ck && !checkedLast && <p className="small muted">The last LLM check ({ck.overall}, {when(ck.at)}) was on older pictures: LLM check again.</p>}
+          {ck && <Findings findings={ck.findings} />}
           <Gallery set={last} cwd={plan.cwd} marks={ck} />
         </>
       )}

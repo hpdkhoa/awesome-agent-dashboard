@@ -10,7 +10,14 @@ One record per step, planEvidence/<plan id>_<step id>:
         stepVersion, pictures: [absolute paths]}.
   state: "idle", "queued" or "running"; what: "pictures" or "check" while busy; error: the last refusal or failure.
   check: the last LLM check: {at, runId, set (the set's at), overall pass | fail | unclear, pictures: [{path, verdict,
-         why}], note}. Mark only: the step's state never changes.
+         why}], note, findings}. Mark only: the step's state never changes.
+  findings (F5, plan bf73af63, the step: "extend the evidence LLM check: findings list, each confirmed / rejected /
+         fixed with a reason"; the method from rules-review.md: "Validate each finding first, fix every confirmed one
+         ... and record each disposition"): [{id f1.., text, picture, disposition confirmed | rejected | fixed, why,
+         raised (the check's at that first listed it), at}]. The check run lists what it finds wrong or missing in the
+         pictures and validates each one first: confirmed (real) or rejected (not real), with the reason. The next check
+         gets the last check's confirmed findings: fixed when its pictures show the fix, else confirmed again, or
+         rejected; findings it does not mention stay as they were. Rejected and fixed ones are kept, never asked again.
 
 Flow 1, auto: a done report (step_update) attaches picture paths (evidence=); the ones that exist and are pictures
 make a set. None attached, or none found: the bridge starts a picture run.
@@ -35,6 +42,8 @@ KEEP_SETS = 10
 MAX_PICTURES = 24
 BUSY = ("queued", "running")
 VERDICTS = ("pass", "fail", "unclear")
+DISPOSITIONS = ("confirmed", "rejected", "fixed")
+MAX_FINDINGS = 30
 
 
 def evidence_dir(cwd: str, plan_id: str, step_id: str, run_id: str) -> Path:
@@ -118,8 +127,17 @@ def picture_prompt(plan: dict, step: dict, reply: str, folder: Path) -> str:
     )
 
 
-def check_prompt(plan: dict, step: dict, pics: list[str]) -> str:
+def open_findings(check: dict | None) -> list[dict]:
+    """The last check's confirmed findings: the next check gives each a disposition again."""
+    return [f for f in (check or {}).get("findings") or [] if f.get("disposition") == "confirmed"]
+
+
+def check_prompt(plan: dict, step: dict, pics: list[str], last: dict | None = None) -> str:
     goal = ((plan.get("_v") or {}).get("parts") or {}).get("goal", "")
+    prior = open_findings(last)
+    old = ("The last check's confirmed findings, each needs a disposition again: fixed (these pictures show it solved), "
+           "confirmed (still there) or rejected (it was wrong), with the reason:\n"
+           + "\n".join(f"- {f['id']}: {f.get('text', '')}" for f in prior) + "\n") if prior else ""
     return (
         f"Check the evidence pictures of step {step.get('id')}: {step.get('title', '')}.\n"
         f"The plan's goal: {str(goal)[:1500]}\n"
@@ -127,14 +145,50 @@ def check_prompt(plan: dict, step: dict, pics: list[str]) -> str:
         "Read each picture below with the Read tool and judge only what the picture shows: does it prove the step is "
         "done as its check says? pass = it shows it, fail = it shows the step is not done, unclear = it cannot tell.\n"
         + "\n".join(f"- {p}" for p in pics)
-        + "\nChange nothing. End your answer with one line of JSON only: "
+        + "\nFindings: list each thing you find wrong or missing in the pictures against the step's check. Validate each "
+        "finding first: look at the picture again; confirmed = it is real, rejected = it is not (say why). One finding per "
+        "problem; none when the pictures show nothing wrong.\n"
+        + old
+        + "Change nothing. End your answer with one line of JSON only: "
         '{"overall": "pass|fail|unclear", "pictures": [{"path": "...", "verdict": "pass|fail|unclear", "why": "a few words"}], '
-        '"note": "what is missing, a few words"}'
+        '"note": "what is missing, a few words", "findings": [{"id": "an id listed above, or empty for a new one", '
+        '"text": "the problem, a few words", "picture": "its path or empty", "disposition": "confirmed|rejected|fixed", '
+        '"why": "the reason, a few words"}]}'
     )
 
 
-def parse_marks(text: str, pics: list[str]) -> dict | None:
-    """The last JSON object in the check run's answer, cleaned; None when there is none."""
+def merge_findings(given, last: dict | None, at: str) -> list[dict]:
+    """The check's findings joined with the last check's. An old id keeps its text and raised time and takes the new
+    disposition and reason; a new finding gets the next id (a new one marked fixed is kept as confirmed: there was
+    nothing listed to fix); old findings the check left out stay as they were."""
+    old = [dict(f) for f in (last or {}).get("findings") or [] if isinstance(f, dict) and f.get("id")]
+    by_id = {f["id"]: f for f in old}
+    n = max([int(m.group(1)) for f in old if (m := re.fullmatch(r"f(\d+)", str(f["id"])))] or [0])
+    out = list(old)
+    for g in given or []:
+        if not isinstance(g, dict):
+            continue
+        d = str(g.get("disposition", "")).lower()
+        d = d if d in DISPOSITIONS else "confirmed"
+        why = redact(str(g.get("why", "")), 300)
+        gid = str(g.get("id", "")).strip()
+        if gid in by_id:
+            by_id[gid].update({"disposition": d, "why": why, "at": at})
+            continue
+        text = redact(str(g.get("text", "")), 300)
+        if not text:
+            continue
+        n += 1
+        f = {"id": f"f{n}", "text": text, "picture": str(g.get("picture", "") or ""),
+             "disposition": "confirmed" if d == "fixed" else d, "why": why, "raised": at, "at": at}
+        by_id[f["id"]] = f
+        out.append(f)
+    return out[-MAX_FINDINGS:]
+
+
+def parse_marks(text: str, pics: list[str], last: dict | None = None, at: str = "") -> dict | None:
+    """The last JSON object in the check run's answer, cleaned, its findings joined with the last check's; None when
+    there is none."""
     for m in reversed(list(re.finditer(r"\{.*\}", text or ""))):
         try:
             j = json.loads(m.group(0))
@@ -149,7 +203,8 @@ def parse_marks(text: str, pics: list[str]) -> dict | None:
                 rows.append({"path": str(r.get("path", "")), "verdict": v if v in VERDICTS else "unclear",
                              "why": redact(str(r.get("why", "")), 300)})
         o = str(j.get("overall", "")).lower()
-        return {"overall": o if o in VERDICTS else "unclear", "pictures": rows, "note": redact(str(j.get("note", "")), 500)}
+        return {"overall": o if o in VERDICTS else "unclear", "pictures": rows, "note": redact(str(j.get("note", "")), 500),
+                "findings": merge_findings(j.get("findings"), last, at or now_iso())}
     return None
 
 
@@ -192,7 +247,7 @@ class Evidence:
             prompt, extra = picture_prompt(plan, step, reply, folder), []
             fields = {"evidenceDir": str(folder)}
         else:
-            prompt, extra = check_prompt({**plan, "_v": v}, step, pics), ["--disallowedTools", NO_EDITS]
+            prompt, extra = check_prompt({**plan, "_v": v}, step, pics, rec.get("check")), ["--disallowedTools", NO_EDITS]
             fields = {"checkedSet": last.get("at"), "checkedPictures": pics}
         session, mode = str(uuid.uuid4()), r.mode()
         model, effort = r.run_with(c)
@@ -218,8 +273,9 @@ class Evidence:
             err = error or "The picture run saved no picture. " + (result.strip().splitlines() or [""])[-1][:300]
             store.update(path, {"state": "idle", "what": None, "error": redact(err, 500), "updatedAt": now_iso()})
             return
-        marks = parse_marks(result, c.get("checkedPictures") or []) if status == "done" else None
-        check = {"at": now_iso(), "runId": c["id"], "set": c.get("checkedSet"), **marks} if marks else None
+        at = now_iso()
+        marks = parse_marks(result, c.get("checkedPictures") or [], (store.get(path) or {}).get("check"), at) if status == "done" else None
+        check = {"at": at, "runId": c["id"], "set": c.get("checkedSet"), **marks} if marks else None
         if marks:
             store.update(path, {"state": "idle", "what": None, "error": None, "updatedAt": now_iso(), "check": check})
         else:
@@ -233,7 +289,7 @@ class Evidence:
             from .stepcheck import commit_of
             receipt = {"kind": "pictures", "commit": commit_of(plan.get("cwd", "")), "at": check["at"], "overall": "pass",
                        "set": check["set"], "pictures": c.get("checkedPictures") or [], "marks": check["pictures"],
-                       "note": check["note"], "runId": c["id"]}
+                       "note": check["note"], "findings": check["findings"], "runId": c["id"]}
             self._settle({**plan, "id": pid}, sid, receipt, "")
         else:
             why = (f"- LLM check of the pictures: {check['overall']}" + (f": {check['note']}" if check["note"] else "")

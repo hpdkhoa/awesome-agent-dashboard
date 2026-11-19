@@ -168,6 +168,14 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
 .evidence-pic.pass { border-color: var(--live); }
 .evidence-pic.fail { border-color: var(--bad); }
 .evidence-pic.unclear { border-color: var(--wait-fg); }
+/* F5: the LLM check's findings, each with its disposition (Findings.tsx) */
+.findings { margin: 0.375rem 0; padding: 0.375rem 0.5rem; border: 1px solid var(--line); border-radius: 8px; }
+.findings-list { margin: 0.25rem 0 0; padding-left: 1.1rem; }
+.findings-list > li { margin: 0.25rem 0; overflow-wrap: anywhere; }
+.disp-chip { display: inline-block; padding: 0 0.5rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; color: var(--bg); }
+.disp-chip.confirmed { background: var(--bad); }
+.disp-chip.fixed { background: var(--live); }
+.disp-chip.rejected { background: var(--muted, #888); }
 .evidence-pic img { width: 100%; height: auto; display: block; cursor: zoom-in; }
 .evidence-pic figcaption { padding: 0.25rem 0.125rem 0; overflow-wrap: anywhere; }
 @media (max-width: 560px) { .evidence-grid { grid-template-columns: minmax(0, 1fr); } }

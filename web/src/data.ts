@@ -136,7 +136,8 @@ export type PlanStep = {
 // 2026-11-19 "Done waits for its receipt"): what made a step done.
 export type Receipt = { kind: "check" | "pictures"; commit: string; at: string; runId: string;
   exit?: number; seconds?: number; command?: string; output?: string;
-  overall?: string; set?: string; pictures?: string[]; marks?: { path: string; verdict: string; why: string }[]; note?: string };
+  overall?: string; set?: string; pictures?: string[]; marks?: { path: string; verdict: string; why: string }[]; note?: string;
+  findings?: EvidenceFinding[] };
 // The run report's fields (bridge inbox.py clean_report; the owner's pick, 2026-11-15: "A + exact report fields").
 export type StepReport = {
   built?: string[];
@@ -597,9 +598,14 @@ export const runCheck = async (plan: Plan, c: StepCheck) => {
 // run", "Mark only"): one record per step (bridge evidence.py). sets: picture sets, newest first; check: the last LLM marks.
 export type EvidenceSet = { at: string; by: "report" | "run"; trigger: "done" | "button"; runId?: string; stepVersion?: number; pictures: string[] };
 export type EvidenceMark = { path: string; verdict: "pass" | "fail" | "unclear"; why: string };
+// F5 (plan bf73af63, "extend the evidence LLM check: findings list, each confirmed / rejected / fixed with a reason"):
+// each finding the LLM check lists, validated first (confirmed real / rejected not real); a later check marks it fixed.
+export type EvidenceFinding = { id: string; text: string; picture?: string; disposition: "confirmed" | "rejected" | "fixed";
+  why: string; raised: string; at: string };
 export type StepEvidence = { id: string; planId: string; stepId: string; sets?: EvidenceSet[]; state?: "idle" | "queued" | "running";
   what?: "pictures" | "check" | null; error?: string | null;
-  check?: { at: string; runId: string; set?: string; overall: "pass" | "fail" | "unclear"; pictures: EvidenceMark[]; note: string } };
+  check?: { at: string; runId: string; set?: string; overall: "pass" | "fail" | "unclear"; pictures: EvidenceMark[]; note: string;
+    findings?: EvidenceFinding[] } };
 export function useStepEvidence(planId: string | undefined): StepEvidence[] {
   const [e, setE] = useState<StepEvidence[]>([]);
   const active = useActive();
