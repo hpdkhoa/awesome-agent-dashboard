@@ -11,6 +11,12 @@ import { Section } from "./Section";
 import { tm, ago } from "./fmt";
 
 const KIND = { question: "Question", suggestion: "Suggestion", result: "Result to review", approval: "Approval" };
+// F7: a question's owner topic, shown on the row and the item (why it is the owner's to decide)
+const OWNER_TOPICS = ["scope", "policy", "approval", "spend"];
+function Topic({ item }: { item: InboxItem }) {
+  if (!item.topic || !OWNER_TOPICS.includes(item.topic)) return null;
+  return <span className="topic-chip" data-topic={item.topic} title="Only you decide this: it was routed to your inbox">{item.topic}</span>;
+}
 const STATUS = {
   open: "waiting for you",
   answered: "answered, waiting to reach the session",
@@ -47,7 +53,7 @@ export function InboxList({ items, picked, onPick }: { items: InboxItem[]; picke
         <li key={i.id} className={i.id === picked ? "row on" : "row"} onClick={() => onPick(i.id)}>
           <span className={size(i).some(isWaiting) ? "dot wait" : "dot"} />
           <div className="grow">
-            <div className="title">{size(i).length > 1 ? `${size(i).length} questions: ` : ""}{i.title}</div>
+            <div className="title"><Topic item={i} />{size(i).length > 1 ? `${size(i).length} questions: ` : ""}{i.title}</div>
             <div className="muted small">
               {KIND[i.kind]} · {i.workType} · {ago(i.createdAt)} · {STATUS[i.status]}
             </div>
@@ -280,7 +286,7 @@ export function InboxView({ item, session, plan, onOpenPlan, items = [], phone =
           <button className="link" onClick={onBack}>‹ Inbox</button>
         </div>
       )}
-      <h1>{item.title}</h1>
+      <h1><Topic item={item} />{item.title}</h1>
       {/* phone: the questions come first, right under the title (the owner's pick "Full screen, Back to list") */}
       {phone && questions}
       <p className="meta">

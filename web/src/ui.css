@@ -168,6 +168,12 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
 .evidence-pic.pass { border-color: var(--live); }
 .evidence-pic.fail { border-color: var(--bad); }
 .evidence-pic.unclear { border-color: var(--wait-fg); }
+/* F8: the box that holds a step's claim (ClaimChip.tsx) */
+.claim-chip { display: inline-block; padding: 0 0.5rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600;
+  border: 1px solid #6aa9ff; color: #6aa9ff; }
+/* F7: the owner topic of an inbox question (Inbox.tsx Topic) */
+.topic-chip { display: inline-block; margin-right: 0.4rem; padding: 0 0.5rem; border-radius: 999px; font-size: 0.75rem;
+  font-weight: 600; vertical-align: middle; background: var(--wait-fg); color: var(--bg); text-transform: uppercase; }
 /* F5: the LLM check's findings, each with its disposition (Findings.tsx) */
 .findings { margin: 0.375rem 0; padding: 0.375rem 0.5rem; border: 1px solid var(--line); border-radius: 8px; }
 .findings-list { margin: 0.25rem 0 0; padding-left: 1.1rem; }

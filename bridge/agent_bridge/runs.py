@@ -72,6 +72,7 @@ from .logs import window_cost
 from .inbox import KINDS, PLAN_FORMAT, format_of, now_iso
 from .chain import Chains
 from .stepcheck import StepChecks
+from .coordinator import Coordinator
 from .evidence import Evidence
 from .planfrom import NO_EDITS, mark_quotes, note_command, plan_prompt, scoped, system_args
 from .redact import redact
@@ -496,6 +497,10 @@ class Runs:
         self.checks = StepChecks(store, machine, self.roots, self.chains, push)
         # 8. Evidence: the picture runs and the LLM check runs of a step (evidence.py)
         self.evidence = Evidence(self)
+        # F7: a coordinator question is answered by a fork of the plan's session (coordinator.py)
+        self.coordinator = Coordinator(self)
+        # F8: claims across boxes (claims.py); set by the CLI when a control plane (Firestore) is reachable
+        self.claims = None
         # step i4: a work folder added on the page joins self.roots in place (the same list the sync and the inbox
         # read); on_roots tells the others that keep their own copy (the file viewer); env_path is where WORK_ROOTS lives
         self.on_roots: list = []
@@ -586,6 +591,7 @@ class Runs:
                     else self.chains.start(c) if action == "chain"
                     else self.checks.start(c) if action == "step_check"
                     else self.evidence.start(c) if action == "evidence"
+                    else self.coordinator.start(c) if action == "coordinator"
                     else self._add_root(c) if action == "add_root"
                     else self._search(c) if action == "search"
                     else self._local(c) if action == "local"
@@ -912,6 +918,9 @@ class Runs:
             self.store.update(path, {"status": "failed", "error": NO_CLI})
             self._answer_back(c, {"status": "answered", "error": NO_CLI})
             return f"{c['id']}: no claude CLI"
+        refused = self._claim_step(c, sid)
+        if refused:
+            return refused
         fresh, context = self._fresh_choice(c, sid)
         if fresh:
             return self._fresh_message(c, sid, cwd, text, wt, context)
@@ -943,6 +952,26 @@ class Runs:
             self.archiver.ask_unarchive(c["id"])
             self.store.update(path, {"archive": "unarchiving"})
         return f"{c['id']}: sent to session {sid}"
+
+    def _claim_step(self, c: dict, sid: str) -> str | None:
+        """F8: a Run step claims its step for this box before it starts; another box's claim refuses it, and the run
+        never starts. Returns the refusal line, or None to go on."""
+        if self.claims is None or not (c.get("planId") and c.get("stepId")):
+            return None
+        try:
+            ok, held = self.claims.take("step", sid, c["id"], "run", plan_id=c["planId"], step_id=str(c["stepId"]))
+        except (Exception, SystemExit) as e:  # the control plane is down (Firestore refusals raise SystemExit): the run goes on
+            self.store.update(f"commands/{c['id']}", {"claim": {"error": str(e).splitlines()[0][:200]}})
+            return None
+        if ok:
+            self.store.update(f"commands/{c['id']}", {"claim": {"key": held["key"], "at": held["at"]}})
+            return None
+        from .claims import holder_text
+        why = "Refused: " + holder_text(held) + ". A second box never works on a claimed step."
+        self.store.update(f"commands/{c['id']}", {"status": "failed", "error": why, "endedAt": now_iso(),
+                                                  "claim": {"refusedBy": held.get("machine"), "key": held.get("key")}})
+        self._answer_back(c, {"status": "answered", "error": why})
+        return f"{c['id']}: refused, {held.get('key')} claimed by box {held.get('machine')}"
 
     def _log_of(self, sid: str):
         files = list(self.logs.glob(f"*/{sid}.jsonl")) if self.logs and self.logs.is_dir() else []
@@ -1323,7 +1352,9 @@ class Runs:
                 self.store.update(f"planEvidence/{ev.get('planId')}_{ev.get('stepId')}", {"state": "idle", "what": None,
                                   "error": "Paused by the usage limit: press the button again after the reset.", "updatedAt": now_iso()})
             c = self.store.get(f"commands/{cid}") or {}
-            if self.push is not None:
+            if c.get("action") == "coordinator":  # F7: never reaches the owner; the asker hears why
+                self.coordinator.finished(c, "paused", "", "Paused by the usage limit.")
+            elif self.push is not None:
                 self.push.notify(f"Run paused until {c.get('pausedUntil', 'the reset')}",
                                  "Continue on the page" + (", or it continues by itself at the reset." if c.get("autoContinue") else "."),
                                  f"/?run={cid}", cid)
@@ -1367,7 +1398,8 @@ class Runs:
         else:
             self._answer_back(c, {"status": "answered", "lastTryAt": now_iso(),
                                   "error": fields.get("error") or f"The message run {fields['status']}."})
-        if self.push is not None and fields["status"] in ("done", "failed"):
+        # F7: a coordinator run never reaches the owner (no push); its answer goes back to the asking run
+        if self.push is not None and fields["status"] in ("done", "failed") and c.get("action") != "coordinator":
             first = (fields.get("error") or str(r.get("result") or "")).strip().split("\n")
             body = next((line for line in first if line.strip(" -")), "")[:160]
             what = "message" if c.get("action") == "message" else "run"
@@ -1376,6 +1408,14 @@ class Runs:
         if c.get("action") == "evidence":
             self.evidence.finished(c, fields["status"], str(r.get("result") or ""),
                                    "Stopped on the page." if stopped else fields.get("error") or "")
+        if self.claims is not None and c.get("action") in ("message", "start"):
+            try:  # F8: the run ended: its claims, and its session's, go
+                self.claims.release_run(cid, c.get("sessionId", ""))
+            except (Exception, SystemExit):
+                pass  # the control plane is down: the next run of the step on this box takes the claim again
+        if c.get("action") == "coordinator":
+            self.coordinator.finished(c, fields["status"], str(r.get("result") or ""),
+                                      "Stopped on the page." if stopped else fields.get("error") or "")
         after = self.chains.after(c) if c.get("chain") else None
         return (f"{cid}: {fields['status']}" + (f"; orphan session, closed {orphans + 1} answer(s), no retry"
                                                  if orphans is not None else "") + (f"; {after}" if after else ""))

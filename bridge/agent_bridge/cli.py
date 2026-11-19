@@ -299,6 +299,9 @@ def main(argv: list[str] | None = None) -> None:
 
                 backup = Firestore(Session(cfg))
                 mirror = Mirror(store, backup)
+                if runs is not None:  # F8: claims on the control plane every box shares
+                    from .claims import Claims
+                    runs.claims = Claims(backup, store, cfg.machine)
                 registry = Registry(backup, cfg.machine, cfg.files_url, "local")
         else:
             try:

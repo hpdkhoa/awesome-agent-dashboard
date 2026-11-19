@@ -45,6 +45,11 @@ export type WorkType = Tokens & { id: string; sessions: number; lastAt: string }
 export type InboxItem = {
   id: string;
   kind: "question" | "suggestion" | "result" | "approval";
+  // F7, question routing (plan bf73af63; the owner, 2026-11-19: "Plan session answers"): every inbox item is the
+  // owner's; topic: a question's owner topic (scope, policy, approval, spend), "hook" for the question box, else the
+  // item's kind. Items from before F7 have none. Coordinator questions live in coordinator/, never here.
+  route?: "owner";
+  topic?: string;
   sessionId: string;
   machine: string;
   cwd: string;
@@ -574,6 +579,20 @@ export function useStepChecks(planId: string | undefined): StepCheck[] {
     if (!planId || !active) return;
     return onSnapshot(query(collection(db, "planChecks"), where("planId", "==", planId)), (s) =>
       (countReads(s.docChanges().length, "planChecks"), setC(s.docs.map((d) => d.data() as StepCheck))));
+  }, [planId, active]);
+  return c;
+}
+// F8, claims across boxes (plan bf73af63, "a session claims a step or folder; shown on the page; a second box is
+// refused"): each box's copy of the claims it holds (bridge claims.py), read from the boxes, never from Firestore.
+export type Claim = { key: string; kind: "step" | "folder"; planId: string; stepId: string; folder: string; machine: string;
+  sessionId: string; runId: string; by: "run" | "session"; at: string };
+export function useClaims(planId: string | undefined): Claim[] {
+  const [c, setC] = useState<Claim[]>([]);
+  const active = useActive();
+  useEffect(() => {
+    if (!planId || !active) return;
+    return onSnapshot(query(collection(db, "boxClaims"), where("planId", "==", planId)), (s) =>
+      (countReads(s.docChanges().length, "boxClaims"), setC(s.docs.map((d) => d.data() as Claim))));
   }, [planId, active]);
   return c;
 }

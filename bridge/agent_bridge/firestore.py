@@ -191,3 +191,16 @@ class Firestore:
 
     def delete(self, path: str) -> None:
         self._call(f"{self.base}:commit", {"writes": [{"delete": f"{self.root}/{path}"}]})
+
+    def create(self, path: str, fields: dict) -> bool:
+        """Writes one document only when it does not exist yet, in one atomic commit (precondition exists=false): two
+        boxes creating the same path at once, one wins. Returns False when the document is already there (F8 claims)."""
+        w = {"update": {"name": f"{self.root}/{path}", "fields": to_value(fields)["mapValue"]["fields"]},
+             "currentDocument": {"exists": False}}
+        try:
+            self._call(f"{self.base}:commit", {"writes": [w]})
+        except SystemExit as e:
+            if any(code in str(e) for code in ("(409)", "ALREADY_EXISTS", "FAILED_PRECONDITION")):
+                return False
+            raise
+        return True

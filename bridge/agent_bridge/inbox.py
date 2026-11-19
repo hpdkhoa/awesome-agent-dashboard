@@ -625,7 +625,7 @@ class Inbox:
                 {"label": "Keep Q&A", "detail": "nothing changes", "differs": "the plan stays as it is",
                  "example": {"type": "text", "draft": "No change to the plan."}}]
         return self.post("question", f"Switch to {KINDS[to]}?", why, opts, 0,
-                         extra={"switch": {"to": to, "commandId": run.get("id", "")}})
+                         extra={"switch": {"to": to, "commandId": run.get("id", "")}, "topic": "scope"})  # F7: a plan change is scope
 
     def confirm_switch(self, item_id: str) -> bool:
         """After the owner answered a switch question: unlocks plan_version for the run when the owner chose the switch."""
@@ -664,6 +664,12 @@ class Inbox:
                  **({"example": clean_example(o["example"])} if o.get("example") else {})} for o in options or []]
         if recommended is not None and not 0 <= recommended < len(opts):
             recommended = None
+        # F7: every inbox item is the owner's: a question carries its owner topic (scope, policy, approval, spend), a
+        # question from the hook "hook", other items their kind. A coordinator question never comes here
+        # (coordinator.py).
+        if extra.get("route", "owner") != "owner":
+            raise ValueError("Only owner items go to the owner's inbox; a coordinator question goes to the plan's session.")
+        extra.update(route="owner", topic=extra.get("topic") or ("hook" if extra.get("via") == "hook" else kind))
         self.store.put_many({f"inbox/{item_id}": {
             "id": item_id,
             "kind": kind,
@@ -955,10 +961,30 @@ def server():
             "answer will be delivered by resuming it."
         )
 
+    async def wait_coordinator(ids: list[str], minutes: float, ctx: Context) -> str:
+        """F7: waits for the plan session's answers to coordinator questions (coordinator.py)."""
+        from . import coordinator as co
+        minutes = max(1.0, min(minutes, MAX_WAIT_MINUTES))
+        end, step, got = time.time() + minutes * 60, 0, {}
+        while time.time() < end:
+            for i in ids:
+                if i not in got and (t := await asyncio.to_thread(co.take, inbox.store, i)):
+                    got[i] = t
+            if len(got) == len(ids):
+                return "\n".join(got[i] for i in ids)
+            step += 1
+            try:
+                await ctx.report_progress(step, None, "waiting for the coordinator (the plan's session)")
+            except Exception:
+                pass
+            await asyncio.sleep(POLL_SECONDS)
+        return "\n".join([*got.values(), f"No coordinator answer yet after {minutes:.0f} minutes for "
+                          + ", ".join(i for i in ids if i not in got) + ". Call inbox_wait with the id to keep waiting."])
+
     @mcp.tool()
     async def inbox_ask(question: str, ctx: Context, title: str = "", options: list[dict] | None = None,
                         recommended: int | None = None, context: str = "", wait_minutes: float = MAX_WAIT_MINUTES,
-                        more_questions: list[dict] | None = None) -> str:
+                        more_questions: list[dict] | None = None, route: str = "") -> str:
         """Ask the owner on the dashboard and wait for the answer. Draw before you write: the owner reads pictures
         faster than words.
 
@@ -977,20 +1003,57 @@ def server():
         {"type": "code", "diff": unified diff, "bench": [{"name", "before", "after", "measured": true|false,
          "source": the run that measured it}]} (say measured false for an estimate);
         {"type": "text", "draft": the draft text}.
+
+        route (required, F7: ask the right party): who decides. scope, policy, approval or spend: only the owner
+        decides; it goes to the owner's inbox. coordinator: GPU, host, job, CI, review, disk and agent conflicts; the
+        plan's own session answers it and it never reaches the owner's inbox. Each of more_questions names its own
+        route; one batch goes to one party (owner topics together, or coordinator questions together).
         """
+        from . import coordinator as co
         try:
-            if more_questions:
-                batch = [{"title": title or question[:80], "text": (context + "\n\n" + question).strip(),
-                          "options": options, "recommended": recommended}]
-                batch += [{"title": q.get("title") or str(q.get("question", ""))[:80], "text": str(q.get("question", "")),
-                           "options": q.get("options"), "recommended": q.get("recommended")} for q in more_questions]
-                item_id = (await asyncio.to_thread(inbox.post_batch, batch))[0]
-            else:
-                item_id = await asyncio.to_thread(inbox.post, "question", title or question[:80],
-                                                  (context + "\n\n" + question).strip(), options, recommended)
+            party, ids = await asyncio.to_thread(co.ask, inbox, question, title, options, recommended, context,
+                                                 more_questions, route)
         except ValueError as e:
             return f"Not asked: {e}"
+        if party == co.COORDINATOR:
+            return await wait_coordinator(ids, wait_minutes, ctx)
+        item_id = ids[0]
         return await wait_for(item_id, wait_minutes, ctx)
+
+    claims_box: list = []
+
+    def claims():
+        """F8: the claims client, made on first use (the control plane: Firestore; this box's copy: the store)."""
+        if not claims_box:
+            from .claims import Claims
+            from .store import is_firestore
+            control = store if is_firestore(store) else Firestore(Session(cfg))
+            claims_box.append(Claims(control, store, cfg.machine))
+        return claims_box[0]
+
+    @mcp.tool()
+    async def claim(step: str = "", folder: str = "", release: bool = False) -> str:
+        """Claim a step of your plan, or a folder, for this box before you work on it (F8, rules-review: "Claim every
+        gap you work on"). A claim held by another box refuses you with its box, session and time: then do not work
+        on it. step: a step id of this session's plan; folder: a full path. release: drop your claim. Your claims also
+        go when your run ends."""
+        from .claims import folder_key, holder_text, step_key
+        plan = await asyncio.to_thread(inbox.open_plan) if step else None
+        if step and not plan:
+            return "No plan in this session: claim a folder instead."
+        try:
+            if release:
+                key = step_key(plan["id"], step) if step else folder_key(folder)
+                ok = await asyncio.to_thread(claims().release, key)
+                return f"Released {key}." if ok else f"No claim of this box on {key}."
+            ok, held = await asyncio.to_thread(claims().take, "step" if step else "folder", inbox.session_id, "",
+                                               "session", plan["id"] if plan else "", step, folder)
+        except ValueError as e:
+            return f"Not claimed: {e}"
+        except SystemExit as e:  # Firestore refused: the control plane is down
+            return f"Not claimed: the control plane did not answer ({str(e)[:160]})."
+        return (f"Claimed {held['key']} for box {held['machine']}." if ok
+                else f"Refused: {holder_text(held)}. Do not work on it.")
 
     @mcp.tool()
     async def inbox_reply(item_id: str, text: str) -> str:
@@ -1012,7 +1075,9 @@ def server():
 
     @mcp.tool()
     async def inbox_wait(item_id: str, ctx: Context, wait_minutes: float = MAX_WAIT_MINUTES) -> str:
-        """Keep waiting for the owner's answer to an earlier inbox_ask."""
+        """Keep waiting for the answer to an earlier inbox_ask (the owner's, or the coordinator's)."""
+        if await asyncio.to_thread(inbox.store.get, f"coordinator/{item_id}"):
+            return await wait_coordinator([item_id], wait_minutes, ctx)
         return await wait_for(item_id, wait_minutes, ctx)
 
     # Text only: Claude Code refuses a permission answer that also carries structured content ("Expected a single text

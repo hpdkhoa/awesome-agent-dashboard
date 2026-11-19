@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   PLAN_KINDS, runAllSteps, runStep, sendPlanMessage, setMaxTogether, setStepPick, stopChain, useHarness, usePlanChain, usePlanPicks, usePlanSteps,
   EFFORTS, exactEffort, exactModel, MODELS, useRunPrefs, type Fresh, type PlanPicks, type StepPick,
-  checkTicked, runCheck, saveCheckCommand, tickCheck, useStepChecks, type StepCheck,
+  checkTicked, runCheck, saveCheckCommand, tickCheck, useClaims, useStepChecks, type StepCheck,
   type InboxItem, type Parts, type Plan, type PlanGenerated, type PlanKind, type PlanStep, type PlanVersion, type Run,
 } from "./data";
 import { isWaiting } from "./Inbox";
@@ -23,6 +23,7 @@ import type { RunWith } from "./data";
 import { FoldAll, Section } from "./Section";
 import { Clamp } from "./Clamp";
 import { ReceiptBox, ReceiptChip } from "./Receipt";
+import { ClaimChip, ClaimLine } from "./ClaimChip";
 import { usePhone } from "./phone";
 import { StepEvidenceCard } from "./EvidenceView";
 import { keyNumber, openItems, sortCheck, sortReply, type Item, type Sorted } from "./reportSort";
@@ -681,6 +682,7 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
 }) {
   const steps = usePlanSteps(plan.id) ?? [];
   const checks = useStepChecks(plan.id);
+  const claims = useClaims(plan.id);
   const evidence = useStepEvidence(plan.id);
   const ticks = useHarness(plan.id);
   const generated = usePlanGenerated(plan.id);
@@ -761,10 +763,12 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
                 <span className={"step-state " + (sv?.state ?? "next")}>{sv?.state ?? "next"}</span>
                 <b>{st.id} · {st.title}</b>{st.new && <span className="tag" title="Work the session's record does not hold">new</span>}
                 {" "}<ReceiptChip sv={sv} c={checks.find((x) => x.stepId === st.id)} />
+                {" "}<ClaimChip c={claims.find((x) => x.kind === "step" && x.stepId === st.id)} />
               </span>}
               tools={sv ? <MoreMenu path={`planSteps/${plan.id}_${st.id}`} /> : undefined}>
               <div className="step-row" data-step={st.id}>
               <p className="step-tools"><StepActions step={st} /></p>
+              <ClaimLine c={claims.find((x) => x.kind === "step" && x.stepId === st.id)} />
               <Md text={linkEntries(`${st.does}\n\n**Check:** ${st.check}`, plan)} cwd={plan.cwd} />
               <ReceiptBox sv={sv} c={checks.find((x) => x.stepId === st.id)} />
               <StepCheckBox plan={plan} stepId={st.id} c={checks.find((x) => x.stepId === st.id)} done={sv?.state === "done" || sv?.state === "failed" || sv?.state === "checking"} />
