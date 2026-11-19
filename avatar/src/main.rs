@@ -102,7 +102,7 @@ fn post_box(url: &str, token: &str, body: &str, route: &str) -> Result<String, S
         }
     } else if route == "packs" {
         if !is_pack_call(&v) {
-            return Err("only a pack list, load, add or pick".to_string());
+            return Err("only a pack list, load, add, pick or remove".to_string());
         }
     } else {
         let op = v.get("op").and_then(|o| o.as_str()).unwrap_or("");
@@ -143,7 +143,7 @@ fn is_pack_call(v: &serde_json::Value) -> bool {
         .is_some_and(|id| !id.is_empty() && id.len() <= 40 && id.chars().all(|c| c.is_ascii_alphanumeric()));
     match o.get("op").and_then(|x| x.as_str()) {
         Some("list") => o.len() == 1,
-        Some("get") | Some("select") => o.len() == 2 && id_ok("id"),
+        Some("get") | Some("select") | Some("delete") => o.len() == 2 && id_ok("id"),   // delete: Remove pack, 2026-11-18 "both"
         Some("put") => o.get("zip").is_some_and(|z| z.is_string())
             && (o.len() == 2 || (o.len() == 3 && o.get("name").and_then(|n| n.as_str()).is_some_and(|n| (1..=60).contains(&n.chars().count())))),
         _ => false,
@@ -652,12 +652,13 @@ mod tests {
     }
 
     #[test]
-    fn only_a_pack_list_load_add_or_pick_goes_to_packs() {
+    fn only_a_pack_list_load_add_pick_or_remove_goes_to_packs() {
         for ok in [json!({"op": "list"}), json!({"op": "get", "id": "ab12"}), json!({"op": "select", "id": "ab12"}),
-                   json!({"op": "put", "zip": "UEs="}), json!({"op": "put", "zip": "UEs=", "name": "Cats"})] {
+                   json!({"op": "put", "zip": "UEs="}), json!({"op": "put", "zip": "UEs=", "name": "Cats"}),
+                   json!({"op": "delete", "id": "ab12"})] {
             assert!(is_pack_call(&ok), "{ok}");
         }
-        for bad in [json!({"op": "delete", "id": "ab12"}), json!({"op": "rename", "id": "ab12", "name": "x"}),
+        for bad in [json!({"op": "delete", "id": "../ab"}), json!({"op": "delete", "id": "ab12", "x": 1}), json!({"op": "rename", "id": "ab12", "name": "x"}),
                     json!({"op": "get", "id": "../x"}), json!({"op": "select", "id": null}), json!({"op": "list", "x": 1}),
                     json!({"op": "put", "zip": 5}), json!({"op": "put", "zip": "UEs=", "name": ""}),
                     json!({"op": "put", "zip": "UEs=", "id": "ab"}), json!({"op": "pictures", "id": "ab12"})] {

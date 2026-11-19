@@ -55,7 +55,8 @@ export function InboxList({ items, picked, onPick }: { items: InboxItem[]; picke
           <div className="grow">
             <div className="title"><Topic item={i} />{size(i).length > 1 ? `${size(i).length} questions: ` : ""}{i.title}</div>
             <div className="muted small">
-              {KIND[i.kind]} · {i.workType} · {ago(i.createdAt)} · {STATUS[i.status]}
+              {KIND[i.kind]} · {i.workType} · {ago(i.editedAt ?? i.createdAt)} · {i.withdrawn ? "withdrawn by the session" : STATUS[i.status]}
+              {(i.version ?? 1) > 1 && <span className="tag" data-edited>edited v{i.version}</span>}
             </div>
           </div>
           <MoreMenu path={`inbox/${i.id}`} />
@@ -290,7 +291,8 @@ export function InboxView({ item, session, plan, onOpenPlan, items = [], phone =
       {/* phone: the questions come first, right under the title (the owner's pick "Full screen, Back to list") */}
       {phone && questions}
       <p className="meta">
-        {KIND[item.kind]} · {item.workType} · {item.machine} · {ago(item.createdAt)} · {STATUS[item.status]}
+        {KIND[item.kind]} · {item.workType} · {item.machine} · {ago(item.createdAt)} · {item.withdrawn ? "withdrawn by the session" : STATUS[item.status]}
+        {(item.version ?? 1) > 1 && item.editedAt && <> · edited v{item.version} {ago(item.editedAt)}</>}
         <br />
         from session: {session?.title ?? item.sessionId}
         {plan && (
@@ -312,6 +314,11 @@ export function InboxView({ item, session, plan, onOpenPlan, items = [], phone =
         )}
       </p>
 
+      {item.withdrawn && (
+        <p className="small" data-withdrawn>
+          <b>Withdrawn</b> by the session {ago(item.withdrawn.at)}: {item.withdrawn.reason}
+        </p>
+      )}
       <Section id="inbox.text" title={item.kind === "approval" ? "The call" : "Details"}>
         <Md text={body} cwd={item.cwd} />
       </Section>
@@ -325,6 +332,24 @@ export function InboxView({ item, session, plan, onOpenPlan, items = [], phone =
               </li>
             ))}
           </ul>
+        </Section>
+      )}
+
+      {(item.versions?.length ?? 0) > 0 && (
+        <Section id="inbox.versions" title="Earlier versions" extra={item.versions!.length}>
+          <ol className="small" data-result-versions>
+            {[...item.versions!].reverse().map((v) => (
+              <li key={v.n}>
+                <details>
+                  <summary>
+                    v{v.n} · {tm(v.at)} · {v.title}
+                    {v.answer && <> · your review: <b>{v.answer.choice || "Reviewed"}</b>{v.answer.text ? `, "${v.answer.text}"` : ""}</>}
+                  </summary>
+                  <Md text={v.text} cwd={item.cwd} />
+                </details>
+              </li>
+            ))}
+          </ol>
         </Section>
       )}
 

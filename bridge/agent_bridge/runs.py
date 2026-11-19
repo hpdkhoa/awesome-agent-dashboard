@@ -1376,6 +1376,15 @@ class Runs:
         else:
             fields["status"] = "failed"
             fields["error"] = redact(str(r.get("result") or (err or out or "")[-800:]), 800)
+        if fields["status"] in ("done", "failed"):
+            # F11 run end guard: a last reply with a promise, or a Run step with no step report, is flagged (endguard.py)
+            try:
+                from .endguard import flag
+                g = flag(self.store, self.store.get(f"commands/{cid}") or {}, str(r.get("result") or ""), fields["endedAt"])
+                if g:
+                    fields["endGuard"] = g
+            except Exception as e:  # the guard never stops a run's end from being written
+                fields["endGuard"] = {"error": redact(str(e), 200), "at": fields["endedAt"]}
         self.store.update(f"commands/{cid}", fields)
         self.procs.pop(cid, None)
         self.sid_of.pop(cid, None)

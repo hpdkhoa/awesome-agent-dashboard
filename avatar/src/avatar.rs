@@ -13,7 +13,10 @@ use std::time::{Duration, Instant};
 use serde_json::{Map, Value};
 use tauri::menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow, Wry};
-use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+
+// the packs the menu shows (id, name): the Remove confirm names the pack (the owner, 2026-11-18: "both")
+static PACKS: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
 
 pub const STATUSES: [(&str, &str); 4] =
     [("in_progress", "In progress"), ("done", "Done"), ("offline", "Offline"), ("needs_you", "Needs you")];
@@ -157,6 +160,18 @@ pub fn submenu(app: &AppHandle, packs: &[(String, String)], current: Option<&str
         prefs.push(&none);
     }
     let packs_menu = Submenu::with_items(app, "Packs", true, &prefs)?;
+    // Remove a pack (the owner's pick 2026-11-18 "both": here with a confirm, and Delete on the dashboard page)
+    *PACKS.lock().unwrap() = packs.iter().take(40).cloned().collect();
+    let mut ritems: Vec<MenuItem<Wry>> = Vec::new();
+    for (id, name) in packs.iter().take(40) {
+        ritems.push(MenuItem::with_id(app, format!("pack-rm:{id}"), name, true, None::<&str>)?);
+    }
+    let rnone = MenuItem::with_id(app, "pack-rm-none", "No pack to remove", false, None::<&str>)?;
+    let mut rrefs: Vec<&dyn IsMenuItem<Wry>> = ritems.iter().map(|i| i as &dyn IsMenuItem<Wry>).collect();
+    if rrefs.is_empty() {
+        rrefs.push(&rnone);
+    }
+    let remove_menu = Submenu::with_items(app, "Remove pack", true, &rrefs)?;
     let save_pack = MenuItem::with_id(app, "pack-save", "Save current as pack", true, None::<&str>)?;
     let export = MenuItem::with_id(app, "pack-export", "Export .hayaku…", true, None::<&str>)?;
     let import = MenuItem::with_id(app, "pack-import", "Import .hayaku…", true, None::<&str>)?;
@@ -167,6 +182,7 @@ pub fn submenu(app: &AppHandle, packs: &[(String, String)], current: Option<&str
     refs.push(&robot);
     refs.push(&sep2);
     refs.push(&packs_menu);
+    refs.push(&remove_menu);
     refs.push(&save_pack);
     refs.push(&export);
     refs.push(&import);
@@ -232,6 +248,21 @@ pub fn on_menu(app: &AppHandle, id: &str) -> bool {
         });
     } else if let Some(pid) = id.strip_prefix("pack:") {
         let _ = app.emit_to("main", "pack-pick", pid.to_string());
+    } else if let Some(pid) = id.strip_prefix("pack-rm:") {
+        let (app, pid) = (app.clone(), pid.to_string());
+        let name = PACKS.lock().unwrap().iter().find(|(i, _)| *i == pid).map(|(_, n)| n.clone()).unwrap_or_else(|| pid.clone());
+        std::thread::spawn(move || {
+            let yes = app
+                .dialog()
+                .message(format!("Remove the pack \"{name}\" from the bridge?\n\nIts pictures leave the bridge PC (Export .hayaku first to keep a copy). hayaku keeps the pictures it shows now."))
+                .title("Remove pack")
+                .kind(MessageDialogKind::Warning)
+                .buttons(MessageDialogButtons::OkCancelCustom("Remove".to_string(), "Cancel".to_string()))
+                .blocking_show();
+            if yes {
+                let _ = app.emit_to("main", "pack-remove", pid);
+            }
+        });
     } else if id == "pack-save" {
         let _ = app.emit_to("main", "pack-save", ());
     } else if id == "pack-export" {

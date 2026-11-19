@@ -86,6 +86,12 @@ export type InboxItem = {
   redrawn?: string; revisions?: { text: string; options: unknown[]; recommended: number | null; at: string }[];
   thread?: ThreadEntry[]; // your saved answers, your questions back and the session's replies, in order
   switch?: { to: PlanKind; commandId: string }; // a Q&A message asks to change the plan (bridge inbox.py ask_switch)
+  // F12 (bridge inbox.py result / withdraw): one result per plan step, later ones edit it (earlier ones kept here, oldest
+  // first); a session withdrew its moot question, with the reason
+  version?: number; editedAt?: string;
+  versions?: { n: number; title: string; text: string; files: string[]; status: string; at: string;
+    answer: { choice: string; text: string; at: string } | null }[];
+  withdrawn?: { at: string; reason: string; by: string };
 };
 
 // Every option of a plan question carries one (the owner's words, 2026-11-03: "every choose will have an example").
@@ -219,6 +225,9 @@ export type Run = {
   kb?: { given: string[]; cited?: string[]; how?: string; error?: string };
   // F2: the session's headline (inbox tool headline): now, next; done/total and pct, eta for heavy work; at = when set
   headline?: { now: string; next?: string; done?: number; total?: number; pct?: number; eta?: string; at: string };
+  // F11 run end guard (bridge endguard.py): the last reply's promise lines ("I will ..."), or a Run step with no step
+  // report this run (the owner's pick 2026-11-19 "No report this run")
+  endGuard?: { promise?: string[]; openStep?: string; error?: string; at: string };
   rulesAt?: Record<string, number>; rulesChanged?: string[]; // F3: each rule record's version this run ran under
   // "Check now": what the bridge's wait rule saw for the session (bridge runs.py session_status)
   check?: { turn: boolean; lastFrom: string; open: boolean | null; openSince: string | null; openIn: "app" | "terminal" | null };

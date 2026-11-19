@@ -590,8 +590,8 @@ class Inbox:
             # the report as a result to review in the inbox (the owner's choice, 2026-11-15: "v7 data + code fix"; the
             # owner's words: "the result report is not visible"); its push replaces the step's own push
             said = f"done, waiting for its receipt ({'the ticked check' if has_check else 'the LLM check of the pictures'})" if state == "done" else state
-            self.post("result", f"Step {said}: {step_id} · {steps[step_id]['title']}", report_text(rep) or reply, files=evidence or [],
-                      extra={"planId": plan_id, "stepId": step_id, "round": int(plan.get("current", 0)), "stepVersion": n})
+            self.result(f"Step {said}: {step_id} · {steps[step_id]['title']}", report_text(rep) or reply, evidence or [],
+                        plan_id=plan_id, step_id=step_id, extra={"round": int(plan.get("current", 0)), "stepVersion": n})
         return n
 
     def check_cites(self, state: str, reply: str, rep: dict) -> list[str]:
@@ -694,6 +694,69 @@ class Inbox:
             body = ("Answer within 10 minutes, or the session asks there. " if extra.get("via") == "hook" else "") + first
             self.push.notify(f"{PUSH_TITLE[kind]}: {title}", body[:200] or title, f"/?item={item_id}", item_id)
         return item_id
+
+    def result(self, title: str, text: str, files: list[str] | None = None, plan_id: str = "", step_id: str = "",
+               edit_of: str = "", extra: dict | None = None) -> tuple[str, int]:
+        """F12, one result per item, later ones edit it (plan bf73af63; the owner's picks 2026-11-19 "Start F12, build
+        now", "Same plan step"). The item is the plan step: a result on a step edits that step's newest result (any
+        session, so a handoff keeps one card); a result with no step edits edit_of when given, else it is a new card.
+        The edit keeps the earlier title, text, files, status and answer as a version, opens the card again for review
+        and pushes it as edited. plan_id / step_id default to the dashboard run's step. Returns (item id, version)."""
+        if not (plan_id and step_id):
+            c = self.running_command() or {}
+            plan_id = plan_id or str(c.get("planId") or "")
+            step_id = step_id or (str(c.get("stepId") or "") if c.get("planId") == plan_id else "")
+        if step_id and not plan_id:
+            raise ValueError("step needs its plan: this session has no dashboard run on a plan step; give plan_id.")
+        old = None
+        if edit_of:
+            old = self.store.get(f"inbox/{edit_of}")
+            if not old or old.get("kind") != "result":
+                raise ValueError(f"No result {edit_of} to edit.")
+        elif plan_id and step_id:
+            same = [i for i in self.store.where("inbox", "planId", plan_id)
+                    if i.get("kind") == "result" and i.get("stepId") == step_id]
+            old = max(same, key=lambda i: i.get("editedAt") or i.get("createdAt", ""), default=None)
+        ex = {**(extra or {}), **({"planId": plan_id} if plan_id else {}), **({"stepId": step_id} if step_id else {})}
+        if not old:
+            return self.post("result", title, text, files=files, extra=ex), 1
+        at = now_iso()
+        keep = ("title", "text", "files", "status", "answer", "sessionId", "deliveredAt", "deliveredVia")
+        versions = list(old.get("versions") or []) + [
+            {**{k: old.get(k) for k in keep}, "at": old.get("editedAt") or old.get("createdAt"), "n": int(old.get("version") or 1)}]
+        n = len(versions) + 1
+        ex.pop("route", None)
+        self.store.update(f"inbox/{old['id']}", {
+            **ex, "title": redact(title, 200), "text": redact(text, 4000), "files": [redact(f, 300) for f in files or []],
+            "status": "open", "answer": None, "deliveredAt": None, "deliveredVia": None, "commandId": None, "waitReason": None,
+            "error": None, "sessionId": self.session_id, "machine": self.machine, "cwd": self.cwd, "editedAt": at,
+            "version": n, "versions": versions[-20:]})
+        if plan_id:
+            self.store.update(f"plans/{plan_id}", {"updatedAt": at})
+        if self.push is not None:
+            first = next((line for line in text.splitlines() if line.strip()), "")
+            self.push.notify(f"Result edited (v{n}): {title}", first[:200] or title, f"/?item={old['id']}", old["id"])
+        return old["id"], n
+
+    def withdraw(self, item_id: str, reason: str) -> str:
+        """F12: a session withdraws its own moot question (the owner's words in the plan: "session withdraws a moot
+        question"). Only an open question; only the session that asked it, or the session that holds its plan now
+        (after a handoff). The item closes with the reason, so it leaves "waiting for you"; the old form stays.
+        Returns "" when done, else why not."""
+        if not reason.strip():
+            return "Not withdrawn: give the reason it is moot."
+        item = self.store.get(f"inbox/{item_id}")
+        if not item or item.get("kind") != "question":
+            return f"No question {item_id}."
+        if item.get("status") != "open":
+            return "Not withdrawn: the owner already answered it (status " + str(item.get("status")) + ")."
+        plan = self.store.get(f"plans/{item['planId']}") if item.get("planId") else None
+        if self.session_id not in (item.get("sessionId"), (plan or {}).get("sessionId")):
+            return "Only the session that asked, or the session holding its plan, can withdraw it."
+        at = now_iso()
+        self.store.update(f"inbox/{item_id}", {"status": "closed", "waitReason": None,
+                                               "withdrawn": {"at": at, "reason": redact(reason, 600), "by": self.session_id}})
+        return ""
 
     def post_batch(self, questions: list[dict], via: str = "") -> list[str]:
         """Questions asked together are one batch (the owner's words, 2026-11-07: "group the questions in the same batch,
@@ -945,7 +1008,7 @@ def server():
                             f"changed, change only it in place with inbox_redraw(item_id=\"{i}\", ...) (never a new "
                             f"batch); then call inbox_wait(item_id=\"{item_id}\").")
             items = [await asyncio.to_thread(inbox.store.get, f"inbox/{i}") or {} for i in ids]
-            if all(x.get("status") == "answered" for x in items):
+            if all(x.get("status") == "answered" or x.get("withdrawn") for x in items) and any(x.get("status") == "answered" for x in items):
                 texts = [t for i in ids if (t := await asyncio.to_thread(inbox.take_answer, i))]
                 extra = await asyncio.to_thread(inbox.other_replies, item_id)
                 return "\n".join([*texts, *extra])
@@ -1300,11 +1363,26 @@ def server():
         return "\n".join([f"Posted suggestion {item_id}.", *replies])
 
     @mcp.tool()
-    async def inbox_result(title: str, summary: str, files: list[str] | None = None) -> str:
-        """Post a result for the owner to review: what was done, the numbers, the files to look at. Does not wait."""
-        item_id = await asyncio.to_thread(inbox.post, "result", title, summary, None, None, files)
+    async def inbox_result(title: str, summary: str, files: list[str] | None = None, step: str = "", plan_id: str = "",
+                           edit_of: str = "") -> str:
+        """Post a result for the owner to review: what was done, the numbers, the files to look at. Does not wait.
+        One result per item (F12): a result on a plan step (step, default: this dashboard run's step) edits that step's
+        result, which keeps the earlier text as a version and opens again for review. No step: edit_of=<result id>
+        edits that result; else a new one."""
+        try:
+            item_id, n = await asyncio.to_thread(inbox.result, title, summary, files, plan_id, step, edit_of)
+        except ValueError as e:
+            return f"Not posted: {e}"
         replies = await asyncio.to_thread(inbox.other_replies, item_id)
-        return "\n".join([f"Posted result {item_id} for review.", *replies])
+        head = f"Edited result {item_id} (v{n}) for review." if n > 1 else f"Posted result {item_id} for review."
+        return "\n".join([head, *replies])
+
+    @mcp.tool()
+    async def inbox_withdraw(item_id: str, reason: str) -> str:
+        """Withdraw your own open question when it is moot (answered elsewhere, the work changed): it leaves the owner's
+        "waiting for you" with your reason. Only the session that asked, or the one holding its plan now."""
+        why = await asyncio.to_thread(inbox.withdraw, item_id, reason)
+        return why or f"Withdrew {item_id}."
 
     # The archiver (archiver.py; the owner's choice, 2026-11-06: "the bridge checks for free and wakes the archiver only
     # when needed, with the archiver in Auto"). Only the archiver session calls these two.

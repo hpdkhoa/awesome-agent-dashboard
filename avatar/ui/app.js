@@ -413,6 +413,17 @@ T.event.listen("pack-upload", async (e) => {
   catch (err) { packSay(`● ${name} shown; ✕ not added to the bridge: ${String(err && err.message || err)}`); }
 });
 T.event.listen("pack-msg", (e) => packSay(String(e.payload)));
+// Avatar > Remove pack (the owner's pick 2026-11-18 "both"): main.rs asked to confirm first; the bridge deletes it
+T.event.listen("pack-remove", async (e) => {
+  if (!signed || !window.FB) return packSay("✕ sign in first: packs live on the bridge");
+  const id = String(e.payload), name = ((packList || []).find((p) => p.id === id) || {}).name || id;
+  try {
+    await FB.packs(packBox(), { op: "delete", id });
+    const l = await FB.packs(packBox(), { op: "list" });
+    packList = l.packs || []; packCur = l.current && l.current.id ? l.current.id : null;
+    packSay(`● removed "${name}"`);
+  } catch (err) { packSay("✕ remove: " + String(err && err.message || err)); }
+});
 setInterval(packSync, PACK_MS);
 setTimeout(packSync, 5000);   // after the sign-in and the boxes start
 

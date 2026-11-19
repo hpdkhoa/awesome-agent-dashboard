@@ -528,6 +528,7 @@ export function RunList({ runs, title = "Runs from the dashboard", paged = false
               <span className={"status " + r.status}>{r.status === "waiting" ? WAIT_LABEL[r.waitReason ?? "turn"] : r.status === "paused" ? `paused until ${r.pausedUntil ?? "the limit resets"}` : r.status}</span>
               <span>{(r.prompt ?? "").split("\n")[0].slice(0, 90)}</span>
               {(r.headline || r.status === "running") && <Headline r={r} />}
+              {r.endGuard && <EndGuard g={r.endGuard} />}
             </span>
           }
           extra={
@@ -602,6 +603,20 @@ export function RunList({ runs, title = "Runs from the dashboard", paged = false
         </button>
       )}
     </div>
+  );
+}
+
+
+// F11 run end guard (plan bf73af63; the step: "a run that ends on a promise ('I will ...') or with an open step is
+// flagged"): shown on the run's head, so it is seen with the run folded
+function EndGuard({ g }: { g: NonNullable<Run["endGuard"]> }) {
+  if (g.error) return <span className="end-guard" data-end-guard="error" title={g.error}>⚠ end guard failed</span>;
+  return (
+    <span className="end-guard" data-end-guard={[g.promise ? "promise" : "", g.openStep ? "open-step" : ""].filter(Boolean).join(" ")}>
+      {g.promise && <span title={g.promise.join(" / ")}>⚠ ends on a promise: "{g.promise[0].slice(0, 110)}"{g.promise.length > 1 ? ` (+${g.promise.length - 1})` : ""}</span>}
+      {g.promise && g.openStep && " · "}
+      {g.openStep && <span>⚠ no report on step {g.openStep} this run</span>}
+    </span>
   );
 }
 

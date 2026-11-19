@@ -1,0 +1,50 @@
+{
+ "calls": [
+  {
+   "call": "query('commands',)",
+   "docs": 2,
+   "reads": 2,
+   "ms": 133
+  },
+  {
+   "call": "query('liveSessions',)",
+   "docs": 2,
+   "reads": 2,
+   "ms": 124
+  },
+  {
+   "call": "where('inbox',)",
+   "docs": 0,
+   "reads": 1,
+   "ms": 109
+  },
+  {
+   "call": "query('machines',)",
+   "docs": 1,
+   "reads": 1,
+   "ms": 104
+  },
+  {
+   "call": "query('plans',)",
+   "docs": 5,
+   "reads": 5,
+   "ms": 109
+  },
+  {
+   "call": "get('planVersions/b73e97ad39a541769492_v12',)",
+   "docs": 1,
+   "reads": 1,
+   "ms": 341
+  },
+  {
+   "call": "where('planSteps',)",
+   "docs": 8,
+   "reads": 8,
+   "ms": 171
+  }
+ ],
+ "readsPerRound": 20,
+ "roundMs": 1092,
+ "readsPerHour_avatarOn": 1200,
+ "readsPerDay_avatarOn": 28800
+}
