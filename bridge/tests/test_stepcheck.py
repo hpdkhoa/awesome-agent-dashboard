@@ -2,6 +2,8 @@
 done + a Run check button", "Step turns failed, chain stops", "PowerShell, plan folder, 10 min")."""
 import os
 
+import pytest
+
 from agent_bridge.chain import Chains
 from agent_bridge.inbox import Inbox
 from agent_bridge.stepcheck import StepChecks, check_hash, inside, run_command, tail, ticked
@@ -86,7 +88,8 @@ def test_a_done_report_queues_a_ticked_check_and_a_proposal_unticks_a_changed_co
     ib.step_update("p1", "S1", "now", "again", check_command="npm test -- --bail")
     rec = store.get("planChecks/p1_S1")
     assert rec["command"] == "npm test -- --bail" and rec["proposedBy"] == "session" and not ticked(rec)
-    ib.step_update("p1", "S1", "done", "built", report=REP)
+    with pytest.raises(ValueError, match="Done needs a receipt"):  # F4: not ticked and no picture: refused
+        ib.step_update("p1", "S1", "done", "built", report=REP)
     assert len(store.where("commands", "action", "step_check")) == 1  # not ticked: nothing queued
 
 

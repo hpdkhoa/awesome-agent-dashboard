@@ -14,6 +14,12 @@ command is ticked, and the page's Run check button asks for one any time. The br
 powershell -NoProfile in the plan's folder, which must sit inside WORK_ROOTS; it stops the run at 10 minutes. When a
 check exits non-zero while the step stands done, the step gets a failed version with the exit code, so Run all steps
 stops there; Run all steps waits while a check is queued or running.
+
+F4, done needs a receipt (plan bf73af63; the owner's picks, 2026-11-13: "Check or checked pictures", "Badge only";
+2026-11-19: "Done waits for its receipt", "All done before F4 without receipt"): a session's done report saves the step
+as "checking" (inbox.py step_update); the ticked check run here then settles it: exit 0 -> a done version with its
+receipt {kind "check", commit, at, exit, seconds, command, output}; any other end -> failed. The pictures path settles
+in evidence.py the same way, with settle() below.
 """
 from __future__ import annotations
 
@@ -32,6 +38,43 @@ TAIL_LINES = 200
 TAIL_CHARS = 16000
 KEEP_RUNS = 10
 BUSY = ("queued", "running")
+CHECKING = "checking"
+
+
+def commit_of(cwd: str) -> str:
+    """The plan folder's git commit (short hash, "+dirty" when it has changes), or "" outside git."""
+    try:
+        head = subprocess.run(["git", "-C", cwd, "rev-parse", "--short", "HEAD"], capture_output=True, text=True, timeout=20,
+                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        if head.returncode != 0:
+            return ""
+        dirty = subprocess.run(["git", "-C", cwd, "status", "--porcelain", "--untracked-files=no"], capture_output=True,
+                               text=True, timeout=20, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        return head.stdout.strip() + ("+dirty" if dirty.stdout.strip() else "")
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def settle(store, plan: dict, sid: str, receipt: dict | None, why: str, by: str, push=None) -> bool:
+    """F4: a step waiting for its receipt ("checking") becomes done with the receipt, or failed with why. Returns False
+    when the step is not checking (nothing changes)."""
+    pid = plan["id"]
+    path = f"planSteps/{pid}_{sid}"
+    step = store.get(path) or {}
+    if step.get("state") != CHECKING:
+        return False
+    versions = list(step.get("versions") or [])
+    state = "done" if receipt else "failed"
+    ver = {"n": len(versions) + 1, "state": state, "at": now_iso(), "planVersion": int(plan.get("current", 0)), "by": by,
+           "reply": (f"- Receipt: {receipt.get('kind')} passed" + (f" · commit {receipt['commit']}" if receipt.get("commit") else "")
+                     if receipt else redact(why, 8000))}
+    if receipt:
+        ver["receipt"] = receipt
+    versions.append(ver)
+    store.put_many({path: {**step, "state": state, "versions": versions, "updatedAt": now_iso()}})
+    if push is not None:
+        push.notify(f"Step {state}: {sid}", (f"receipt {receipt.get('kind')}" if receipt else why)[:160], f"/?plan={pid}", f"plan-{pid}-{sid}")
+    return True
 
 
 def check_hash(command: str) -> str:
@@ -126,6 +169,8 @@ class StepChecks:
             self.store.update(f"commands/{cid}", {"status": "failed", "endedAt": now_iso(), "error": why})
             if rec:
                 self.store.update(path, {"state": "idle", "updatedAt": now_iso()})
+            if plan:
+                settle(self.store, {**plan, "id": pid}, sid, None, f"- No receipt: the check could not run: {why}", "check", self.push)
             self._after(pid)
             return f"{cid}: step check refused, {why}"
         self.store.update(f"commands/{cid}", {"status": "running", "startedAt": now_iso()})
@@ -141,6 +186,7 @@ class StepChecks:
         cid, pid, sid = c["id"], plan["id"], c["stepId"]
         path = f"planChecks/{pid}_{sid}"
         at = now_iso()
+        commit = commit_of(plan["cwd"])
         try:
             code, out, secs = self.runner(rec["command"], plan["cwd"])
         except OSError as e:
@@ -154,9 +200,20 @@ class StepChecks:
         ok = code == 0
         self.store.update(f"commands/{cid}", {"status": "done", "endedAt": now_iso(), "exit": code})
         step = self.store.get(f"planSteps/{pid}_{sid}") or {}
-        if not ok and step.get("state") == "done":
+        if step.get("state") == CHECKING:  # F4: the done report waits for this run
+            receipt = {"kind": "check", "commit": commit, "at": run["endedAt"], "exit": code, "seconds": secs,
+                       "command": rec["command"], "output": run["tail"], "runId": cid} if ok else None
+            settle(self.store, plan, sid, receipt, self._why(run), "check", self.push)
+        elif not ok and step.get("state") == "done":
             self._fail(plan, sid, step, run)
         self._after(pid)
+
+    @staticmethod
+    def _why(run: dict) -> str:
+        code = "stopped at 10 min" if run["timedOut"] else f"exit {run['exit']}"
+        lines = run["tail"].split("\n")[-20:]
+        return (f"- Check failed ({code}, {run['seconds']} s, by the bridge): `{run['command']}`\n"
+                "- The step was reported done; the check says otherwise\n\n```\n" + "\n".join(lines) + "\n```")
 
     def _fail(self, plan: dict, sid: str, step: dict, run: dict) -> None:
         """The owner's pick "Step turns failed, chain stops": a failed step version with the exit code and the output."""
@@ -164,9 +221,7 @@ class StepChecks:
         versions = list(step.get("versions") or [])
         n = len(versions) + 1
         code = "stopped at 10 min" if run["timedOut"] else f"exit {run['exit']}"
-        lines = run["tail"].split("\n")[-20:]
-        reply = (f"- Check failed ({code}, {run['seconds']} s, by the bridge): `{run['command']}`\n"
-                 "- The step was reported done; the check says otherwise\n\n```\n" + "\n".join(lines) + "\n```")
+        reply = self._why(run)
         versions.append({"n": n, "state": "failed", "reply": redact(reply, 8000), "at": now_iso(),
                          "planVersion": int(plan.get("current", 0)), "by": "check"})
         self.store.put_many({f"planSteps/{pid}_{sid}": {**step, "state": "failed", "versions": versions, "updatedAt": now_iso()}})

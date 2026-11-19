@@ -23,7 +23,7 @@ if prompt.startswith("Take the evidence pictures"):
     print(json.dumps({"type": "result", "result": "saved"}))
 else:
     edits = "--disallowedTools" in sys.argv
-    print(json.dumps({"type": "result", "result": "looked.\n" + json.dumps({"overall": "fail" if edits else "pass",
+    print(json.dumps({"type": "result", "result": "looked.\n" + json.dumps({"overall": "pass" if "passme" in prompt else "fail" if edits else "pass",
         "pictures": [{"path": "a.png", "verdict": "fail", "why": "no phone view"}], "note": "phone view missing"})}))
 '''
 

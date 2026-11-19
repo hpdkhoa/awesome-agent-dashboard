@@ -177,6 +177,8 @@ button.pill.wait { background: var(--wait); color: var(--wait-fg); border-color:
 .step-state.failed::before { background: var(--bad, #d4708f); }
 .step-state.done { color: var(--live); border-color: var(--live); }
 .step-state.failed { color: var(--bad, #d4708f); border-color: var(--bad, #d4708f); }
+.step-state.checking { color: var(--wait-fg); }
+.step-state.checking::before { background: var(--wait-fg); }
 .qcard { border-top: 1px solid var(--line); padding: 0.625rem 0; display: flex; flex-direction: column; gap: 0.5rem; }
 .qcard:first-child { border-top: 0; }
 .differs { color: var(--accent); }

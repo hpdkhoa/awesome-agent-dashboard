@@ -1,3 +1,4 @@
+import os
 import json
 
 import pytest
@@ -84,6 +85,14 @@ def test_every_option_of_a_plan_question_needs_an_example():
     assert store.docs[f"inbox/{qid}"]["options"][0]["example"] == EX
 
 
+def pic():
+    """F4: a done report needs a ticked check or a picture that exists; these tests attach one."""
+    import tempfile
+    f = os.path.join(tempfile.mkdtemp(), "shot.png")
+    open(f, "wb").write(bytes([0x89]) + b"PNG")
+    return [f]
+
+
 def test_parts_plan_versions_change_on_data_never_on_a_step():
     store = FakeStore()
     store.put_many({"commands/c1": {"id": "c1", "action": "plan", "sourceSessionId": "old", "pagesDir": "D:/p",
@@ -98,10 +107,10 @@ def test_parts_plan_versions_change_on_data_never_on_a_step():
     with pytest.raises(ValueError, match="six parts"):
         ib.plan_version(pid, "", "x", parts={"goal": "g"})
     assert ib.step_update(pid, "s1", "now", "counting") == 1
-    assert ib.step_update(pid, "s1", "done", "40 reads a view", report=REP) == 2
+    assert ib.step_update(pid, "s1", "done", "40 reads a view", report=REP, evidence=pic()) == 2
     assert store.docs[f"plans/{pid}"]["current"] == 1  # a step moving makes no plan version
     st = store.docs[f"planSteps/{pid}_s1"]
-    assert st["state"] == "done" and [v["reply"] for v in st["versions"]] == ["counting", "40 reads a view"]
+    assert st["state"] == "checking" and [v["reply"] for v in st["versions"]] == ["counting", "40 reads a view"]
     with pytest.raises(ValueError, match="no step s9"):
         ib.step_update(pid, "s9", "now", "x")
 
@@ -113,7 +122,7 @@ def test_a_question_asked_during_a_step_joins_it():
     ib.step_update(pid, "s1", "now", "working")
     qid = ib.post("question", "q", "x", [{"label": "A", "differs": "d", "example": EX}])
     assert store.docs[f"inbox/{qid}"]["stepId"] == "s1"
-    ib.step_update(pid, "s1", "done", "ok", report=REP)
+    ib.step_update(pid, "s1", "done", "ok", report=REP, evidence=pic())
     assert "stepId" not in store.docs[f"inbox/{ib.post('question', 'q', 'x', [{'label': 'A', 'differs': 'd', 'example': EX}])}"]
 
 
@@ -391,7 +400,7 @@ def test_a_done_or_failed_step_posts_its_report_as_a_result_to_review():
     res = [d for d in store.docs.values() if d.get("kind") == "result"]
     assert len(res) == 1 and res[0]["planId"] == pid and res[0]["stepId"] == "s1" and res[0]["stepVersion"] == 2
     assert res[0]["text"] == "- 0/12 pass" and res[0]["files"] == ["a.png"] and res[0]["title"].startswith("Step failed: s1")
-    ib.step_update(pid, "s1", "done", "- 12/12 pass", report=REP)
+    ib.step_update(pid, "s1", "done", "- 12/12 pass", report=REP, evidence=pic())
     res = [d for d in store.docs.values() if d.get("kind") == "result" and d["stepVersion"] == 3]
     assert res[0]["text"].splitlines() == ["- reads: 90 -> 40 (counted)", "- Test: pytest: 5 pass"]
 
@@ -406,7 +415,7 @@ def test_a_done_report_needs_numbers_and_tests_and_keeps_its_fields():
     with pytest.raises(ValueError, match="tests"):
         ib.step_update(pid, "s1", "done", "built it", report={"numbers": REP["numbers"]})
     assert f"planSteps/{pid}_s1" not in store.docs  # a refused report writes nothing
-    ib.step_update(pid, "s1", "done", "built it", report={**REP, "built": ["x.py", " "], "not_done": [{"item": "Mac", "fix": "s7"}]})
+    ib.step_update(pid, "s1", "done", "built it", report={**REP, "built": ["x.py", " "], "not_done": [{"item": "Mac", "fix": "s7"}]}, evidence=pic())
     v = store.docs[f"planSteps/{pid}_s1"]["versions"][0]
     assert v["reply"] == "built it" and v["report"] == {"built": ["x.py"], **REP, "not_done": [{"item": "Mac", "fix": "s7"}]}
     ib.step_update(pid, "s1", "now", "again")  # a now report needs no fields

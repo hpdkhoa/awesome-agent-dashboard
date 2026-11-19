@@ -551,29 +551,46 @@ class Inbox:
         steps = {st["id"]: st for st in (v.get("parts") or {}).get("steps") or []}
         if step_id not in steps:
             raise ValueError(f"plan v{plan.get('current', 0)} has no step {step_id}; its steps: " + ", ".join(steps))
+        # F4, done needs a receipt (plan bf73af63; the owner's picks 2026-11-13 "Check or checked pictures", 2026-11-19
+        # "Done waits for its receipt"): a done report needs a ticked check or attached pictures; the step then waits as
+        # "checking" until the bridge's check exits 0 (stepcheck.py) or the LLM check passes the pictures (evidence.py)
+        from .evidence import add_set, on_done, pictures
+        from .evidence import queue as evidence_queue
+        from .stepcheck import CHECKING, propose, queue, ticked
+        if check_command.strip():
+            propose(self.store, plan_id, step_id, check_command.strip())
+        has_check = state == "done" and ticked(self.store.get(f"planChecks/{plan_id}_{step_id}"))
+        pics = pictures(evidence, plan.get("cwd", "")) if state == "done" else []
+        if state == "done" and not has_check and not pics:
+            raise ValueError("Done needs a receipt (the owner's picks 2026-11-13 \"Check or checked pictures\", 2026-11-19 "
+                             "\"Done waits for its receipt\"): this step has no ticked check and the report attaches no "
+                             "picture that exists. Propose a check_command and ask the owner to tick it, or attach the "
+                             "pictures that show the step working (evidence=[paths]); then report done again.")
         cited = self.check_cites(state, reply, rep)
+        saved = CHECKING if state == "done" else state
         path = f"planSteps/{plan_id}_{step_id}"
         versions = list((self.store.get(path) or {}).get("versions") or [])
         n = len(versions) + 1
-        versions.append({"n": n, "state": state, "reply": redact(reply, 8000), "at": now_iso(),
-                         "planVersion": int(plan.get("current", 0)), **({"report": rep} if rep else {})})
-        self.store.put_many({path: {"id": f"{plan_id}_{step_id}", "planId": plan_id, "stepId": step_id, "state": state,
+        versions.append({"n": n, "state": saved, "reply": redact(reply, 8000), "at": now_iso(),
+                         "planVersion": int(plan.get("current", 0)), **({"report": rep} if rep else {}),
+                         **({"receiptBy": "check" if has_check else "pictures"} if state == "done" else {})})
+        self.store.put_many({path: {"id": f"{plan_id}_{step_id}", "planId": plan_id, "stepId": step_id, "state": saved,
                                     "versions": versions, "updatedAt": now_iso()}})
-        # step i8: the session proposes the step's check command; a done report asks the bridge to run it if ticked
-        from .stepcheck import propose, queue
-        if check_command.strip():
-            propose(self.store, plan_id, step_id, check_command.strip())
-        if state == "done":
+        # step i8: a done report asks the bridge to run the ticked check
+        if has_check:
             queue(self.store, {**plan, "id": plan_id}, step_id, "done", self.machine)
             # 8. Evidence, flow 1 (the owner's pick, 2026-11-12: "Attach, else picture run")
-            from .evidence import on_done
             on_done(self.store, {**plan, "id": plan_id}, step_id, evidence or [], n, self.machine)
+        elif state == "done":  # F4: no ticked check: the LLM check on the attached pictures gives the receipt
+            add_set(self.store, plan_id, step_id, pics, "report", "done", step_version=n)
+            evidence_queue(self.store, {**plan, "id": plan_id}, step_id, "check", "receipt", self.machine)
         active = step_id if state == "now" else (None if plan.get("activeStep") == step_id else plan.get("activeStep"))
         self.store.update(f"plans/{plan_id}", {"activeStep": active, "updatedAt": now_iso()})
         if state in ("done", "failed"):
             # the report as a result to review in the inbox (the owner's choice, 2026-11-15: "v7 data + code fix"; the
             # owner's words: "the result report is not visible"); its push replaces the step's own push
-            self.post("result", f"Step {state}: {step_id} · {steps[step_id]['title']}", report_text(rep) or reply, files=evidence or [],
+            said = f"done, waiting for its receipt ({'the ticked check' if has_check else 'the LLM check of the pictures'})" if state == "done" else state
+            self.post("result", f"Step {said}: {step_id} · {steps[step_id]['title']}", report_text(rep) or reply, files=evidence or [],
                       extra={"planId": plan_id, "stepId": step_id, "round": int(plan.get("current", 0)), "stepVersion": n})
         return n
 
@@ -1097,6 +1114,9 @@ def server():
         check_command: propose one PowerShell command that checks this step (run in the plan's folder, 10 min max,
         exit 0 = pass). The bridge runs it only after the owner ticks it on the page, on each done report and on the
         page's Run check; a non-zero exit after done turns the step failed.
+        Done needs a receipt (F4): a done report needs a ticked check or attached pictures, else it is refused. The step
+        then shows "checking" until the bridge settles it: the ticked check exits 0, or (no ticked check) the LLM check
+        passes the pictures -> done with its receipt; anything else -> failed.
         evidence: on a done report, the paths of the pictures that show the step's feature working (screenshots,
         renders), taken before reporting; the owner wants pictures, not text. None attached: the bridge starts a
         picture run.

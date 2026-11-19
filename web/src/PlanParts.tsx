@@ -22,6 +22,7 @@ import { RunList, RunWithPicker } from "./Runs";
 import type { RunWith } from "./data";
 import { FoldAll, Section } from "./Section";
 import { Clamp } from "./Clamp";
+import { ReceiptBox, ReceiptChip } from "./Receipt";
 import { usePhone } from "./phone";
 import { StepEvidenceCard } from "./EvidenceView";
 import { keyNumber, openItems, sortCheck, sortReply, type Item, type Sorted } from "./reportSort";
@@ -193,7 +194,7 @@ function featureOf(ids: string[], steps: PlanStep[]) {
   const open = svs.reduce((n, sv) => { const l = lastOf(sv); return n + (l ? openItems(l.reply, l.report).length : 0); }, 0);
   const st = svs.map((sv) => sv?.state ?? "next");
   const state: FeatureState = !ids.length ? "next" : st.includes("failed") ? "failed"
-    : st.every((x) => x === "done") ? (open ? "open" : "built") : st.some((x) => x === "done" || x === "now") ? "doing" : "next";
+    : st.every((x) => x === "done") ? (open ? "open" : "built") : st.some((x) => x === "done" || x === "now" || x === "checking") ? "doing" : "next";
   const newest = [...lasts].sort((a, b) => b.at.localeCompare(a.at))[0];
   return { state, open, key: newest ? keyNumber(newest.reply, newest.report) : "" };
 }
@@ -759,12 +760,14 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
               title={<span data-step={st.id}>
                 <span className={"step-state " + (sv?.state ?? "next")}>{sv?.state ?? "next"}</span>
                 <b>{st.id} · {st.title}</b>{st.new && <span className="tag" title="Work the session's record does not hold">new</span>}
+                {" "}<ReceiptChip sv={sv} c={checks.find((x) => x.stepId === st.id)} />
               </span>}
               tools={sv ? <MoreMenu path={`planSteps/${plan.id}_${st.id}`} /> : undefined}>
               <div className="step-row" data-step={st.id}>
               <p className="step-tools"><StepActions step={st} /></p>
               <Md text={linkEntries(`${st.does}\n\n**Check:** ${st.check}`, plan)} cwd={plan.cwd} />
-              <StepCheckBox plan={plan} stepId={st.id} c={checks.find((x) => x.stepId === st.id)} done={sv?.state === "done" || sv?.state === "failed"} />
+              <ReceiptBox sv={sv} c={checks.find((x) => x.stepId === st.id)} />
+              <StepCheckBox plan={plan} stepId={st.id} c={checks.find((x) => x.stepId === st.id)} done={sv?.state === "done" || sv?.state === "failed" || sv?.state === "checking"} />
               <OnMessages runs={runs} plan={plan} where={{ stepId: st.id }} />
               {qs.map((q) => (
                 <p key={q.id} className="small">

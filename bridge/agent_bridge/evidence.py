@@ -182,6 +182,8 @@ class Evidence:
             store.update(f"commands/{cid}", {"status": "failed", "endedAt": now_iso(), "error": why})
             store.put_many({path: {**rec, "id": f"{pid}_{sid}", "planId": pid, "stepId": sid, "state": "idle", "what": None,
                                    "error": why, "updatedAt": now_iso()}})
+            if what == "check" and plan:
+                self._settle({**plan, "id": pid}, sid, None, f"- No receipt: the LLM check of the pictures could not run: {why}")
             return f"{cid}: evidence refused, {why}"
         if what == "pictures":
             sv = store.get(f"planSteps/{pid}_{sid}") or {}
@@ -217,9 +219,34 @@ class Evidence:
             store.update(path, {"state": "idle", "what": None, "error": redact(err, 500), "updatedAt": now_iso()})
             return
         marks = parse_marks(result, c.get("checkedPictures") or []) if status == "done" else None
+        check = {"at": now_iso(), "runId": c["id"], "set": c.get("checkedSet"), **marks} if marks else None
         if marks:
-            store.update(path, {"state": "idle", "what": None, "error": None, "updatedAt": now_iso(),
-                                "check": {"at": now_iso(), "runId": c["id"], "set": c.get("checkedSet"), **marks}})
+            store.update(path, {"state": "idle", "what": None, "error": None, "updatedAt": now_iso(), "check": check})
         else:
             store.update(path, {"state": "idle", "what": None, "updatedAt": now_iso(),
                                 "error": redact(error or "The LLM check gave no marks (no JSON line).", 500)})
+        # F4: a step waiting for its receipt ("checking") is settled by this check: pass -> done, else failed
+        plan = store.get(f"plans/{pid}") or {}
+        if not plan:
+            return
+        if check and check["overall"] == "pass":
+            from .stepcheck import commit_of
+            receipt = {"kind": "pictures", "commit": commit_of(plan.get("cwd", "")), "at": check["at"], "overall": "pass",
+                       "set": check["set"], "pictures": c.get("checkedPictures") or [], "marks": check["pictures"],
+                       "note": check["note"], "runId": c["id"]}
+            self._settle({**plan, "id": pid}, sid, receipt, "")
+        else:
+            why = (f"- LLM check of the pictures: {check['overall']}" + (f": {check['note']}" if check["note"] else "")
+                   if check else "- No receipt: " + (error or "the LLM check gave no marks (no JSON line)."))
+            self._settle({**plan, "id": pid}, sid, None, why)
+
+    def _settle(self, plan: dict, sid: str, receipt: dict | None, why: str) -> None:
+        from .stepcheck import settle
+        r = self.runs
+        if settle(r.store, plan, sid, receipt, why, "llm", getattr(r, "push", None)):
+            chains = getattr(r, "chains", None)
+            if chains is not None:
+                try:
+                    chains.after({"planId": plan["id"]})
+                except Exception:  # the chain re-checks on the next run's end and at the bridge's start
+                    pass

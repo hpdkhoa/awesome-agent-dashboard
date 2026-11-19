@@ -128,9 +128,15 @@ export const PLAN_KINDS: [PlanKind, string][] = [
 ];
 // A step version: each report on a step, its state and the session's reply (no plan version).
 export type PlanStep = {
-  id: string; planId: string; stepId: string; state: "next" | "now" | "done" | "failed"; updatedAt: string;
-  versions: { n: number; state: string; reply: string; at: string; planVersion: number; report?: StepReport }[];
+  id: string; planId: string; stepId: string; state: "next" | "now" | "checking" | "done" | "failed"; updatedAt: string;
+  versions: { n: number; state: string; reply: string; at: string; planVersion: number; report?: StepReport;
+    by?: string; receiptBy?: "check" | "pictures"; receipt?: Receipt }[];
 };
+// F4, done needs a receipt (bridge stepcheck.py settle; the owner's picks 2026-11-13 "Check or checked pictures",
+// 2026-11-19 "Done waits for its receipt"): what made a step done.
+export type Receipt = { kind: "check" | "pictures"; commit: string; at: string; runId: string;
+  exit?: number; seconds?: number; command?: string; output?: string;
+  overall?: string; set?: string; pictures?: string[]; marks?: { path: string; verdict: string; why: string }[]; note?: string };
 // The run report's fields (bridge inbox.py clean_report; the owner's pick, 2026-11-15: "A + exact report fields").
 export type StepReport = {
   built?: string[];

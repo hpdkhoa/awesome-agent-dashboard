@@ -118,6 +118,8 @@ class Chains:
         by_check = ((sv.get("versions") or [{}])[-1] or {}).get("by") == "check"
         if status in ("failed", "stopped"):
             return "fail", f"step {step_id}: the run {status}" + (f": {c['error'][:120]}" if c.get("error") else ""), run_id
+        if status == "done" and rep == "checking":  # F4: the done report waits for its receipt (stepcheck/evidence call back)
+            return "going", "", run_id
         if status == "done" and rep == "failed":
             return "fail", f"step {step_id}: " + ("its check failed" if by_check else "the session reported it failed"), run_id
         if status == "done" and rep != "done":
@@ -153,7 +155,11 @@ class Chains:
             return self._stop(ch, "the plan is in Explore: no step runs there")
         v = self.store.get(f"planVersions/{pid}_v{plan.get('current', 0)}") or {}
         steps = (v.get("parts") or {}).get("steps") or []
-        left = [st for st in steps if (self.store.get(f"planSteps/{pid}_{st['id']}") or {}).get("state") != "done"]
+        states = {st["id"]: (self.store.get(f"planSteps/{pid}_{st['id']}") or {}).get("state") for st in steps}
+        left = [st for st in steps if states[st["id"]] not in ("done", "checking")]
+        if not left and not running and "checking" in states.values():  # F4: wait for the last receipts
+            self.store.update(f"planChains/{pid}", {"running": {}, "left": 0, "updatedAt": now_iso()})
+            return None
         if not left and not running:
             self.store.update(f"planChains/{pid}", {"running": {}})
             return self._stop(ch, f"{len(steps)} of {len(steps)} steps done", "done")
