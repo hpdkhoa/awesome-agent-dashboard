@@ -205,6 +205,8 @@ export type Run = {
   freshFrom?: string; contextTokens?: number; // the message went to a fresh session with a handoff from this one (handoff.py)
   // KB first (plan bf73af63 F1, bridge records.py gate_for_run): the records the run was given and the ones its report cited
   kb?: { given: string[]; cited?: string[]; how?: string; error?: string };
+  // F2: the session's headline (inbox tool headline): now, next; done/total and pct, eta for heavy work; at = when set
+  headline?: { now: string; next?: string; done?: number; total?: number; pct?: number; eta?: string; at: string };
   rulesAt?: Record<string, number>; rulesChanged?: string[]; // F3: each rule record's version this run ran under
   // "Check now": what the bridge's wait rule saw for the session (bridge runs.py session_status)
   check?: { turn: boolean; lastFrom: string; open: boolean | null; openSince: string | null; openIn: "app" | "terminal" | null };

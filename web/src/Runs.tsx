@@ -527,6 +527,7 @@ export function RunList({ runs, title = "Runs from the dashboard", paged = false
             <span className="run-head">
               <span className={"status " + r.status}>{r.status === "waiting" ? WAIT_LABEL[r.waitReason ?? "turn"] : r.status === "paused" ? `paused until ${r.pausedUntil ?? "the limit resets"}` : r.status}</span>
               <span>{(r.prompt ?? "").split("\n")[0].slice(0, 90)}</span>
+              {(r.headline || r.status === "running") && <Headline r={r} />}
             </span>
           }
           extra={
@@ -623,5 +624,32 @@ function KbLine({ r }: { r: Run }) {
       {rules.length > 0 && <>{" · "}<b>rules</b> {rules.length}{moved.length > 0 && <> ({moved.map(([k, v]) => `${k} v${v}`).join(", ")})</>}
         {(r.rulesChanged ?? []).length > 0 && <span className="warn"> · new version: {r.rulesChanged!.join(", ")}</span>}</>}
     </p>
+  );
+}
+
+
+// F2 session headline (plan bf73af63; the source rule, rules-review.md section 15: "Update the headline at least every 5
+// minutes: what you're doing now and next. Heavy work shows a percentage plus done/total units and an ETA"). The session
+// writes it with the inbox tool headline; older than 5 minutes on a running run it shows as stale.
+const STALE_MS = 5 * 60 * 1000;
+function Headline({ r }: { r: Run }) {
+  const [t, setT] = useState(Date.now());
+  useEffect(() => {
+    if (r.status !== "running") return;
+    const i = setInterval(() => setT(Date.now()), 15000);
+    return () => clearInterval(i);
+  }, [r.status]);
+  const h = r.headline;
+  if (!h) return <span className="headline stale" data-headline="none">no headline yet</span>;
+  const age = t - Date.parse(h.at);
+  const stale = r.status === "running" && age > STALE_MS;
+  const clock = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return (
+    <span className={stale ? "headline stale" : "headline"} data-headline={stale ? "stale" : "fresh"}>
+      <b>Now</b> {h.now}{h.next && <> · <b>Next</b> {h.next}</>}
+      {h.total != null && <> · {h.done}/{h.total} ({h.pct}%)<progress max={h.total} value={h.done} /></>}
+      {h.eta && <> · ETA {clock(h.eta)}</>}
+      <span className="muted"> · {Math.max(0, Math.round(age / 60000))} min ago{stale ? " (stale: over 5 min)" : ""}</span>
+    </span>
   );
 }

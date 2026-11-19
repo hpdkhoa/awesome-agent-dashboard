@@ -36,7 +36,7 @@ import re
 import threading
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from .aggregate import work_type_of
 from .redact import redact
@@ -425,6 +425,31 @@ class Inbox:
         rows = [c for c in self.store.where("commands", "sessionId", self.session_id)
                 if c.get("status") == "running" and c.get("action") in ("message", "start", "plan")]
         return max(rows, key=lambda c: c.get("startedAt", ""), default=None)
+
+    def headline(self, now: str, next_: str = "", done: int | None = None, total: int | None = None,
+                 eta_minutes: float | None = None) -> dict:
+        """F2 (plan bf73af63; the source rule, rules-review.md section 15: "Update the headline at least every 5 minutes:
+        what you're doing now and next. Heavy work shows a percentage plus done/total units and an ETA"): the running
+        dashboard run's headline, written by its session onto its run row. The percentage comes from done/total; the
+        ETA is a clock time from the minutes the session gives."""
+        now = " ".join(str(now or "").split())[:200]
+        if not now:
+            raise ValueError("headline needs now: what you are doing now")
+        if (done is None) != (total is None):
+            raise ValueError("give done and total together, or neither")
+        if total is not None and (total <= 0 or done < 0 or done > total):
+            raise ValueError("done and total: 0 <= done <= total, total > 0")
+        run = self.running_command()
+        if not run:
+            raise ValueError("No dashboard run is going in this session: the headline shows on a run row only.")
+        at = datetime.now(timezone.utc)
+        h = {"now": redact(now, 200), "next": redact(" ".join(str(next_ or "").split())[:200], 200), "at": now_iso()}
+        if total is not None:
+            h.update(done=int(done), total=int(total), pct=round(100 * done / total))
+        if eta_minutes is not None and eta_minutes >= 0:
+            h["eta"] = (at + timedelta(minutes=float(eta_minutes))).isoformat(timespec="seconds").replace("+00:00", "Z")
+        self.store.update(f"commands/{run['id']}", {"headline": h})
+        return {"run": run["id"], **h}
 
     def plan_version(self, plan_id: str, text: str, note: str = "", parent: int | None = None,
                      answers: list[str] | None = None, parts: dict | None = None, change: str = "",
@@ -870,7 +895,9 @@ def server():
             "explore, build, verify, remove, optimize. Every plan starts in explore, where no step runs. Only the "
             "owner moves the phase, forward or back: record each move with plan_version(phase=..., order=the owner's "
             "words), a plain version. In explore, list the harness with plan_version(harness=[...]): the tools and "
-            "context each step needs and each step's check; the owner approves every item on the page."
+            "context each step needs and each step's check; the owner approves every item on the page. While a "
+            "dashboard run works, keep its headline current with headline (now, next; done/total and ETA for heavy "
+            "work): at the start and at least every 5 minutes."
         ),
     )
 
@@ -1089,6 +1116,19 @@ def server():
         except ValueError as e:
             return str(e)
         return f"Saved step version {n} of {step_id} ({state})."
+
+    @mcp.tool()
+    async def headline(now: str, next: str = "", done: int | None = None, total: int | None = None,
+                       eta_minutes: float | None = None) -> str:
+        """While a dashboard run works in this session: set its headline on the owner's Runs tab. Call it when the run
+        starts and again at least every 5 minutes, and when the work moves on. now: what you are doing now; next: what
+        comes next. Heavy work also gives done and total (units: files, tests, steps; the page shows done/total and %)
+        and eta_minutes (minutes left; the page shows the clock time). A headline older than 5 minutes shows as stale."""
+        try:
+            h = await asyncio.to_thread(inbox.headline, now, next, done, total, eta_minutes)
+        except ValueError as e:
+            return str(e)
+        return f"Headline set on run {h['run']}."
 
     # Records with ids (plan bf73af63 F1, the owner's pick "Best"): the knowledge base sessions write and read.
     from .records import Records, Refused, TYPES as RECORD_TYPES

@@ -213,3 +213,9 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
 .linkish { background: none; border: none; padding: 0; color: var(--accent, #5aa9e6); text-decoration: underline; cursor: pointer; font: inherit; }
 .kb-line .good { color: #2fbf9b; font-weight: bold; }
 .kb-line .warn { color: var(--wait-fg); font-weight: bold; }
+
+/* F2 session headline on a run row */
+.run-head .headline { display: block; flex-basis: 100%; font-size: 0.8rem; font-weight: normal; margin-top: 0.15rem; white-space: normal; overflow-wrap: anywhere; }
+.run-head .headline progress { width: 4rem; height: 0.5rem; margin-left: 0.3rem; vertical-align: middle; }
+.run-head .headline.stale { color: var(--wait-fg); }
+.sec-title:has(.headline) { white-space: normal; }
