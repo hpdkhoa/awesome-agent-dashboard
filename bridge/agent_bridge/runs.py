@@ -74,6 +74,7 @@ from .chain import Chains
 from .stepcheck import StepChecks
 from .coordinator import Coordinator
 from .evidence import Evidence
+from .glance import Glance
 from .planfrom import NO_EDITS, mark_quotes, note_command, plan_prompt, scoped, system_args
 from .redact import redact
 from .search import NO_KEY, SearchRun, settings as search_settings
@@ -497,6 +498,7 @@ class Runs:
         self.checks = StepChecks(store, machine, self.roots, self.chains, push)
         # 8. Evidence: the picture runs and the LLM check runs of a step (evidence.py)
         self.evidence = Evidence(self)
+        self.glance = Glance(self)  # s5 glance test scoring (plan 44fc4979)
         # F7: a coordinator question is answered by a fork of the plan's session (coordinator.py)
         self.coordinator = Coordinator(self)
         # F8: claims across boxes (claims.py); set by the CLI when a control plane (Firestore) is reachable
@@ -592,6 +594,7 @@ class Runs:
                     else self.chains.start(c) if action == "chain"
                     else self.checks.start(c) if action == "step_check"
                     else self.evidence.start(c) if action == "evidence"
+                    else self.glance.start(c) if action == "glance"
                     else self.coordinator.start(c) if action == "coordinator"
                     else self._add_root(c) if action == "add_root"
                     else self._search(c) if action == "search"
@@ -1435,6 +1438,9 @@ class Runs:
         if c.get("action") == "evidence":
             self.evidence.finished(c, fields["status"], str(r.get("result") or ""),
                                    "Stopped on the page." if stopped else fields.get("error") or "")
+        if c.get("action") == "glance":
+            self.glance.finished(c, fields["status"], str(r.get("result") or ""),
+                                 "Stopped on the page." if stopped else fields.get("error") or "")
         if self.claims is not None and c.get("action") in ("message", "start"):
             try:  # F8: the run ended: its claims, and its session's, go
                 self.claims.release_run(cid, c.get("sessionId", ""))

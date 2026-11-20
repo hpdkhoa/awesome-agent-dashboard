@@ -32,6 +32,7 @@ import { dt, tm } from "./fmt";
 import { boardMaterials, gathered } from "./materials";
 import { SrcLine, type SrcCtx } from "./SourceChip";
 import { CoverageBar } from "./Coverage";
+import { GlanceTest, RulesBox } from "./BoardRules";
 
 // A plan with six parts (plan from a session; the owner's words, 2026-11-03, in cc/dashboard/SESSION_PLAN.md).
 // Plan versions change only with the plan's data; each step shows its own versions, the last reply like a message.
@@ -231,7 +232,7 @@ export function ReportBoard({ plan, v, steps, evidence, asked, onOpenItem, stale
   const reports = rows.filter((st) => (steps.find((x) => x.stepId === st.id)?.versions ?? []).length > 0).map((st) => ({ id: st.id, title: st.title }));
   return (
     <Section id="plan.board" main stale={stale} title="Report board"
-      extra={b ? `${count("built") + count("open")} of ${feats.length} features built${noSrc ? ` · ${noSrc} lines without source` : ""}` : "no board yet"}>
+      extra={b ? `${count("built") + count("open")} of ${feats.length} features built${noSrc ? ` · ${noSrc} lines without source` : ""}${v.boardCheck?.fail ? ` · rules: ${v.boardCheck.fail} fail` : ""}` : "no board yet"}>
       {!b && <p className="small muted">This plan has no board yet: its session adds What for, Idea and the product list with the next plan version.</p>}
       {b && (
         <>
@@ -240,7 +241,7 @@ export function ReportBoard({ plan, v, steps, evidence, asked, onOpenItem, stale
           <div className="board-box"><p className="board-lab">What for</p><SrcLine ids={b.src?.whatFor ?? null} ctx={ctx}><p>{b.whatFor}</p></SrcLine></div>
           {b.idea.length > 0 && (
             <div className="board-box">
-              <p className="board-lab">The idea</p>
+              <p className="board-lab">Idea</p>
               {b.idea.map((x, i) => <SrcLine key={i} ids={ideaSrc[i] ?? null} ctx={ctx} className="src-bullet">{md(x, plan)}</SrcLine>)}
             </div>
           )}
@@ -312,6 +313,12 @@ export function ReportBoard({ plan, v, steps, evidence, asked, onOpenItem, stale
           </div>
         )}
       </div>
+      {b && (  // s5: after the board's content, so What for stays near the top (rule B1)
+        <div className="board-box"><p className="board-lab">Rules and glance</p>
+          <RulesBox check={v.boardCheck} ctx={ctx} />
+          <GlanceTest plan={plan} version={v.n} />
+        </div>
+      )}
     </Section>
   );
 }

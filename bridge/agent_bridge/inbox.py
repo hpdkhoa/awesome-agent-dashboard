@@ -39,6 +39,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from .aggregate import work_type_of
+from .boardrules import check_board
 from .redact import redact
 from .filelinks import refuse_dead_links
 from .planfrom import check_parts
@@ -625,6 +626,11 @@ class Inbox:
             version["checks"] = checks
         if parts is not None:
             version["parts"] = parts
+            # s5: the auto rule check B1 to B10 on every version with a board; saved with a red flag, never refused
+            # (the owner's pick "Save + red flag"; refusing is open: "refuse will come when I decide later")
+            bc = check_board(parts.get("board"))
+            if bc:
+                version["boardCheck"] = bc
         if harness:
             version["harness"] = harness
         if change in KINDS:

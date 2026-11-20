@@ -165,7 +165,11 @@ export type PlanVersion = {
   parts?: Parts; change?: { kind: PlanKind; message: string };
   phase?: Phase; phaseMove?: { from: Phase; to: Phase; order: string }; // phases.ts
   harness?: HarnessItem[]; // harness.ts: the list as it is in this version
+  boardCheck?: BoardCheck; // s5: the auto rule check B1 to B10 the bridge ran on this version (boardrules.py)
 };
+// s5 (plan 44fc4979): the owner's picks "Check all 10, B2/B4/B7 'waits s7'", "Save + red flag"
+export type BoardRule = { id: string; name: string; kb: string; state: "pass" | "fail" | "waits for s7"; n: number; lines: string[]; note: string };
+export type BoardCheck = { at: string; rules: BoardRule[]; pass: number; fail: number; wait: number };
 
 export type Machine = {
   name: string;
@@ -636,6 +640,27 @@ export type StepEvidence = { id: string; planId: string; stepId: string; sets?: 
   what?: "pictures" | "check" | null; error?: string | null;
   check?: { at: string; runId: string; set?: string; overall: "pass" | "fail" | "unclear"; pictures: EvidenceMark[]; note: string;
     findings?: EvidenceFinding[] } };
+// s5 glance test (the owner's pick "Button on the board"): the board shows 10 s, hides, the owner answers 4 questions;
+// a fresh run scores them against the plan (bridge glance.py), 0 to 4, per version.
+export type GlanceMark = { q: "whatFor" | "done" | "next" | "blocked"; verdict: "right" | "partly" | "wrong"; why: string };
+export type GlanceTest = { at: string; version: number; answers: Record<string, string>; score: number | null; marks: GlanceMark[]; runId: string; error?: string };
+export type PlanGlance = { id: string; planId: string; tests?: GlanceTest[]; state?: "idle" | "queued" | "running" };
+export function usePlanGlance(planId: string | undefined): PlanGlance | null {
+  const [g, setG] = useState<PlanGlance | null>(null);
+  const active = useActive();
+  useEffect(() => {
+    if (!planId || !active) return;
+    return onSnapshot(query(collection(db, "planGlance"), where("planId", "==", planId)), (s) =>
+      (countReads(s.docChanges().length, "planGlance"), setG((s.docs[0]?.data() as PlanGlance) ?? null)));
+  }, [planId, active]);
+  return g;
+}
+export const askGlance = async (plan: Plan, version: number, answers: Record<string, string>) => {
+  const id = newId();
+  await setDoc(doc(db, "commands", id), { id, action: "glance", machine: plan.machine, planId: plan.id, version, answers,
+    folder: plan.cwd, trigger: "button", status: "new", createdAt: new Date().toISOString() });
+  await setDoc(doc(db, "planGlance", plan.id), { id: plan.id, planId: plan.id, state: "queued" }, { merge: true });
+};
 export function useStepEvidence(planId: string | undefined): StepEvidence[] {
   const [e, setE] = useState<StepEvidence[]>([]);
   const active = useActive();
