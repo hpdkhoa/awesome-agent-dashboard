@@ -270,3 +270,4 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
 .cov-mini { width: 12rem; } .cov-mini .board-bar { margin: 0; height: 0.55rem; }
 .cov-stats { margin: 0.3rem 0 0.5rem 1.1rem; padding: 0; } .cov-missing { border-top: 1px solid var(--line); padding-top: 0.3rem; }
 .cov-miss .src-text { color: var(--wait-fg); }
+.board-box.cov > .sec { border: none; background: transparent; margin: 0; } .board-box.cov > .sec .sec-head { padding-left: 0; }

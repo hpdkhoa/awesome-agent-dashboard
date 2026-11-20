@@ -4,12 +4,14 @@ import { db } from "./firebase";
 import { ticket } from "./FileView";
 import { countReads } from "./pageReads";
 import { SrcLine, type SrcCtx } from "./SourceChip";
+import { Section } from "./Section";
 import { coverage, covStats, firstSentence, isLogRow, LOG_NAME, type CovInput, type LogRow } from "./covCount";
 
 // The coverage bar and the missing list at the top of the report board (plan 44fc4979 s4; see covCount.ts for the
 // owner's picks). The chart rule (2026-11-08): the points (one bar per source with its value), a legend naming each
-// colour, and the stats with what each one means, always visible. Missing items are listed, never folded away; each
-// carries its chip, so a click opens the item's full text under its line.
+// colour, and the stats with what each one means, all visible when the section is open. The fold rule (2026-11-20, "the
+// coverage section at plan need to have collapse feature"): the whole box folds under a header that carries the counts.
+// Each missing item carries its chip, so a click opens the item's full text under its line.
 type Base = Omit<CovInput, "records" | "logRows">;
 
 export function CoverageBar({ planId, base, ctx }: { planId: string; base: Base; ctx: SrcCtx }) {
@@ -45,15 +47,16 @@ export function CoverageBar({ planId, base, ctx }: { planId: string; base: Base;
       .then((all) => live && setLogRows(all.flat()), (e) => live && setErr(String(e?.message ?? e)));
     return () => { live = false; };
   }, [logKey, planId, ctx.cwd]);
-  if (err) return <div className="board-box cov" data-cov="error"><p className="small bad">Coverage: could not count ({err})</p></div>;
-  if (records === null || logRows === null) return <div className="board-box cov"><p className="small muted">Coverage: counting…</p></div>;
+  if (err) return <div className="board-box cov" data-cov="error"><Section id="plan.board.coverage" title="Coverage" extra="could not count"><p className="small bad">Coverage: could not count ({err})</p></Section></div>;
+  if (records === null || logRows === null) return <div className="board-box cov"><Section id="plan.board.coverage" title="Coverage" extra="counting…"><p className="small muted">Coverage: counting…</p></Section></div>;
   const groups = coverage({ ...base, records, logRows });
   const st = covStats(groups);
   const used = groups.filter((g) => g.items.length);
   const missing = used.filter((g) => g.items.some((i) => !i.covered));
   return (
     <div className="board-box cov" data-cov={st.missing ? "missing" : "full"} data-cov-total={st.total} data-cov-covered={st.covered}>
-      <p className="board-lab">Coverage · {st.covered} of {st.total} truth items reachable ({st.pct}%)</p>
+      <Section id="plan.board.coverage" title={`Coverage · ${st.covered} of ${st.total} truth items reachable (${st.pct}%)`}
+        extra={st.missing ? `${st.missing} missing` : "none missing"}>
       <div className="board-bar" role="img" aria-label={`covered ${st.covered}, missing ${st.missing}`}>
         {st.covered > 0 && <i className="cov-in" style={{ width: `${st.pct}%` }} title={`covered: ${st.covered} of ${st.total}`} />}
         {st.missing > 0 && <i className="cov-out" style={{ width: `${100 - st.pct}%` }} title={`missing: ${st.missing} of ${st.total}`} />}
@@ -96,6 +99,7 @@ export function CoverageBar({ planId, base, ctx }: { planId: string; base: Base;
           ))}
         </div>
       )}
+      </Section>
     </div>
   );
 }
