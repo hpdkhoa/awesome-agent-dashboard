@@ -267,7 +267,9 @@ export function ReportBoard({ plan, v, steps, evidence, asked, onOpenItem, stale
           </div>
           {mats.length > 0 && (
             <div className="board-box">
-              <p className="board-lab">Materials · latest version of each ({mats.length})</p>
+              {/* folds like Coverage (the owner, 2026-11-20: "material section got the same problem") */}
+              <Section id="plan.board.materials" title={`Materials · latest version of each (${mats.length})`}
+                extra={MATERIAL_GROUPS.map(([kind, label]) => [label, mats.filter((m) => m.kind === kind).length] as const).filter(([, n]) => n).map(([l, n]) => `${l} ${n}`).join(" · ")}>
               {MATERIAL_GROUPS.map(([kind, label]) => {
                 const list = mats.filter((m) => m.kind === kind);
                 return list.length > 0 && (
@@ -281,6 +283,7 @@ export function ReportBoard({ plan, v, steps, evidence, asked, onOpenItem, stale
                   </div>
                 );
               })}
+              </Section>
             </div>
           )}
         </>
