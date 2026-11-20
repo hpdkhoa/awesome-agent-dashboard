@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { doc, getDoc } from "./fs";
 import { db } from "./firebase";
 import { LocalImg, openFile, ticket } from "./FileView";
@@ -113,6 +113,47 @@ const AROUND = 3;
 const HEAD = 40;
 const PICTURE = /\.(png|jpe?g|gif|webp|svg|avif)$/i;
 const NOT_TEXT = /\.(pdf|html?|mp4|webm|mov)$/i;
+const MARKDOWN = /\.(md|markdown)$/i;
+const TABLE = /^\s*\|/;
+const HEADING = /^#{1,6}\s/;
+
+// A .md file opens as a markdown preview, not raw text (the owner, 2026-11-20, on the s3 result: "the open for .md file
+// need a markdown preview panel to view, not a raw markdown format texts"). No anchor: the whole file, rendered, in a
+// scroll box. An anchor in a table (a feedback log row): the table's header and the rows around it, the anchored row
+// marked. An anchor elsewhere: its section, from the heading above to the next heading.
+function MdFile({ path, all, line, cwd }: { path: string; all: string[]; line: number; cwd: string }) {
+  const box = useRef<HTMLDivElement>(null);
+  let text = all.join("\n"), hitRow = -1, where = `${all.length} lines`;
+  if (line && TABLE.test(all[line - 1] ?? "")) {
+    let start = line - 1;
+    while (start > 0 && TABLE.test(all[start - 1])) start--;
+    let end = line - 1;
+    while (end + 1 < all.length && TABLE.test(all[end + 1])) end++;
+    const first = Math.max(start + 2, line - 1 - AROUND), last = Math.min(end, line - 1 + AROUND);
+    if (line - 1 >= start + 2) {
+      text = [all[start], all[start + 1], ...all.slice(first, last + 1)].join("\n");
+      hitRow = line - 1 - first;
+      where = `row on line ${line} of ${all.length}, with ${last - first} rows around it`;
+    }
+  } else if (line) {
+    let start = line - 1;
+    while (start > 0 && !HEADING.test(all[start])) start--;
+    let end = line;
+    while (end < all.length && !HEADING.test(all[end])) end++;
+    text = all.slice(start, end).join("\n");
+    where = `line ${line} of ${all.length}, its section (lines ${start + 1} to ${end})`;
+  }
+  useEffect(() => {
+    box.current?.querySelectorAll("tbody tr").forEach((tr, i) => tr.classList.toggle("hit", i === hitRow));
+  }, [text, hitRow]);
+  return (
+    <>
+      <p className="src-head">{path} · {where}{" "}
+        <button className="link" onClick={() => openFile(path, cwd)}>open the whole file</button></p>
+      <div className="src-md" ref={box} data-src-md><Md text={text} cwd={cwd} /></div>
+    </>
+  );
+}
 function FileText({ id, cwd }: { id: string; cwd: string }) {
   const m = FILE.exec(id)!.groups!;
   if (PICTURE.test(m.path)) return <><p className="src-head">{m.path}</p><LocalImg src={m.path} alt={label(id)} cwd={cwd} /></>;
@@ -140,6 +181,7 @@ function TextFile({ id, cwd }: { id: string; cwd: string }) {
     if (at < 0) return <p className="small bad">{m.path}: no row holds "{q}" now</p>;
     line = at + 1;
   }
+  if (MARKDOWN.test(m.path)) return <MdFile path={m.path} all={all} line={line} cwd={cwd} />;
   const from = line ? Math.max(1, line - AROUND) : 1;
   const to = line ? Math.min(all.length, line + AROUND) : Math.min(all.length, HEAD);
   return (
