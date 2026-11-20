@@ -31,6 +31,7 @@ import { useStepEvidence, type Material, type StepEvidence, type StepReport } fr
 import { dt, tm } from "./fmt";
 import { boardMaterials, gathered } from "./materials";
 import { SrcLine, type SrcCtx } from "./SourceChip";
+import { CoverageBar } from "./Coverage";
 
 // A plan with six parts (plan from a session; the owner's words, 2026-11-03, in cc/dashboard/SESSION_PLAN.md).
 // Plan versions change only with the plan's data; each step shows its own versions, the last reply like a message.
@@ -223,12 +224,20 @@ export function ReportBoard({ plan, v, steps, evidence, asked, onOpenItem, stale
   const ctx: SrcCtx = { parts: v.parts, steps, cwd: plan.cwd };
   const ideaSrc = b?.src?.idea ?? [];
   const noSrc = b ? (b.src?.whatFor?.length ? 0 : 1) + b.idea.filter((_, i) => !ideaSrc[i]?.length).length : 0;
+  // every chip id the board shows (s4 coverage counts what these chips open): What for, Idea, features, materials,
+  // Needs you and Latest result
+  const boardIds = b ? [...(b.src?.whatFor ?? []), ...ideaSrc.flat(), ...feats.flatMap((f) => f.steps), ...mats.map((m) => m.path ?? "").filter(Boolean),
+    ...failed.map((st) => st.id), ...waiting.map((q) => q.stepId ?? "").filter(Boolean), ...(openTotal > 0 ? ["leftover"] : []),
+    ...(latest ? [latest.sv.stepId] : [])] : [];
+  const reports = rows.filter((st) => (steps.find((x) => x.stepId === st.id)?.versions ?? []).length > 0).map((st) => ({ id: st.id, title: st.title }));
   return (
     <Section id="plan.board" main stale={stale} title="Report board"
       extra={b ? `${count("built") + count("open")} of ${feats.length} features built${noSrc ? ` · ${noSrc} lines without source` : ""}` : "no board yet"}>
       {!b && <p className="small muted">This plan has no board yet: its session adds What for, Idea and the product list with the next plan version.</p>}
       {b && (
         <>
+          <CoverageBar planId={plan.id} ctx={ctx} base={{ boardIds, goal: v.parts?.goal ?? "", rules: v.parts ? partLines(v.parts, "rules") : [],
+            lessons: v.parts ? partLines(v.parts, "lessons") : [], leftover: v.parts?.leftover ?? [], reports }} />
           <div className="board-box"><p className="board-lab">What for</p><SrcLine ids={b.src?.whatFor ?? null} ctx={ctx}><p>{b.whatFor}</p></SrcLine></div>
           {b.idea.length > 0 && (
             <div className="board-box">

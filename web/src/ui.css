@@ -259,3 +259,9 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
 .board-feat .src-row { flex-direction: column; align-items: stretch; gap: 0.2rem; }
 .board-feat .src-text { display: flex; flex-direction: column; }
 .board-need .src-line { padding: 0.1rem 0; }
+/* s4 coverage bar + missing list (plan 44fc4979): covered = the built colour, missing = the waiting colour */
+.board-bar .cov-in, .sw.cov-in { background: var(--live); } .board-bar .cov-out, .sw.cov-out { background: var(--wait-fg); }
+.cov-rows { border-collapse: collapse; margin: 0.3rem 0; } .cov-rows td { padding: 0.1rem 0.6rem 0.1rem 0; } .cov-rows .num { text-align: right; white-space: nowrap; }
+.cov-mini { width: 12rem; } .cov-mini .board-bar { margin: 0; height: 0.55rem; }
+.cov-stats { margin: 0.3rem 0 0.5rem 1.1rem; padding: 0; } .cov-missing { border-top: 1px solid var(--line); padding-top: 0.3rem; }
+.cov-miss .src-text { color: var(--wait-fg); }
