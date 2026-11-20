@@ -227,7 +227,7 @@ function StatusBar({ plan, runs }: { plan: Plan; runs: Run[] }) {
   );
 }
 
-// The board of every plan by phase (the owner's choice, 2026-11-09, "Both"): five columns, one card per plan with its
+// The board of every plan by phase (the owner's choice, 2026-11-09, "Both"): one column per phase (six, Done last), one card per plan with its
 // status; Close or Reopen on the card, a click on the card opens the plan.
 export function PlanBoard({ plans, items, picked, onPick }: { plans: Plan[]; items: InboxItem[]; picked?: string; onPick: (id: string) => void }) {
   const [error, setError] = useState("");

@@ -324,7 +324,7 @@ td + td { padding-left: 0.75rem; }
 .pill.phase { border-color: var(--accent); color: var(--accent); }
 .status-bar { margin: 0.5rem 0; padding: 0.5rem 0.75rem; border: 1px solid var(--line); border-radius: 10px; }
 .status-bar .chips { margin: 0.25rem 0; }
-.board { display: grid; grid-template-columns: repeat(5, minmax(150px, 1fr)); gap: 0.5rem; overflow-x: auto; margin: 0.5rem 0; }
+.board { display: grid; grid-template-columns: repeat(6, minmax(150px, 1fr)); gap: 0.5rem; overflow-x: auto; margin: 0.5rem 0; }
 .board-col { border: 1px solid var(--line); border-radius: 10px; padding: 0.375rem; min-height: 60px; }
 .board-head { font-weight: 600; font-size: 0.8125rem; margin-bottom: 0.375rem; }
 .board-card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 0.375rem; margin-bottom: 0.375rem; cursor: pointer; }
