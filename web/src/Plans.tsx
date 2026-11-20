@@ -4,7 +4,7 @@ import { approvals, approvedFiles, checkGenerate, compareBase, FORMATS, generate
 import { openFile } from "./FileView";
 import { HarnessSection } from "./HarnessView";
 import { GeneratedSection } from "./GeneratedView";
-import { PHASES, phaseName, phaseOf, phaseOrder, phasePrompt, phaseStarts } from "./phases";
+import { PHASES, phaseName, phaseOf, phaseOrder, phaseStarts } from "./phases";
 import { MoreMenu } from "./MoreMenu";
 import { PartsView } from "./PlanParts";
 import { RunWithPicker } from "./Runs";
@@ -197,7 +197,9 @@ function StatusBar({ plan, runs }: { plan: Plan; runs: Run[] }) {
   const [error, setError] = useState("");
   const now = phaseOf(plan);
   const at = PHASES.findIndex((p) => p.id === now);
-  const going = runs.some((r) => r.planId === plan.id && r.phaseOrder && (r.status === "new" || r.status === "running"));
+  const mine = runs.filter((r) => r.planId === plan.id && r.phaseOrder);
+  const going = mine.some((r) => r.status === "new" || r.status === "running");
+  const refused = mine.filter((r) => r.status === "failed" && r.action === "phase").sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""))[0];
   const fail = (e: unknown) => setError(String((e as { code?: string })?.code ?? e));
   const closed = isClosed(plan);
   return (
@@ -212,11 +214,12 @@ function StatusBar({ plan, runs }: { plan: Plan; runs: Run[] }) {
         <b className="small">Phase</b>
         {PHASES.map((p, i) => (
           <button key={p.id} className={p.id === now ? "chip on" : "chip"} disabled={going || p.id === now} title={p.means}
-            onClick={() => sendPhaseOrder(plan, phasePrompt(p.id), phaseOrder(p.id)).catch(fail)}>
+            onClick={() => sendPhaseOrder(plan, p.id, phaseOrder(p.id)).catch(fail)}>
             {p.id === now ? p.name : i < at ? `Back to ${p.name}` : `Move to ${p.name}`}
           </button>
         ))}
         {going && <span className="small muted">Order sent</span>}
+        {!going && refused?.error && <span className="small bad">Phase move refused: {refused.error}</span>}
       </div>
       <p className="small muted">{phaseName(now)}: {PHASES[at]?.means}</p>
       {error && <p className="bad small">{error}</p>}

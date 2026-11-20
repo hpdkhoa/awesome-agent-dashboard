@@ -204,10 +204,10 @@ html,body{margin:0;background:transparent;overflow:hidden;font-family:Tahoma,Ver
 .nfile span{overflow:hidden;text-overflow:ellipsis}
 .nthh{font-size:9px;color:#6a7a80;letter-spacing:1px;margin-bottom:2px}
 .nth{border-left:2px solid #444;padding:2px 6px;margin:3px 0;font-size:11px;color:#f8f8f8;white-space:pre-wrap;word-break:break-word;user-select:text;cursor:text}
-.nth span{display:block;font-size:10px;color:#9ab}
-.nth.ask{border-color:var(--orange)}.nth.ask span{color:var(--orange)}
-.nth.ses{border-color:var(--green)}.nth.ses span{color:var(--green)}
-.nth.redraw{border-color:#e8f0ff}.nth.redraw span{color:#e8f0ff}
+.nth>span{display:block;font-size:10px;color:#9ab}
+.nth.ask{border-color:var(--orange)}.nth.ask>span{color:var(--orange)}
+.nth.ses{border-color:var(--green)}.nth.ses>span{color:var(--green)}
+.nth.redraw{border-color:#e8f0ff}.nth.redraw>span{color:#e8f0ff}
 .nth i{color:#7a8a90}
 .nact button:disabled{color:#6a7a80;border-color:#4a5a60;cursor:default}
 .nsay{font-size:11px;color:#9ab;margin-top:5px;white-space:normal}
@@ -218,7 +218,26 @@ html,body{margin:0;background:transparent;overflow:hidden;font-family:Tahoma,Ver
 .nfull[hidden]{display:none}
 .nfull img{max-width:100%;max-height:calc(100% - 24px);object-fit:contain;border:1px solid #444}
 .nfull pre{max-width:100%;max-height:calc(100% - 24px);overflow:auto;margin:0;font:11px Consolas,monospace;color:#cfc;white-space:pre-wrap;user-select:text}
-.nfull span{color:#aaa;font-size:11px;margin-top:4px}
+.nfull>span{color:#aaa;font-size:11px;margin-top:4px}
+/* the text view (fb/md.js, the owner 2026-11-20: no raw <svg> or raw text): markdown, tables, pictures, drawings */
+.md{white-space:normal}
+.md p,.md ul,.md ol,.md pre,.md table,.md blockquote{margin:0 0 4px}
+.md>:last-child{margin-bottom:0}
+.md ul,.md ol{padding-left:16px}
+.md h1,.md h2,.md h3,.md h4{font-size:12px;margin:4px 0 2px;color:#f8f8f8}
+.md code{font:10px Consolas,monospace;color:#cfc;background:#0008;padding:0 2px}
+.md pre{background:#0008;padding:3px;overflow:auto;white-space:pre}
+.md pre code{padding:0;background:none}
+.md table{border-collapse:collapse;display:block;overflow-x:auto;max-width:100%}
+.md th,.md td{border:1px solid #444;padding:1px 4px;text-align:left}
+.md th{background:#0008;color:#f8f8f8}
+.md img{max-width:100%;height:auto;cursor:zoom-in}
+.md .md-drawing{display:block;max-height:220px;background:#1a1a1a}
+.md a.mdlink{color:#9cf;cursor:pointer;text-decoration:underline}
+.md blockquote{border-left:2px solid #444;padding-left:6px;color:#9ab}
+.md-line p{display:inline;margin:0}
+.ndraft.md-draft{font-family:inherit;color:#cfc}
+.nfull-md{max-width:100%;max-height:calc(100% - 24px);overflow:auto;font-size:11px;color:#f8f8f8;user-select:text;cursor:text;background:#1a1a1a;padding:6px;border:1px solid #444}
 /* plan c5cb9485 s5: the hotkey box (right click > Hotkey) */
 #kwrap{display:none}.keyopen #kwrap{display:block}
 .wrap.key{--c:var(--pink)}

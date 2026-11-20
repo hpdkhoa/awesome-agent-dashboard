@@ -181,7 +181,7 @@ export function FilePicker({ machine, picked, onChange }: { machine: string; pic
   const toggle = (p: string) => onChange(picked.includes(p) ? picked.filter((x) => x !== p) : [...picked, p]);
   return (
     <div className="file-picker" data-mark="files">
-      <p className="label">Files for the model ({picked.length} picked)</p>
+      <Section id="runs.files" title="Files for the model" extra={`${picked.length} picked`}>
       {picked.map((p) => (
         <p key={p} className="small picked"><button className="link" onClick={() => toggle(p)} title="remove">✕</button> {p}</p>
       ))}
@@ -195,6 +195,7 @@ export function FilePicker({ machine, picked, onChange }: { machine: string; pic
         ))}
         {!!list?.more && <p className="muted small">{list.more} more not shown</p>}
       </div>
+      </Section>
     </div>
   );
 }
@@ -514,8 +515,7 @@ export function RunList({ runs, title = "Runs from the dashboard", paged = false
   const [count, setCount] = useState(PAGE);
   const shown = paged ? all.slice(0, count) : all;
   return (
-    <div>
-      <h2 className="label">{title}{paged && all.length > PAGE ? ` (${shown.length} of ${all.length})` : ""}</h2>
+    <Section id={"runs.list." + title} title={title} extra={paged && all.length > PAGE ? `${shown.length} of ${all.length}` : all.length}>
       {shown.length === 0 && <p className="muted small">None yet.</p>}
       {shown.map((r) => (
         <Section
@@ -553,30 +553,28 @@ export function RunList({ runs, title = "Runs from the dashboard", paged = false
         >
           <div {...quoteTarget(r)}>
           <KbLine r={r} />
-          <p className="label">Prompt</p>
-          <Md text={r.prompt} cwd={r.cwd ?? r.folder ?? ""} />
+          <Section id="run.prompt" title="Prompt">
+            <Md text={r.prompt} cwd={r.cwd ?? r.folder ?? ""} />
+          </Section>
           {r.action === "local" && (r.context ?? []).length > 0 && (
-            <>
-              <p className="label">Context sent</p>
+            <Section id="run.context" title="Context sent" extra={r.context!.length}>
               {r.context!.map((c) => (
                 <p key={c.name} className="small">{c.name}: {num(c.sent)} of {num(c.chars)} chars{c.chunks ? ` (chunks ${c.chunks})` : ""}</p>
               ))}
-            </>
+            </Section>
           )}
           {r.stoppedOnRepeat && <p className="small bad">Stopped: the answer repeated itself.</p>}
           {(r.status === "done" || r.status === "lost") && (
-            <>
-              <p className="label">Result</p>
+            <Section id="run.result" title="Result">
               <PcText run={r.id} cwd={r.cwd ?? r.folder ?? ""} />
-            </>
+            </Section>
           )}
           </div>
           {r.error && <p className="bad small">{r.error}</p>}
           {r.status === "running" && r.action !== "plan" && (
-            <>
-              <p className="label">Live</p>
+            <Section id="run.live" title="Live">
               <LiveText run={r.id} cwd={r.cwd ?? r.folder ?? ""} />
-            </>
+            </Section>
           )}
           {/* the owner's words, 2026-11-18: "the stop button always show when run item is not done or stopped or canceled" */}
           {r.status !== "done" && r.status !== "stopped" && r.status !== "cancelled" && (
@@ -602,7 +600,7 @@ export function RunList({ runs, title = "Runs from the dashboard", paged = false
           Show more ({Math.min(PAGE, all.length - shown.length)} older of {all.length - shown.length} left)
         </button>
       )}
-    </div>
+    </Section>
   );
 }
 

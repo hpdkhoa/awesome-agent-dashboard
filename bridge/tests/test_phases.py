@@ -240,3 +240,24 @@ def test_approving_one_generated_result_keeps_the_rest_of_tmp(tmp_path, monkeypa
     assert not tmp.exists()  # empty now: removed
     gen = store.get("planGenerated/pl1")["versions"]["v4"]
     assert [(g["file"], g["kind"]) for g in gen] == [(".plan_data/pl1/v4/featuremap-a.svg", "featuremap"), (".plan_data/pl1/v4/chart-b.svg", "chart")]
+
+
+def test_the_phase_button_moves_the_phase_in_the_bridge_with_no_claude_run(tmp_path, monkeypatch):
+    # the owner, 2026-11-20: "build so the phase change only bridge work, no touch LLM"; "Done just a phase ... keep it
+    # as separated like it is now"
+    from test_runs import cmd, setup
+    store, runs, work = setup(tmp_path, monkeypatch)
+    pid = Inbox(store, "PC", [], "s1", str(work)).plan_start("p", parts=PARTS)
+    store.update(f"plans/{pid}", {"status": "open"})
+    cmd(store, "ph1", action="phase", planId=pid, phase="done", ownerText="Move the plan to phase Done.", phaseOrder=True)
+    runs.step()
+    v = store.docs[f"planVersions/{pid}_v2"]
+    assert v["phaseMove"] == {"from": "explore", "to": "done", "order": "Move the plan to phase Done."}
+    assert v["parts"] == store.docs[f"planVersions/{pid}_v1"]["parts"]  # plain version
+    assert store.docs[f"plans/{pid}"]["phase"] == "done" and store.docs[f"plans/{pid}"]["status"] == "open"
+    assert "commands/ph1" not in store.docs  # no run row, no Claude process
+    cmd(store, "ph2", action="phase", planId=pid, phase="build", ownerText="")  # no order: refused
+    cmd(store, "ph3", action="phase", planId="nope", phase="build", ownerText="x")
+    runs.step()
+    assert store.get("commands/ph2")["status"] == "failed" and "Only the owner" in store.get("commands/ph2")["error"]
+    assert store.get("commands/ph3")["status"] == "failed" and store.docs[f"plans/{pid}"]["phase"] == "done"

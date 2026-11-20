@@ -743,7 +743,7 @@ function renderRun() {
   const lines = String(sRunText || "").split(/\n\s*Sources:\s*\n/)[0].split(/\r?\n/).map((x) => x.trim()).filter(Boolean).slice(0, 3);
   const srcs = (sRun.sources || []).map((x) => x.title);
   let r = sRun.error && st === "failed" ? `<span class="rk">why:</span> <span class="bad">${esc(sRun.error.slice(0, 160))}</span>`
-    : lines.length ? `<span class="rk">reply:</span> ${lines.map(esc).join("<br>")}` : `<span class="rk">reply:</span> <span class="k">${st === "done" ? "none" : "\u2026"}</span>`;
+    : lines.length ? `<span class="rk">reply:</span> ${window.MD ? window.MD(lines.join("\n"), () => null, true) : lines.map(esc).join("<br>")}` : `<span class="rk">reply:</span> <span class="k">${st === "done" ? "none" : "\u2026"}</span>`;
   if (srcs.length) r += `<br><span class="rk">sources:</span> ${srcs.slice(0, 2).map(esc).join(" \u00b7 ")}${srcs.length > 2 ? ` \u00b7 +${srcs.length - 2}` : ""}`;
   if ($("srep").innerHTML !== r) $("srep").innerHTML = r;
   if (el.hidden) { el.hidden = false; fit(); } else if (shown === "send") fit();
@@ -807,6 +807,17 @@ function nNow() {
 const nSelOf = (q) => nSel[q.id] || (nSel[q.id] = { choice: (q.draft && q.draft.choice) || "", text: (q.draft && q.draft.text) || "" });
 const nAgo = (iso) => { const s = (Date.now() - Date.parse(iso)) / 1000; return s < 60 ? "now" : s < 3600 ? `${Math.floor(s / 60)}m ago` : s < 86400 ? `${Math.floor(s / 3600)}h ago` : `${Math.floor(s / 86400)}d ago`; };
 const NIMG = /\.(png|jpe?g|gif|webp|svg|avif|bmp)$/i;
+// the owner, 2026-11-20: "make sure not display <svg> or raw text without render again": every text written for the
+// owner (the ask's text, option details, the thread, a draft, an md file) shows as markdown with its tables, pictures
+// and drawings (fb/md.js, the page's rules); each link or PC picture in it becomes a FILES entry, opened as FILES opens.
+function nEntryOf(q, path, web) {
+  const how = web ? "web" : NIMG.test(path) ? "picture" : NTEXT.test(path) ? "text" : "browser";
+  return { how, box: q._box, cwd: q.cwd, path, pic: `${q._box}|${q.cwd}|${path}`, label: web ? path : base(path) || path };
+}
+const nEntry = (q, path, web) => nFull.push(nEntryOf(q, path, web)) - 1;
+// the full-size view keeps its own list: a redraw of the deck under it rebuilds nFull, never this one
+let nBig = [];
+const nMd = (q, text, line = false) => (window.MD ? window.MD(text, (u, web) => nEntry(q, u, web), line) : esc(text || ""));
 function nShot(q, path, label) {
   if (!NIMG.test(path || "")) return `<figure><div class="ph">${esc(base(path) || "no file")}</div>${label}</figure>`;
   const f = nFull.push({ pic: `${q._box}|${q.cwd}|${path}`, box: q._box, path, cwd: q.cwd, label }) - 1;
@@ -829,8 +840,8 @@ function nExample(q, e) {
     return `<div class="ndraft" data-act="full" data-f="${f}"${note}>${lines}</div>`;
   }
   if (e.type === "text") {
-    const f = nFull.push({ text: e.draft || "", label: "draft" }) - 1;
-    return `<div class="ndraft" data-act="full" data-f="${f}"${note}>${esc(e.draft || "")}</div>`;
+    const f = nFull.push({ text: e.draft || "", md: true, label: "draft" }) - 1;
+    return `<div class="ndraft md-draft" data-act="full" data-f="${f}"${note}>${nMd(q, e.draft || "")}</div>`;
   }
   return "";
 }
@@ -883,7 +894,7 @@ async function nOpenFile(x) {
     if (typeof nPicSrc.get(x.pic) !== "string") nPicSrc.set(x.pic, await FB.picture(x.box, x.path, x.cwd));
     return nShowFull({ pic: x.pic, path: x.path, label: x.label });
   }
-  nShowFull({ text: await FB.fileText(x.box, x.path, x.cwd), path: x.path, label: x.label });
+  nShowFull({ text: await FB.fileText(x.box, x.path, x.cwd), md: /\.(md|markdown)$/i.test(x.path), path: x.path, label: x.label });
 }
 function renderNeed() {
   if (layer !== "need") return;
@@ -906,7 +917,7 @@ function renderNeed() {
       : [q.machine, q.workType, NKIND[q.kind] || q.kind, nAgo(q.createdAt)];
     h += `<div class="nmeta">${esc(meta.filter(Boolean).join(" · "))}</div><div class="nq">${esc(q.title)}</div>`;
     if (q.kind === "approval") h += `<div class="nctx call">${esc(q.text)}</div>`;
-    else if (q.text && q.text !== q.title) h += `<div class="nctx">${esc(q.text)}</div>`;
+    else if (q.text && q.text !== q.title) h += `<div class="nctx">${nMd(q, q.text)}</div>`;
     h += nFiles(q);
     if (b.length > 1) h += `<div class="ndots">${b.map((x, n) => `<i data-act="q" data-i="${n}" class="${n === k ? "now" : x.draft ? "saved" : ""}" title="question ${n + 1}${x.draft ? ": saved" : ""}"></i>`).join("")}</div>`;
     const sel = nSelOf(q), picks = sel.choice.split(", ");
@@ -916,7 +927,7 @@ function renderNeed() {
         const on = q.multi ? picks.includes(o.label) : sel.choice === o.label;
         return `<div class="ncard${on ? " sel" : ""}${q.multi ? " multi" : ""}${pickable ? "" : " dis"}" data-act="pick" data-i="${n}"><span class="rad"></span>`
           + `<div class="tx"><span class="l">(${String.fromCharCode(97 + n)}) ${esc(o.label)}</span>${q.recommended === n ? `<span class="rec">REC</span>` : ""}`
-          + `${o.detail ? `<div class="d">${esc(o.detail)}</div>` : ""}${o.differs ? `<div class="df">≠ ${esc(o.differs)}</div>` : ""}</div>`
+          + `${o.detail ? `<div class="d">${nMd(q, o.detail, true)}</div>` : ""}${o.differs ? `<div class="df">≠ ${nMd(q, o.differs, true)}</div>` : ""}</div>`
           + nExample(q, o.example) + `</div>`;
       }).join("") + `</div>`;
     }
@@ -992,7 +1003,7 @@ function nThread(q) {
   for (const x of t) {
     const who = x.who === "owner" ? (x.kind === "ask" ? "you asked" : "you saved") : x.kind === "redraw" ? "session redrew" : "session";
     let body;
-    if (x.kind === "answer") body = `<b>${esc([x.choice, x.text].filter(Boolean).join(" · "))}</b>`;
+    if (x.kind === "answer") body = `<b>${esc(x.choice || "")}</b>${x.choice && x.text ? " · " : ""}${x.text ? nMd(q, x.text, true) : ""}`;
     else if (x.who === "session" && x.kind !== "redraw" && x.text == null) {
       const key = `${q._box}|${q.id}|${k}`, got = nReply.get(key);
       if (got === undefined && q.sessionId) {
@@ -1000,8 +1011,8 @@ function nThread(q) {
         FB.replyText(q._box, q.sessionId, q.id, k).then((r) => nReply.set(key, (r && r.text) || ""), (e) => nReply.set(key, { err: String(e.message || e).slice(0, 80) }))
           .then(() => { if (layer === "need") renderNeed(); });
       }
-      body = typeof got === "string" ? esc(got) : got && got.err ? `<i>${esc(got.err)}</i>` : `<i>reading the reply from ${esc(q.machine || q._box)}...</i>`;
-    } else body = esc(x.text || "");
+      body = typeof got === "string" ? nMd(q, got) : got && got.err ? `<i>${esc(got.err)}</i>` : `<i>reading the reply from ${esc(q.machine || q._box)}...</i>`;
+    } else body = nMd(q, x.text || "");
     if (x.who === "session" && x.kind !== "redraw") k += 1;
     const c = x.who === "owner" ? (x.kind === "ask" ? "ask" : "own") : x.kind === "redraw" ? "redraw" : "ses";
     h += `<div class="nth ${c}"><span>${who} · ${esc(nAgo(x.at))}</span>${body}</div>`;
@@ -1032,7 +1043,20 @@ function nShowFull(x) {
   const el = $("nfull");
   if (!x) { if (!el.hidden) { el.hidden = true; el.replaceChildren(); } return; }
   el.replaceChildren();
-  if (x.text != null) el.append(Object.assign(document.createElement("pre"), { textContent: x.text }));
+  if (x.text != null && x.md && window.MD) {
+    // an md file or a draft: shown rendered (fb/md.js gives safe HTML); its links and pictures open from FILES
+    const q = nNow().q, box = document.createElement("div");
+    box.className = "nfull-md";
+    box.dataset.act = "stay";   // reading or selecting the text never closes the view
+    nBig = [];
+    box.innerHTML = window.MD(x.text, (u, web) => (q ? nBig.push(nEntryOf(q, u, web)) - 1 : null))
+      .replace(/data-act="file"/g, 'data-act="bigfile"').replace(/data-act="full"/g, 'data-act="bigpic"');
+    el.append(box);
+    for (const img of box.querySelectorAll("img[data-pic]")) {
+      const y = nBig[Number(img.dataset.pic)];
+      if (y) FB.picture(y.box, y.path, y.cwd).then((src) => { img.src = src; }, (e) => { img.alt = `${y.label}: ${String(e.message || e).slice(0, 60)}`; });
+    }
+  } else if (x.text != null) el.append(Object.assign(document.createElement("pre"), { textContent: x.text }));
   else {
     const src = x.src || nPicSrc.get(x.pic);
     if (typeof src !== "string") return;
@@ -1057,6 +1081,12 @@ async function nRun(f) {
 function needAct(el) {
   const a = el.dataset.act, { list, i, b, k, q } = nNow();
   if (a === "close") return nShowFull(null);
+  if (a === "stay") return;
+  if (a === "bigpic" || a === "bigfile") {   // a picture or a link inside the full-size md view
+    const y = nBig[Number(el.dataset.f)];
+    if (!y) return;
+    return void nOpenFile(y).catch((e) => { nSay = `${y.label}: ${String(e && e.message || e).slice(0, 90)}`; nSayBad = true; renderNeed(); });
+  }
   if (a === "full") return nShowFull(nFull[Number(el.dataset.f)]);
   if (a === "file") {
     const x = nFull[Number(el.dataset.f)];

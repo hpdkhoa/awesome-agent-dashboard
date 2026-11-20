@@ -1,6 +1,7 @@
 // F5, review findings with dispositions (plan bf73af63, the step: "extend the evidence LLM check: findings list, each
 // confirmed / rejected / fixed with a reason"; rules-review.md: "Validate each finding first, fix every confirmed one
 // ... and record each disposition"). The LLM check's findings, each with its disposition and the reason.
+import { Md } from "./Markdown";
 import type { EvidenceFinding } from "./data";
 import { dt } from "./fmt";
 
@@ -26,7 +27,7 @@ export function Findings({ findings }: { findings?: EvidenceFinding[] }) {
           {list.map((f) => (
             <li key={f.id} data-disposition={f.disposition}>
               <span className={"disp-chip " + f.disposition}>{f.disposition}</span>{" "}
-              <b>{f.id}</b> {f.text}
+              <b>{f.id}</b> <Md line text={f.text} />
               {f.picture && <span className="muted"> · {f.picture.split(/[\\/]/).pop()}</span>}
               <div className="muted">why: {f.why || "no reason given"} · {dt(f.at)}{f.raised !== f.at ? ` · raised ${dt(f.raised)}` : ""}</div>
             </li>

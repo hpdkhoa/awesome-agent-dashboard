@@ -146,7 +146,7 @@ function RecordCard({ r, rows, onPick }: { r: Rec; rows: Rec[]; onPick: (id: str
       </p>
       <Md text={r.text} cwd="" />
       {r.words && <p className="small"><b>The owner's words:</b> {r.words}</p>}
-      {r.why && <p className="small"><b>Why:</b> {r.why}</p>}
+      {r.why && <p className="small"><b>Why:</b> <Md line text={r.why} /></p>}
       {r.source && <p className="muted small">source: {r.source}</p>}
       <Section id="records.versions" title={`Versions (${r.versions?.length ?? 1})`} extra="the owner's words per version" open>
         <ol className="rec-versions" data-rec-versions>

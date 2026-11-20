@@ -59,8 +59,9 @@ STEP_STATES = ("next", "now", "done", "failed")
 # The plan's phases (the owner's words, 2026-11-04: "In my mind having these phases: 1. Explore 2. Build 3. Verify
 # 4. Remove 5. Optimize. Then in any phase can rollback to previous phases at any step"; "Every plan starts in Explore";
 # "I will be the one who trigger the move in every phase, I give order and decisions, you note it down as a plain
-# version to change the phase, and I want the version is included the phase").
-PHASES = ("explore", "build", "verify", "remove", "optimize")
+# version to change the phase, and I want the version is included the phase"). 6. Done (the owner, 2026-11-20: "Done just
+# a phase, I just want to categorize so keep it as separated like it is now": it never touches the Open/Closed status).
+PHASES = ("explore", "build", "verify", "remove", "optimize", "done")
 # The plan format number (the owner's words, 2026-11-07: "all plans will have to update to latest format when I resume
 # the plan"). 0: text only. 1: the six parts. Raise it when the plan format changes; plans below it are rebuilt from
 # their session when the owner resumes them (runs.py _upgrade_first).
@@ -1078,9 +1079,10 @@ def server():
             "you ask joins the round of your plan's current version. While a plan is yours, every option of every question carries an example (before and after pictures, a "
             "code diff with a benchmark, or a draft). A plan with parts makes a new version only when its data "
             "changes; report work on a step with step_update, which never makes a plan version. A plan has a phase: "
-            "explore, build, verify, remove, optimize. Every plan starts in explore, where no step runs. Only the "
-            "owner moves the phase, forward or back: record each move with plan_version(phase=..., order=the owner's "
-            "words), a plain version. In explore, list the harness with plan_version(harness=[...]): the tools and "
+            "explore, build, verify, remove, optimize, done. Every plan starts in explore, where no step runs. Only the "
+            "owner moves the phase, forward or back, with the phase buttons on the page: the bridge records that move "
+            "itself as a plain version, never you. Only when the owner orders a move in a message, record it with "
+            "plan_version(phase=..., order=the owner's words), a plain version. In explore, list the harness with plan_version(harness=[...]): the tools and "
             "context each step needs and each step's check; the owner approves every item on the page. While a "
             "dashboard run works, keep its headline current with headline (now, next; done/total and ETA for heavy "
             "work): at the start and at least every 5 minutes."
@@ -1303,8 +1305,9 @@ def server():
         Only when the plan's data changes; a step moving is step_update. note: one line on what changed and which
         answers or message caused it. plan_id: this session's plan when empty. parent: the version it grows
         from; leave it out for the current one, or give an older one when the owner reopened an answer (a branch).
-        phase: explore, build, verify, remove or optimize. Only the owner moves a phase, forward or back: when the owner
-        orders a move, call this with phase and order (the owner's words), and leave text and parts out for a plain
+        phase: explore, build, verify, remove, optimize or done. Only the owner moves a phase, forward or back. A move
+        from the page's phase buttons is recorded by the bridge, not here; when the owner orders a move in a message,
+        call this with phase and order (the owner's words), and leave text and parts out for a plain
         version that keeps the data. harness: the whole harness list, each {"id": "h1", "item", "kind": "tool" or
         "check"}: the tools and context each step needs, and each step's check; the owner approves every item on the
         page. Left out, the list stays as it was. parts.board (see plan_start): send it with every parts version;

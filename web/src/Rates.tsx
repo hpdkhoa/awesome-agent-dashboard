@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Section } from "./Section";
 import { LineChart } from "./Charts";
 import { addGold, fmt, parseAmount, FX_SOURCES, fxSource, GOLD_SOURCES, goldSource, syncAll, type FxSnapshot, type GoldPrice, type SyncLine } from "./moneyData";
 import { dt } from "./fmt";
@@ -22,7 +23,7 @@ export function RatesSide({ fx, gold }: { fx: FxSnapshot[] | null; gold: GoldPri
 
   return (
     <div className="pad form">
-      <h2>Rates and gold</h2>
+      <Section id="rates.sync" title="Rates and gold">
       <button className="primary" disabled={!ready || busy} onClick={sync}>
         {!ready ? "Loading" : busy ? "Syncing" : "Sync all sources"}
       </button>
@@ -35,6 +36,7 @@ export function RatesSide({ fx, gold }: { fx: FxSnapshot[] | null; gold: GoldPri
           {l.text}
         </p>
       ))}
+      </Section>
       <GoldForm />
     </div>
   );
@@ -60,8 +62,7 @@ function GoldForm() {
       .catch((e: Error) => setMsg("Not saved: " + e.message));
 
   return (
-    <>
-      <h2>Gold price typed by you</h2>
+    <Section id="rates.typed" title="Gold price typed by you">
       <select value={kind} onChange={(e) => setKind(e.target.value as "bar" | "ring")}>
         <option value="bar">Gold bar</option>
         <option value="ring">Gold ring</option>
@@ -78,7 +79,7 @@ function GoldForm() {
       {buy && sell && s < b && <p className="small bad">Sell is below buy.</p>}
       {msg && <p className="small muted">{msg}</p>}
       <p className="small muted">For a price no source covers.</p>
-    </>
+    </Section>
   );
 }
 
@@ -95,11 +96,11 @@ function FxTable({ label, list }: { label: string; list: FxSnapshot[] }) {
   const usd = [...list].reverse().filter((s) => s.rates.USD?.transfer != null);
   if (!latest) return <p className="muted">{label}: nothing saved yet.</p>;
   return (
-    <>
-      <h2>
-        {label}, {dt(latest.sourceTime)}
-        {prev && <span className="muted"> · change since {dt(prev.sourceTime)}</span>}
-      </h2>
+    <Section
+      id={`rates.fx.${label}`}
+      title={`${label}, ${dt(latest.sourceTime)}`}
+      extra={prev ? <span className="muted">change since {dt(prev.sourceTime)}</span> : undefined}
+    >
       <table>
         <thead>
           <tr className="small muted">
@@ -133,7 +134,7 @@ function FxTable({ label, list }: { label: string; list: FxSnapshot[] }) {
       <p className="muted small">
         Source: <a href={latest.sourceUrl}>{label}</a>, for reference only.
       </p>
-    </>
+    </Section>
   );
 }
 
@@ -152,7 +153,7 @@ export function RatesReport({ fx, gold }: { fx: FxSnapshot[]; gold: GoldPrice[] 
       {FX_SOURCES.map((s) => (
         <FxTable key={s.id} label={s.label} list={fx.filter((x) => fxSource(x) === s.id)} />
       ))}
-      <h2>Gold, đ per lượng</h2>
+      <Section id="rates.gold" title="Gold, đ per lượng">
       <table>
         <thead>
           <tr className="small muted">
@@ -203,6 +204,7 @@ export function RatesReport({ fx, gold }: { fx: FxSnapshot[]; gold: GoldPrice[] 
           </div>
         ))}
       {gold.length === 0 && <p className="muted">No gold price saved yet. Press "Sync all sources".</p>}
+      </Section>
     </article>
   );
 }

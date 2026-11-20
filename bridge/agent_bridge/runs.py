@@ -69,7 +69,7 @@ from .archiver import Archiver
 from .handoff import CHOICES, DEFAULT_FRESH_OVER, handoff_prompt, last_context, should_fresh
 from .digest import find_log, write_pages
 from .logs import window_cost
-from .inbox import KINDS, PLAN_FORMAT, format_of, now_iso
+from .inbox import KINDS, PLAN_FORMAT, Inbox, format_of, now_iso
 from .chain import Chains
 from .stepcheck import StepChecks
 from .coordinator import Coordinator
@@ -588,6 +588,7 @@ class Runs:
                     else self._stop(c) if action == "stop" else self._check(c) if action == "check"
                     else self._plan(c) if action == "plan" else self._approve_generated(c) if action == "approve_generated"
                     else self._delete_plan_files(c) if action == "delete_plan_files"
+                    else self._phase(c) if action == "phase"
                     else self.chains.start(c) if action == "chain"
                     else self.checks.start(c) if action == "step_check"
                     else self.evidence.start(c) if action == "evidence"
@@ -1152,6 +1153,23 @@ class Runs:
             gone = True
         self.store.delete(path)
         return f"{c['id']}: plan {pid} deleted, its folder {'removed' if gone else 'was not there'}"
+
+    def _phase(self, c: dict) -> str:
+        """The owner's phase button (the owner, 2026-11-20: "build so the phase change only bridge work, no touch LLM"):
+        the bridge records the move as a plain plan version itself, with the owner's order word for word; no Claude
+        run. Done, the command goes; refused, it stays failed with why, for the page to show."""
+        path, pid = f"commands/{c['id']}", str(c.get("planId") or "")
+        plan = self.store.get(f"plans/{pid}") if pid else None
+        try:
+            if not plan:
+                raise ValueError(f"no plan {pid}")
+            ib = Inbox(self.store, self.machine, self.roots, "", plan.get("cwd") or "", push=self.push)
+            n = ib.plan_version(pid, "", "", phase=str(c.get("phase") or ""), order=str(c.get("ownerText") or ""))
+        except ValueError as e:
+            self.store.update(path, {"status": "failed", "endedAt": now_iso(), "error": str(e)})
+            return f"{c['id']}: phase refused, {e}"
+        self.store.delete(path)
+        return f"{c['id']}: plan {pid} moved to {c.get('phase')} as v{n}"
 
     def _check(self, c: dict) -> str:
         """"Check now" on a session page: writes what the wait rule sees, once, on the command itself."""

@@ -4,7 +4,7 @@
 // phase"). A plan or version saved before phases existed counts as Explore.
 import type { Plan, PlanVersion } from "./data";
 
-export type Phase = "explore" | "build" | "verify" | "remove" | "optimize";
+export type Phase = "explore" | "build" | "verify" | "remove" | "optimize" | "done";
 
 export const PHASES: { id: Phase; name: string; means: string }[] = [
   { id: "explore", name: "Explore", means: "this phase the plan is mainly used for summarize, deeper in details, pivot and validate the idea." },
@@ -12,6 +12,8 @@ export const PHASES: { id: Phase; name: string; means: string }[] = [
   { id: "verify", name: "Verify", means: "this phase is the A/B testing, benchmark, UAT testing, etc... Do every thing to test and benchmark the MVP result in Build phase." },
   { id: "remove", name: "Remove", means: "this phase I'll test, look back, pivot and can remove some feature, tune the MVP, tune the plan, remove anything inside a plan and MVP to make the sub-final product." },
   { id: "optimize", name: "Optimize", means: "this phase is sorely used for hardening the MVP to make it come to the state of the art to ready for production or mass user testing." },
+  // the owner, 2026-11-20: "Done just a phase, I just want to categorize so keep it as separated like it is now"
+  { id: "done", name: "Done", means: "just a phase, to categorize the plan as done; the Open/Closed status stays separate." },
 ];
 
 export const phaseOf = (x: Pick<Plan, "phase"> | Pick<PlanVersion, "phase"> | undefined): Phase => x?.phase ?? "explore";
@@ -29,7 +31,6 @@ export function phaseStarts(versions: PlanVersion[]): Map<number, Phase> {
   return out;
 }
 
-// The owner's order the Move button sends to the plan's session (it records a plain version with plan_version).
+// The owner's order the Move button sends: the bridge records it as a plain version itself, no Claude run (the owner,
+// 2026-11-20: "build so the phase change only bridge work, no touch LLM"; runs.py _phase).
 export const phaseOrder = (to: Phase) => `Move the plan to phase ${phaseName(to)}.`;
-export const phasePrompt = (to: Phase) =>
-  `${phaseOrder(to)} Record it with plan_version(phase="${to}", order="${phaseOrder(to)}") and no text or parts: a plain version.`;

@@ -152,10 +152,9 @@ function OnMessages({ runs, plan, where }: { runs: Run[]; plan: Plan; where: On 
           title={<>{KIND_NAME[r.kind!]} · {when(r.createdAt)} · <span className={"status " + r.status}>{r.status}</span></>}>
           <Clamp><Md text={r.ownerText ?? r.prompt ?? ""} cwd={plan.cwd} /></Clamp>
           {(r.status === "done" || r.status === "lost") && (
-            <>
-              <p className="label">Reply</p>
+            <Section id="plan.msg.reply" title="Reply">
               <Clamp><PcText run={r.id} cwd={plan.cwd} /></Clamp>
-            </>
+            </Section>
           )}
         </Section>
       ))}
@@ -332,26 +331,24 @@ const SORTED_NAMES: [keyof Sorted, string][] = [
 function ExactFields({ r, plan }: { r: StepReport; plan: Plan }) {
   return (
     <>
-      {r.built?.length ? <><p className="label">Built</p>{md(r.built.map((b) => `- ${b}`).join("\n"), plan)}</> : null}
+      {r.built?.length ? <Section id="step.report.built" title="Built" extra={r.built.length}>{md(r.built.map((b) => `- ${b}`).join("\n"), plan)}</Section> : null}
       {r.numbers?.length ? (
-        <>
-          <p className="label">Numbers</p>
+        <Section id="step.report.numbers" title="Numbers" extra={r.numbers.length}>
           <table>
             <thead><tr><th>Metric</th><th>Before</th><th>After</th><th>Measured by</th></tr></thead>
             <tbody>{r.numbers.map((n, i) => <tr key={i}><td>{md(n.metric, plan)}</td><td>{md(n.before || "-", plan)}</td><td><b>{md(n.after, plan)}</b></td><td className="small">{md(n.how, plan)}</td></tr>)}</tbody>
           </table>
-        </>
+        </Section>
       ) : null}
       {r.tests?.length ? (
-        <>
-          <p className="label">Tested by</p>
+        <Section id="step.report.tests" title="Tested by" extra={r.tests.length}>
           <table>
             <thead><tr><th>Method</th><th>Result</th></tr></thead>
             <tbody>{r.tests.map((t, i) => <tr key={i}><td>{md(t.method, plan)}</td><td>{md(t.result, plan)}</td></tr>)}</tbody>
           </table>
-        </>
+        </Section>
       ) : null}
-      {r.not_done?.length ? <><p className="label">Not done → what to do</p>{md(r.not_done.map((x) => `- ${x.item}${x.fix ? ` → ${x.fix}` : ""}`).join("\n"), plan)}</> : null}
+      {r.not_done?.length ? <Section id="step.report.notdone" title="Not done → what to do" extra={r.not_done.length}>{md(r.not_done.map((x) => `- ${x.item}${x.fix ? ` → ${x.fix}` : ""}`).join("\n"), plan)}</Section> : null}
     </>
   );
 }
@@ -367,7 +364,7 @@ function SortedFields({ reply, plan }: { reply: string; plan: Plan }) {
         in a near field; the full reply is below
       </p>
       {SORTED_NAMES.filter(([k]) => fields[k].length).map(([k, name]) => (
-        <div key={k}><p className="label">{name}</p><ItemList items={fields[k]} plan={plan} /></div>
+        <Section key={k} id={`step.report.sorted.${k}`} title={name} extra={fields[k].length}><ItemList items={fields[k]} plan={plan} /></Section>
       ))}
     </>
   );
@@ -471,8 +468,7 @@ function DecisionsSection({ plan, versions, asked, onOpenItem }: {
     <Section id="plan.part.decisions" title="9. Decisions" extra={`${answered.length} decided · ${qs.length - answered.length} waiting`}>
       {qs.length === 0 && <p className="muted small">No question asked on this plan yet.</p>}
       {rounds.map((r) => (
-        <div key={r}>
-          <h3 className="small muted">{r ? `Round on v${r}` : "Before v1"}</h3>
+        <Section key={r} id={`plan.decisions.round.${r}`} title={r ? `Round on v${r}` : "Before v1"} extra={qs.filter((q) => (q.round ?? 0) === r).length}>
           {qs.filter((q) => (q.round ?? 0) === r).map((q) => {
             const picked = q.answer ? (q.multi ? q.answer.choice.split(", ") : [q.answer.choice]) : [];
             const chosen = q.options.filter((o) => picked.includes(o.label));
@@ -487,11 +483,11 @@ function DecisionsSection({ plan, versions, asked, onOpenItem }: {
                   <span className="small muted">{made ? ` · made v${made}` : ""}{q.answer ? ` · ${dt(q.answer.at)}` : ""} · {q.kind}</span></span>}>
               <div className="decision">
                 <p><button className="link" onClick={() => onOpenItem(q.id)}>Open in the inbox</button></p>
-                {q.answer?.text && <p className="small">Your note: {q.answer.text}</p>}
+                {q.answer?.text && <p className="small">Your note: <Md line text={q.answer.text} /></p>}
                 {q.history?.length ? <p className="small muted">Earlier: {q.history.map((h) => h.choice).join(" → ")}</p> : null}
                 {chosen.map((o) => (
                   <div key={o.label} className="decision-pick">
-                    {o.detail && <p className="small muted">{o.detail}</p>}
+                    {o.detail && <Md className="small muted" text={o.detail} cwd={q.cwd || plan.cwd} />}
                     <KeptExample q={q} o={o} cwd={q.cwd || plan.cwd} />
                   </div>
                 ))}
@@ -500,7 +496,7 @@ function DecisionsSection({ plan, versions, asked, onOpenItem }: {
                   <Section id="plan.decision.others" title={`Not picked (${others.length})`} open={false}>
                     {others.map((o) => (
                       <div key={o.label} className="decision-pick">
-                        <p className="small"><b>{o.label}</b>{o.detail ? ` · ${o.detail}` : ""}</p>
+                        <p className="small"><b>{o.label}</b>{o.detail ? <> · <Md line text={o.detail} cwd={q.cwd || plan.cwd} /></> : ""}</p>
                         <KeptExample q={q} o={o} cwd={q.cwd || plan.cwd} />
                       </div>
                     ))}
@@ -510,7 +506,7 @@ function DecisionsSection({ plan, versions, asked, onOpenItem }: {
               </Section>
             );
           })}
-        </div>
+        </Section>
       ))}
     </Section>
   );

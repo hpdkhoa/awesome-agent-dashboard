@@ -128,8 +128,8 @@ function QuestionCard({ q, batch, k, onSaved }: { q: InboxItem; batch: InboxItem
                     ({String.fromCharCode(97 + n)}) {o.label}
                     {q.recommended === n && <span className="tag">Recommended</span>}
                   </span>
-                  {o.detail && <span className="muted small">{o.detail}</span>}
-                  {o.differs && <span className="small differs">≠ {o.differs}</span>}
+                  {o.detail && <Md line className="muted small" text={o.detail} />}
+                  {o.differs && <span className="small differs">≠ <Md line text={o.differs} /></span>}
                 </button>
                 {o.example && <Example e={o.example} cwd={q.cwd} />}
               </div>
@@ -379,7 +379,7 @@ export function InboxView({ item, session, plan, onOpenPlan, items = [], phone =
                     ({String.fromCharCode(97 + n)}) {o.label}
                     {item.recommended === n && <span className="tag">Recommended</span>}
                   </span>
-                  {o.detail && <span className="muted small">{o.detail}</span>}
+                  {o.detail && <Md line className="muted small" text={o.detail} />}
                 </button>
                 {o.example && <Example e={o.example} cwd={item.cwd} />}
                 </div>

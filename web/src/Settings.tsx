@@ -1,6 +1,7 @@
 // The Settings tab (the owner's picks, 2026-11-14: "use rem. open own settings tab."). Everything here is saved in this
 // browser only (prefs.ts); another browser or the phone keeps its own. A change repaints the page once and reads no
 // data. Shared settings (approvals, model, push, boxes) stay where they are, because the bridge reads them.
+import { Section } from "./Section";
 import { useRef, useState, type ReactNode } from "react";
 import { AvatarPacks } from "./AvatarPacks";
 import { dt, nf } from "./fmt";
@@ -92,8 +93,7 @@ export function SettingsView({ onResetLayout }: { onResetLayout: () => void }) {
       <h1>Settings</h1>
       <p className="muted small">This browser only · {changed.length} changed from the default · a change shows at once.</p>
 
-      <section className="set-group" id="set-text">
-        <h2>Text</h2>
+      <div className="set-group" id="set-text"><Section id="settings.text" title="Text">
         <Row what="Font" why="The page's text font">
           <Pick k="font" s={s} set={set} opts={[["system", "System"], ["tahoma", "Tahoma"], ["verdana", "Verdana"], ["georgia", "Georgia"], ["custom", "Other"]]} />
           {s.font === "custom" && <input type="text" placeholder="a font name on this PC" value={s.fontCustom} onChange={(e) => set({ fontCustom: e.target.value })} />}
@@ -117,10 +117,9 @@ export function SettingsView({ onResetLayout }: { onResetLayout: () => void }) {
         <div className="set-sample">
           <b>Sample</b> · The plan moved to Build at {dt(Date.now())}. Tokens {nf(1234567)}. <code>web/src/Settings.tsx</code>
         </div>
-      </section>
+      </Section></div>
 
-      <section className="set-group" id="set-theme">
-        <h2>Theme</h2>
+      <div className="set-group" id="set-theme"><Section id="settings.theme" title="Theme">
         <Row what="Theme" why="System follows this device's light or dark mode">
           <Pick k="theme" s={s} set={set} opts={[["system", "System"], ["light", "Light"], ["dark", "Dark"]]} />
         </Row>
@@ -134,10 +133,9 @@ export function SettingsView({ onResetLayout }: { onResetLayout: () => void }) {
         <Row what="Motion" why="Reduce turns off the small animations">
           <Pick k="reduceMotion" s={s} set={set} opts={[[false, "Normal"], [true, "Reduce"]]} />
         </Row>
-      </section>
+      </Section></div>
 
-      <section className="set-group" id="set-layout">
-        <h2>Layout</h2>
+      <div className="set-group" id="set-layout"><Section id="settings.layout" title="Layout">
         <Row what="Density" why="Space inside rows, buttons and tables on a desktop">
           <Pick k="density" s={s} set={set} opts={[["compact", "Compact"], ["normal", "Normal"], ["roomy", "Roomy"]]} />
         </Row>
@@ -163,10 +161,9 @@ export function SettingsView({ onResetLayout }: { onResetLayout: () => void }) {
         <Row what="Sections start" why="Open or folded, for sections this browser has not opened or folded yet">
           <Pick k="foldDefault" s={s} set={set} opts={[[false, "Open"], [true, "Folded"]]} />
         </Row>
-      </section>
+      </Section></div>
 
-      <section className="set-group" id="set-time">
-        <h2>Time and numbers</h2>
+      <div className="set-group" id="set-time"><Section id="settings.time" title="Time and numbers">
         <Row what="Clock" why="System uses this browser's own format">
           <Pick k="clock" s={s} set={set} opts={[["system", "System"], ["24h", "24 h"], ["12h", "12 h"]]} />
         </Row>
@@ -176,10 +173,9 @@ export function SettingsView({ onResetLayout }: { onResetLayout: () => void }) {
         <Row what="Numbers" why="Separators in counts and times; Money keeps the Vietnamese format">
           <Pick k="numbers" s={s} set={set} opts={[["system", "System"], ["en", "1,234.5"], ["vi", "1.234,5"]]} />
         </Row>
-      </section>
+      </Section></div>
 
-      <section className="set-group" id="set-phone">
-        <h2>Phone (560 px and narrower)</h2>
+      <div className="set-group" id="set-phone"><Section id="settings.phone" title="Phone (560 px and narrower)">
         <Row what="Size" why="The phone's own page size">
           <Slide k="phoneSize" s={s} set={set} step={1} unit=" px" />
         </Row>
@@ -189,18 +185,16 @@ export function SettingsView({ onResetLayout }: { onResetLayout: () => void }) {
         <Row what="Plan graph" why="Off: plans open as a list on the phone and the graph is not drawn">
           <Pick k="phoneGraph" s={s} set={set} opts={[[true, "On"], [false, "Off"]]} />
         </Row>
-      </section>
+      </Section></div>
 
-      <section className="set-group" id="set-speed">
-        <h2>Speed</h2>
+      <div className="set-group" id="set-speed"><Section id="settings.speed" title="Speed">
         <Row what="Pictures" why="Ask the PC for a picture only when it scrolls into view">
           <Pick k="lazyImages" s={s} set={set} opts={[[false, "Load all"], [true, "When in view"]]} />
         </Row>
         <p className="small muted">A hidden browser tab already asks the bridge nothing until it shows again. Hidden tabs load nothing.</p>
-      </section>
+      </Section></div>
 
-      <section className="set-group" id="set-reset">
-        <h2>Reset and files</h2>
+      <div className="set-group" id="set-reset"><Section id="settings.reset" title="Reset and files">
         <Row what="Reset" why="Back to the default look; folds and panel widths each on their own">
           <button className="danger" disabled={!changed.length} onClick={() => set(DEFAULTS)}>Reset all settings</button>
           <button className="chip" onClick={() => {
@@ -216,12 +210,11 @@ export function SettingsView({ onResetLayout }: { onResetLayout: () => void }) {
         </Row>
         {msg && <p className="small">{msg}</p>}
         <p className="small muted">Changed: {changed.length ? changed.map(([k, v]) => `${k} ${JSON.stringify(v)}`).join(" · ") : "none"}</p>
-      </section>
+      </Section></div>
 
-      <section className="set-group" id="set-avatar">
-        <h2>hayaku avatar</h2>
+      <div className="set-group" id="set-avatar"><Section id="settings.avatar" title="hayaku avatar">
         <AvatarPacks />
-      </section>
+      </Section></div>
     </div>
   );
 }

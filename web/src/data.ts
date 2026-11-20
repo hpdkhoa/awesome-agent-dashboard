@@ -187,7 +187,7 @@ export type Run = {
   target?: string;
   cwd?: string;
   status: "new" | "waiting" | "running" | "stopping" | "done" | "stopped" | "failed" | "lost" | "cancelled" | "paused";
-  action: "start" | "stop" | "message" | "check" | "plan" | "approve_generated" | "continue" | "auto_continue" | "add_root" | "search" | "local";
+  action: "start" | "stop" | "message" | "check" | "plan" | "approve_generated" | "continue" | "auto_continue" | "add_root" | "search" | "local" | "phase";
   // plan 1c08f4c2 s3/s4 local run (bridge localrun.py): this machine's Ollama; tokens, never dollars (s5: "$0")
   files?: string[]; promptTokens?: number | null; outputTokens?: number | null; tokensPerSec?: number | null; loadMs?: number | null;
   numCtx?: number | null; stoppedOnRepeat?: boolean; context?: { name: string; chars: number; sent: number; chunks: string | null }[];
@@ -720,12 +720,13 @@ export const runAllSteps = (plan: Plan, w?: RunWith) => {
 export const stopChain = (planId: string) =>
   setDoc(doc(db, "planChains", planId), { state: "stopped", reason: "stopped by the owner", endedAt: new Date().toISOString() }, { merge: true });
 
-// The owner's order to move the plan's phase (phases.ts): a plain message; the session records a plain version.
-export const sendPhaseOrder = (plan: Plan, text: string, order: string) => {
+// The owner's order to move the plan's phase (phases.ts): the bridge writes the plain version itself (runs.py _phase), no
+// Claude run; the command goes when done, or stays failed with its error.
+export const sendPhaseOrder = (plan: Plan, to: string, order: string) => {
   const id = newId();
   return setDoc(doc(db, "commands", id), {
-    id, action: "message", machine: plan.machine, sessionId: plan.sessionId, cwd: plan.cwd, prompt: text, ownerText: order,
-    planId: plan.id, phaseOrder: true, status: "new", createdAt: new Date().toISOString(),
+    id, action: "phase", machine: plan.machine, planId: plan.id, phase: to, ownerText: order,
+    phaseOrder: true, status: "new", createdAt: new Date().toISOString(),
   });
 };
 

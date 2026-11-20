@@ -62,7 +62,7 @@ export function Example({ e, cwd }: { e: Ex; cwd: string }) {
         </>
       )}
       {e.type === "text" && <Md className="ex-draft" text={e.draft} cwd={cwd} />}
-      {e.note && <p className="small muted">{e.note}</p>}
+      {e.note && <Md className="small muted" text={e.note} cwd={cwd} />}
     </div>
   );
 }

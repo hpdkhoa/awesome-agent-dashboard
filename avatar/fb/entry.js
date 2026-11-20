@@ -7,6 +7,7 @@
 // Sign-in: the owner's Google account through the same localhost page the bridge uses (main.rs auth.rs); the Firebase
 // user it returns lives in the OS key store and only in this page's memory (session storage) while the app runs.
 import { initializeApp } from "firebase/app";
+import { mdHtml } from "./md.js";
 import { initializeAuth, browserSessionPersistence, onIdTokenChanged, signOut } from "firebase/auth";
 import { getFirestore, collection, doc, getDocs, limit, onSnapshot, orderBy, query, setDoc, where } from "firebase/firestore";
 
@@ -298,3 +299,5 @@ async function packs(name, body) {
 // reads/writes: Firestore bills one read per changed record delivered (at least one per answer); counted for the checks
 window.FB = { start, stop, sessions, send, packs, envKeys, envSet, runState, runText, replyText, needsOpen, needsClose, needsWrite, planTitle, picture, fileText, fileOpen, needAsks: 0, pics: 0, ratesOpen, ratesClose, saveFx, saveGold, signedIn: () => !!(auth && auth.currentUser), reads: 0, writes: 0,
   boxAsks: 0, boxes: () => boxes.map((b) => b.name) };
+// the text view (md.js): markdown, tables, safe HTML and drawings, the same rules as the page
+window.MD = mdHtml;

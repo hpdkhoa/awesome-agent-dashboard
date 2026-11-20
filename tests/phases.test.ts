@@ -1,13 +1,14 @@
 // The plan's phases: a divider where each phase begins, old records count as Explore, and the owner's order text.
 import { describe, expect, it } from "vitest";
 import type { PlanVersion } from "../web/src/data";
-import { phaseOf, phaseOrder, phasePrompt, phaseStarts, PHASES } from "../web/src/phases";
+import { phaseOf, phaseOrder, phaseStarts, PHASES } from "../web/src/phases";
 
 const v = (n: number, phase?: PlanVersion["phase"]) => ({ id: `p_v${n}`, planId: "p", n, text: "", note: "", createdAt: "", phase }) as PlanVersion;
 
 describe("phases", () => {
-  it("lists the owner's five phases in order, with the owner's words", () => {
-    expect(PHASES.map((p) => p.id)).toEqual(["explore", "build", "verify", "remove", "optimize"]);
+  it("lists the owner's six phases in order, with the owner's words", () => {
+    expect(PHASES.map((p) => p.id)).toEqual(["explore", "build", "verify", "remove", "optimize", "done"]);
+    expect(PHASES[5].means).toContain("Open/Closed status stays separate");
     expect(PHASES[1].means).toContain("the result of build phase will be the MVP");
   });
 
@@ -21,9 +22,8 @@ describe("phases", () => {
     expect(phaseOf(v(1))).toBe("explore");
   });
 
-  it("sends the owner's order and asks for a plain version", () => {
+  it("words the owner's order the bridge records", () => {
     expect(phaseOrder("build")).toBe("Move the plan to phase Build.");
-    expect(phasePrompt("build")).toContain('plan_version(phase="build"');
-    expect(phasePrompt("build")).toContain("no text or parts");
+    expect(phaseOrder("done")).toBe("Move the plan to phase Done.");
   });
 });

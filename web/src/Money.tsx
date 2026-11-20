@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Section } from "./Section";
 import {
   addEntry, ASSET_LABEL, ASSET_SHORT, ASSETS, assetOf, fmt, holdings, parseAmount, syncAll, UNIT, valuations, vnd,
   type Asset, type Entry, type FxSnapshot, type GoldPrice, type SyncLine,
@@ -44,7 +45,7 @@ export function EntryForm({ fx, gold }: { fx: FxSnapshot[] | null; gold: GoldPri
 
   return (
     <div className="pad form">
-      <h2>Add money in or out</h2>
+      <Section id="money.add" title="Add money in or out">
       <select value={asset} onChange={(e) => setAsset(e.target.value as Asset)}>
         {ASSETS.map((x) => (
           <option key={x} value={x}>
@@ -82,6 +83,7 @@ export function EntryForm({ fx, gold }: { fx: FxSnapshot[] | null; gold: GoldPri
         </p>
       ))}
       {msg && <p className="small muted">{msg}</p>}
+      </Section>
     </div>
   );
 }
@@ -164,7 +166,7 @@ export function MoneyView({ entries, fx, gold }: { entries: Entry[]; fx: FxSnaps
         dollars and euros at Vietcombank's cash buy. Paid is the average price paid; an "out" entry takes its share at that
         average.
       </p>
-      <h2>Entries</h2>
+      <Section id="money.entries" title="Entries" extra={entries.length}>
       <table>
         <tbody>
           {entries.map((e) => (
@@ -189,6 +191,7 @@ export function MoneyView({ entries, fx, gold }: { entries: Entry[]; fx: FxSnaps
           )}
         </tbody>
       </table>
+      </Section>
     </article>
   );
 }

@@ -2,6 +2,7 @@
 // 2026-11-19: "Done waits for its receipt", "All done before F4 without receipt"). A step's header shows what made it
 // done: its receipt (the ticked check's exit 0, or the LLM check's pass of its pictures), "checking" while it waits,
 // or "no receipt" on a step done before F4. A step done before F4 whose ticked check last exited 0 shows that run.
+import { Md } from "./Markdown";
 import { Clamp } from "./Clamp";
 import { checkTicked, type PlanStep, type Receipt, type StepCheck } from "./data";
 import { dt } from "./fmt";
@@ -53,7 +54,7 @@ export function ReceiptBox({ sv, c }: { sv?: PlanStep; c?: StepCheck }) {
           {r.marks.map((m) => <li key={m.path}><span className={"check-chip " + m.verdict}>{m.verdict}</span> {m.path.split(/[\\/]/).pop()} · {m.why}</li>)}
         </ul>
       )}
-      {r.note && <p className="small muted">{r.note}</p>}
+      {r.note && <Md className="small muted" text={r.note} />}
       {r.kind === "pictures" && <Findings findings={r.findings} />}
     </div>
   );

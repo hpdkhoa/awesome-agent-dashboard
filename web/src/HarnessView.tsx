@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Md } from "./Markdown";
 import { tickHarness, useHarness, type Plan, type PlanVersion } from "./data";
 import { approved, harnessCount, harnessLine } from "./harness";
 import { diffLines } from "./planDiff";
@@ -37,7 +38,7 @@ export function HarnessSection({ plan, v, parent, stale }: { plan: Plan; v: Plan
               <label>
                 <input type="checkbox" checked={ok} disabled={!current || ticks === null}
                   onChange={(e) => tickHarness(plan.id, h, e.target.checked, v.n).catch((x) => setError(String(x?.code ?? x)))} />{" "}
-                <b>{h.id}</b> <span className="tag">{h.kind}</span> {h.item}
+                <b>{h.id}</b> <span className="tag">{h.kind}</span> <Md line text={h.item} />
                 {!ok && phaseOf(plan) !== "explore" && <span className="small bad"> · not approved: left out of Build</span>}
               </label>
             </li>

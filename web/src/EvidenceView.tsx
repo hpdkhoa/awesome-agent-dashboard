@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Md } from "./Markdown";
 import { askEvidence, type EvidenceSet, type Plan, type PlanStep, type PlanVersion, type StepEvidence } from "./data";
 import { LocalImg } from "./FileView";
 import { Section } from "./Section";
@@ -67,7 +68,7 @@ export function StepEvidenceCard({ plan, id, title, done, e }: { plan: Plan; id:
       {last && (
         <>
           <p className="small muted">{source(last)} · {when(last.at)}{last.stepVersion ? ` · step version ${last.stepVersion}` : ""}</p>
-          {checkedLast && <p className="small"><span className={"check-chip " + ck!.overall}>LLM {ck!.overall}</span> {ck!.note} <span className="muted">· {when(ck!.at)}</span></p>}
+          {checkedLast && <p className="small"><span className={"check-chip " + ck!.overall}>LLM {ck!.overall}</span> <Md line text={ck!.note} /> <span className="muted">· {when(ck!.at)}</span></p>}
           {ck && !checkedLast && <p className="small muted">The last LLM check ({ck.overall}, {when(ck.at)}) was on older pictures: LLM check again.</p>}
           {ck && <Findings findings={ck.findings} />}
           <Gallery set={last} cwd={plan.cwd} marks={ck} />
