@@ -237,8 +237,28 @@ export function ReportBoard({ plan, v, steps, evidence, asked, onOpenItem, stale
   // Needs you and Latest result
   const boardIds = b ? [...(b.src?.whatFor ?? []), ...ideaSrc.flat(), ...feats.flatMap((f) => f.steps), ...mats.map((m) => m.path ?? "").filter(Boolean),
     ...failed.map((st) => st.id), ...waiting.map((q) => q.stepId ?? "").filter(Boolean), ...(openTotal > 0 ? ["leftover"] : []),
-    ...(latest ? [latest.sv.stepId] : [])] : [];
+    ...(latest ? [latest.sv.stepId] : []), ...(b.stepCards ?? []).flatMap((c) => [c.step, ...(c.src ?? [])])] : [];
   const reports = rows.filter((st) => (steps.find((x) => x.stepId === st.id)?.versions ?? []).length > 0).map((st) => ({ id: st.id, title: st.title }));
+  const stOf = (id: string) => steps.find((x) => x.stepId === id)?.state ?? "next";
+  // s8 step cards (the owner's pick "A: step cards For / How / Result"; the owner's words 2026-11-21: "what the step
+  // for, how it will do, what is the result or outcome or benefit"): one card per step, For and How from board data,
+  // Result from the step's newest report (its first 2 numbers, else its key number), grouped by state in chunks of 4
+  const CARD_STATE: Record<string, string> = { done: "done", now: "doing", checking: "doing", failed: "failed", next: "next" };
+  const CARD_GROUPS: [string, string][] = [["doing", "Steps running"], ["failed", "Steps failed"], ["next", "Steps not run yet"], ["done", "Steps done"]];
+  const cardOf = (id: string) => b?.stepCards?.find((c) => c.step === id);
+  const resultOf = (id: string) => {
+    const sv = steps.find((x) => x.stepId === id);
+    if (!sv || !sv.versions.length) return "not run yet";
+    const rep = [...sv.versions].reverse().find((x) => x.report)?.report ?? null;
+    const nums = (rep?.numbers ?? []).slice(0, 2).map((n) => `${n.metric}: ${n.before ? `${n.before} → ` : ""}${n.after}`);
+    if (nums.length) return nums.join(" · ");
+    // a step not done or failed has no result yet: never a number picked from a running or stopped reply
+    if (sv.state === "next") return "not run yet";
+    if (sv.state !== "done" && sv.state !== "failed") return "running, no result yet";
+    return keyNumber(lastOf(sv)?.reply ?? "", rep) || "no numbers in the report";
+  };
+  const cards = rows.map((st) => ({ st, c: cardOf(st.id), state: CARD_STATE[stOf(st.id)] ?? "next", result: resultOf(st.id) }));
+  const cardKey = (x: (typeof cards)[number]) => `card|${x.st.id}|${x.state}|${x.c?.for ?? ""}|${x.c?.how ?? ""}|${x.result}`;
   // s7 rule B7, the owner's pick "Bridge, all devices": each line as a key; a key the last look did not hold is changed.
   // The last look is read once when the board opens; the lines shown are saved after they stay the same for 3 s.
   const keys = {
@@ -247,7 +267,7 @@ export function ReportBoard({ plan, v, steps, evidence, asked, onOpenItem, stale
   };
   const featKey = (f: { feature: string; state: FeatureState }) => `feat|${f.feature}|${f.state}`;
   const allKeys = [keys.what, ...keys.idea, ...feats.map(featKey), ...failed.map((st) => `failed|${st.id}`),
-    ...waiting.map((q) => `wait|${q.id}`), ...(openTotal ? [keys.open] : []), keys.latest].filter(Boolean);
+    ...waiting.map((q) => `wait|${q.id}`), ...(openTotal ? [keys.open] : []), keys.latest, ...cards.map(cardKey)].filter(Boolean);
   const seen = useBoardSeen(plan.id);
   const isCurrent = v.n === plan.current;
   const prev = useMemo(() => (seen.prev ? new Set(seen.prev.lines) : null), [seen.prev]);
@@ -263,7 +283,6 @@ export function ReportBoard({ plan, v, steps, evidence, asked, onOpenItem, stale
   // s8 (plan 44fc4979), the owner's pick "4-line answer strip": the glance test's 4 questions answered on top, one
   // line each: For (What for), Done (steps done of all), Next (the step running now, else the first not done in plan
   // order), Waits for you (failed steps, questions waiting, open items). The owner's words: "I don't see it yet".
-  const stOf = (id: string) => steps.find((x) => x.stepId === id)?.state ?? "next";
   const doneIds = rows.filter((st) => stOf(st.id) === "done").map((st) => st.id);
   const nowRows = rows.filter((st) => ["now", "checking"].includes(stOf(st.id)));
   const nextRows = nowRows.length ? nowRows : rows.filter((st) => !["done", "failed"].includes(stOf(st.id))).slice(0, 1);
@@ -305,6 +324,21 @@ export function ReportBoard({ plan, v, steps, evidence, asked, onOpenItem, stale
                 ? <><b data-state="need">Waits for you</b> <span data-state="need">{waitText}</span></>
                 : <><b data-state="done">Waits for you</b> nothing</>}</p>
             </SrcLine>
+          </div>
+          <div className="board-box" data-step-cards>
+            <p className="board-lab">Steps · For / How / Result</p>
+            {CARD_GROUPS.map(([state, head]) => (
+              <Chunks key={state} head={head} state={state} wrap="step-cards" items={cards.filter((x) => x.state === state).map((x) => (
+                <div key={x.st.id} className="step-card" data-state={state} data-step-card={x.st.id}>
+                  <SrcLine ids={[x.st.id, ...(x.c?.src ?? [])]} ctx={ctx} changed={changed(cardKey(x))}>
+                    <p className="step-card-head"><b data-state={state}>{x.st.id}</b> {x.st.title}</p>
+                    <p data-card-line="for"><b>For</b> {x.c?.for || <span className="muted">not written yet</span>}</p>
+                    <p data-card-line="how"><b>How</b> {x.c?.how || <span className="muted">not written yet</span>}</p>
+                    <p data-card-line="result"><b>Result</b> <span data-state={state === "next" ? "next" : state}>{x.result}</span></p>
+                  </SrcLine>
+                </div>
+              ))} />
+            ))}
           </div>
           {latest && (
             <div className="board-box" data-latest>
@@ -393,7 +427,10 @@ export function ReportBoard({ plan, v, steps, evidence, asked, onOpenItem, stale
       {b && (  // s5: after the board's content, so What for stays near the top (rule B1)
         <div className="board-box"><p className="board-lab">Rules and glance</p>
           <RulesBox check={v.boardCheck} ctx={ctx} />
-          <GlanceTest plan={plan} version={v.n} />
+          {/* s8, the owner's pick "Fold it under the board": the board shows the answers; the test sits folded here */}
+          <Section id="plan.board.glance" title="Glance test" open={false} extra="folded: the board above shows the answers">
+            <GlanceTest plan={plan} version={v.n} />
+          </Section>
         </div>
       )}
     </Section>

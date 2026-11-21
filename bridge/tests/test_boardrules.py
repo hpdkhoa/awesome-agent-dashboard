@@ -59,3 +59,17 @@ def test_glance_score_from_the_json_line():
     assert got["score"] == 1.5 and [m["q"] for m in got["marks"]] == ["whatFor", "done", "next", "blocked"]
     assert got["marks"][3]["verdict"] == "wrong"
     assert parse_score("no json") is None
+
+
+def test_step_cards_kept_and_checked():
+    # s8 (plan 44fc4979), the owner's pick "A: step cards For / How / Result"
+    import pytest
+    from agent_bridge.inbox import clean_board, board_markdown
+    base = {"what_for": "x", "product": [{"feature": "f", "steps": ["s1", "s2"]}]}
+    b = clean_board({**base, "step_cards": [{"step": "s1", "for": "see gaps", "how": "count items", "src": ["goal"]}]}, ["s1", "s2"])
+    assert b["stepCards"] == [{"step": "s1", "for": "see gaps", "how": "count items", "src": ["goal"]}]
+    assert "Step card s1: For see gaps" in board_markdown(b)
+    assert clean_board(b, ["s1", "s2"])["stepCards"] == b["stepCards"]  # a cleaned board re-sent keeps its cards
+    with pytest.raises(ValueError):
+        clean_board({**base, "step_cards": [{"step": "s9", "for": "a", "how": "b"}]}, ["s1", "s2"])
+    assert "stepCards" not in clean_board(base, ["s1", "s2"])

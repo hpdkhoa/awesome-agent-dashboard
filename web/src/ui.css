@@ -218,6 +218,12 @@ span[data-state], b[data-state], p[data-state], .board-feat[data-state] .board-k
 .glance-strip p[data-strip-line] { margin: 0.15rem 0; font-size: 1.05rem; } .glance-strip b { margin-right: 0.4rem; }
 .board-box[data-latest] img { max-height: 14rem; max-width: 100%; width: auto; object-fit: contain; }
 .latest-nums { border-collapse: collapse; margin: 0.3rem 0; } .latest-nums td { padding: 0.1rem 0.6rem 0.1rem 0; } .latest-nums .num { text-align: right; }
+/* s8 step cards (plan 44fc4979, "A: step cards For / How / Result") */
+.step-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr)); gap: 0.5rem; margin-top: 0.3rem; }
+.step-card { border: 2px solid var(--st, var(--line)); border-radius: 8px; padding: 0.4rem 0.6rem; background: var(--bg); line-height: 1.35; }
+.step-card p { margin: 0.12rem 0; } .step-card p[data-card-line] b { margin-right: 0.35rem; color: var(--second); }
+.step-card .src-row { flex-direction: column; align-items: stretch; gap: 0.2rem; }
+.step-card .src-text { display: flex; flex-direction: column; }
 .board-group { margin: 0.25rem 0 0.4rem; } .board-sub { margin: 0.35rem 0 0.15rem; }
 /* rule B7: the "changed" mark carries no state colour, only an outline in the text colour */
 .changed-mark { font-size: 0.72rem; line-height: 1.5; padding: 0 0.45rem; border-radius: 999px; border: 1px solid var(--fg); color: var(--fg); font-weight: bold; white-space: nowrap; }

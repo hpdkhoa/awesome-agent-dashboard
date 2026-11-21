@@ -134,7 +134,10 @@ export type Material = { name: string; kind: "story" | "material" | "file"; path
 export type Board = { whatFor: string; idea: string[]; product: { feature: string; steps: string[] }[]; materials?: Material[];
   src?: { whatFor?: string[]; idea?: string[][] };
   // s7 (plan 44fc4979), the owner's pick "By meaning" (rule B2): Idea over 4 lines in named sub-groups, in order
-  ideaGroups?: { head: string; count: number }[] };
+  ideaGroups?: { head: string; count: number }[];
+  // s8 (plan 44fc4979), the owner's pick "A: step cards For / How / Result": per step what it is for and how it works,
+  // written by the session with sources; the Result is read from the step's newest report on the page
+  stepCards?: { step: string; for: string; how: string; src?: string[] }[] };
 // The message kinds on a plan: four change it (a new plan version), Q&A never does; Action does the work asked and makes
 // no version (step i11, the owner's words, 2026-11-16: "need action type to cover this case when I ask you to perform an action").
 export type PlanKind = "qa" | "goal" | "step" | "rule" | "lesson" | "action";
