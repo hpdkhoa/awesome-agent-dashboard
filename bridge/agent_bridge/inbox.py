@@ -223,8 +223,9 @@ def clean_parts(parts: dict) -> dict:
 BOARD_SHAPE = ('{"what_for": one line, "idea": [short lines], "product": [{"feature": short name, '
                '"steps": [the step ids that build it]}], "materials": [{"name", "path" (a full path; none for a material '
                'given as text), "kind": "story" | "material" | "file", "note"}] (optional), "step_cards": [{"step": step id, "for": what the '
-               'step is for (its benefit), "how": how it does it, "src": [source ids]}] (one per step; the page adds its '
-               'Result from the newest step report)}')
+               'step is for (its benefit), "how": how it does it, "done": what was done, in words, "missed": what was missed, in words, '
+               '"src": [source ids]}] (one per step; missed falls back to the open items of the step report), '
+               '"glossary": [{"group", "term", "means"}] (every term the plan uses or makes, in this plan\'s meaning)}')
 
 # Materials on the board (the owner's words, 2026-11-17: "Add material section in report board, in this section only
 # keep the latest version of each file/material and stories"; pick "sửa web + bridge chọn session ghi"): the session
@@ -359,9 +360,27 @@ def clean_board(board, step_ids: list[str]) -> dict:
     has_src = bool(src["whatFor"]) or any(src["idea"])
     groups = clean_idea_groups(board.get("idea_groups", board.get("ideaGroups")))
     cards = clean_step_cards(board.get("step_cards", board.get("stepCards")), step_ids)
+    gloss = clean_glossary(board.get("glossary"))
     return {"whatFor": what, "idea": idea, "product": product[:30], **({"materials": mats} if mats else {}),
             **({"src": src} if has_src else {}), **({"ideaGroups": groups} if groups else {}),
-            **({"stepCards": cards} if cards else {})}
+            **({"stepCards": cards} if cards else {}), **({"glossary": gloss} if gloss else {})}
+
+
+def clean_glossary(items) -> list[dict]:
+    """The plan's glossary (plan 44fc4979 s8, the owner's words 2026-11-21: "I'll need a grossary to look up for the word
+    means ... all new terms or objects mentioned in this plan or created in this plan"; pick "C: Both (section + hover)"):
+    [{"group", "term", "means"}] in order; the page lists it folded and shows the meaning on hover."""
+    out, seen = [], set()
+    for g in items or []:
+        if not isinstance(g, dict):
+            continue
+        term = redact(str(g.get("term", "") or "").strip(), 60)
+        means = redact(str(g.get("means", "") or "").strip(), 300)
+        group = redact(str(g.get("group", "") or "").strip(), 40)
+        if term and means and term.lower() not in seen:
+            seen.add(term.lower())
+            out.append({**({"group": group} if group else {}), "term": term, "means": means})
+    return out[:150]
 
 
 def clean_step_cards(cards, step_ids: list[str]) -> list[dict]:
@@ -376,6 +395,9 @@ def clean_step_cards(cards, step_ids: list[str]) -> list[dict]:
         sid = str(c.get("step", c.get("id", "")) or "").strip()
         fr = redact(str(c.get("for", "") or "").strip(), 160)
         how = redact(str(c.get("how", "") or "").strip(), 160)
+        # the owner's words 2026-11-21: "the result must do as i read it i know what has been done and what missed"
+        done = redact(str(c.get("done", "") or "").strip(), 240)
+        missed = redact(str(c.get("missed", "") or "").strip(), 240)
         if not sid or not (fr or how):
             continue
         if sid not in step_ids:
@@ -384,7 +406,8 @@ def clean_step_cards(cards, step_ids: list[str]) -> list[dict]:
         src = [src] if isinstance(src, str) else src
         src = [str(x).strip().strip("`") for x in src if str(x).strip()][:8]
         bad += check_sources(src, step_ids)
-        out.append({"step": sid, "for": fr, "how": how, **({"src": src} if src else {})})
+        out.append({"step": sid, "for": fr, "how": how, **({"done": done} if done else {}), **({"missed": missed} if missed else {}),
+                    **({"src": src} if src else {})})
     if bad:
         raise ValueError("board.step_cards: steps or source ids not understood: " + ", ".join(bad))
     return out[:40]
@@ -425,7 +448,9 @@ def board_markdown(b: dict) -> str:
         if i in heads:
             lines.append(f"- Idea group: {heads[i]}")
         lines.append(f"- Idea: {x}{tag(ideas[i] if i < len(ideas) else [])}")
-    lines += [f"- Step card {c['step']}: For {c['for']} · How {c['how']}{tag(c.get('src') or [])}" for c in b.get("stepCards") or []]
+    lines += [f"- Step card {c['step']}: For {c['for']} · How {c['how']}" + (f" · Done {c['done']}" if c.get("done") else "")
+              + (f" · Missed {c['missed']}" if c.get("missed") else "") + tag(c.get("src") or []) for c in b.get("stepCards") or []]
+    lines += [f"- Glossary: {g['term']}: {g['means']}" for g in b.get("glossary") or []]
     lines += [f"- Feature: {f['feature']} (steps {', '.join(f['steps']) or 'none'})" for f in b.get("product", [])]
     return "\n".join(lines)
 

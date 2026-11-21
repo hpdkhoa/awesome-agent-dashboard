@@ -73,3 +73,15 @@ def test_step_cards_kept_and_checked():
     with pytest.raises(ValueError):
         clean_board({**base, "step_cards": [{"step": "s9", "for": "a", "how": "b"}]}, ["s1", "s2"])
     assert "stepCards" not in clean_board(base, ["s1", "s2"])
+
+
+def test_glossary_and_card_done_missed_kept():
+    # s8: "C: Both (section + hover)" glossary; cards carry Done / Missed in words
+    from agent_bridge.inbox import clean_board, board_markdown
+    base = {"what_for": "x", "product": [{"feature": "f", "steps": ["s1"]}]}
+    b = clean_board({**base, "glossary": [{"group": "Board", "term": "Chip", "means": "a source label"}, {"term": "chip", "means": "dup"}],
+                     "step_cards": [{"step": "s1", "for": "a", "how": "b", "done": "did it", "missed": "nothing"}]}, ["s1"])
+    assert b["glossary"] == [{"group": "Board", "term": "Chip", "means": "a source label"}]
+    assert b["stepCards"][0]["done"] == "did it" and b["stepCards"][0]["missed"] == "nothing"
+    assert "Glossary: Chip: a source label" in board_markdown(b)
+    assert clean_board(b, ["s1"]) == b

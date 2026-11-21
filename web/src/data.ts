@@ -137,7 +137,9 @@ export type Board = { whatFor: string; idea: string[]; product: { feature: strin
   ideaGroups?: { head: string; count: number }[];
   // s8 (plan 44fc4979), the owner's pick "A: step cards For / How / Result": per step what it is for and how it works,
   // written by the session with sources; the Result is read from the step's newest report on the page
-  stepCards?: { step: string; for: string; how: string; src?: string[] }[] };
+  stepCards?: { step: string; for: string; how: string; done?: string; missed?: string; src?: string[] }[];
+  // s8 glossary (the owner's pick "C: Both (section + hover)"): every term the plan uses or makes, in its meaning here
+  glossary?: { group?: string; term: string; means: string }[] };
 // The message kinds on a plan: four change it (a new plan version), Q&A never does; Action does the work asked and makes
 // no version (step i11, the owner's words, 2026-11-16: "need action type to cover this case when I ask you to perform an action").
 export type PlanKind = "qa" | "goal" | "step" | "rule" | "lesson" | "action";

@@ -37,6 +37,25 @@ function label(id: string): string {
 }
 
 // own: a line that is itself a stored item (an inbox question): its chip opens that item, its own full text
+// s8 glossary (the owner's pick "C: Both (section + hover)"): the meaning of a term from the plan's board glossary
+export function gloss(parts: Parts | undefined, ...names: string[]): string {
+  const g = parts?.board?.glossary ?? [];
+  for (const n of names) {
+    const hit = g.find((x) => x.term.toLowerCase() === n.toLowerCase()) ?? g.find((x) => x.term.toLowerCase().startsWith(n.toLowerCase()));
+    if (hit) return `${hit.term}: ${hit.means}`;
+  }
+  return "";
+}
+const KIND_TERM: Record<string, (id: string) => string[]> = {
+  record: (id) => [id.replace(/\d+$/, "N")], step: () => ["Step (s1", "Step"], part: () => ["Plan parts"], file: () => ["Truth (source)", "Truth"],
+};
+function chipTitle(id: string, ctx: SrcCtx): string {
+  const k = srcKind(id);
+  const lines = [gloss(ctx.parts, "Chip (source chip)", "Chip"), k ? gloss(ctx.parts, ...(KIND_TERM[k]?.(id) ?? [])) : "",
+    `source: ${id} · click to open its full text under the line`];
+  return lines.filter(Boolean).join("\n");
+}
+
 export function SrcLine({ ids, ctx, children, className, own, changed }: {
   ids: string[] | null; ctx: SrcCtx; children: ReactNode; className?: string; own?: { label: string; open: () => void };
   changed?: boolean;  // s7 rule B7: the line differs from the owner's last look
@@ -47,12 +66,12 @@ export function SrcLine({ ids, ctx, children, className, own, changed }: {
       <div className="src-row">
         <div className="src-text">{children}</div>
         <span className="src-chips">
-          {changed && <span className="changed-mark" title="changed since your last look at this board">changed</span>}
+          {changed && <span className="changed-mark" title={gloss(ctx.parts, "Changed mark") || "changed since your last look at this board"}>changed</span>}
           {own && <button className="src-chip k-own" data-src="own" title="source: this item itself · click to open it" onClick={own.open}>{own.label}</button>}
           {ids?.length
             ? ids.map((id) => (
               <button key={id} className={"src-chip k-" + (srcKind(id) || "bad") + (open === id ? " on" : "")} data-src={id}
-                title={`source: ${id} · click to open its full text under the line`} onClick={() => setOpen(open === id ? null : id)}>
+                title={chipTitle(id, ctx)} onClick={() => setOpen(open === id ? null : id)}>
                 {label(id)}
               </button>
             ))

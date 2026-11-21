@@ -224,6 +224,13 @@ span[data-state], b[data-state], p[data-state], .board-feat[data-state] .board-k
 .step-card p { margin: 0.12rem 0; } .step-card p[data-card-line] b { margin-right: 0.35rem; color: var(--second); }
 .step-card .src-row { flex-direction: column; align-items: stretch; gap: 0.2rem; }
 .step-card .src-text { display: flex; flex-direction: column; }
+/* s8 glossary hover (the owner's pick "C: Both (section + hover)"): dotted underline, meaning on hover, focus or tap */
+.term { border-bottom: 1px dotted currentColor; cursor: help; position: relative; outline: none; }
+.term:hover::after, .term:focus::after { content: attr(data-tip); position: absolute; left: 0; top: 1.4em; z-index: 20; width: max-content;
+  max-width: 22rem; white-space: normal; background: var(--card); color: var(--fg); border: 1px solid var(--line); border-radius: 6px;
+  padding: 0.35rem 0.5rem; font-size: 0.85rem; font-weight: normal; line-height: 1.35; text-transform: none; letter-spacing: 0;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
+.gloss-line { margin: 0.15rem 0; } .gloss-line b { margin-right: 0.35rem; }
 .board-group { margin: 0.25rem 0 0.4rem; } .board-sub { margin: 0.35rem 0 0.15rem; }
 /* rule B7: the "changed" mark carries no state colour, only an outline in the text colour */
 .changed-mark { font-size: 0.72rem; line-height: 1.5; padding: 0 0.45rem; border-radius: 999px; border: 1px solid var(--fg); color: var(--fg); font-weight: bold; white-space: nowrap; }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   PLAN_KINDS, runAllSteps, runStep, sendPlanMessage, setMaxTogether, setStepPick, stopChain, useHarness, usePlanChain, usePlanPicks, usePlanSteps,
   EFFORTS, exactEffort, exactModel, MODELS, useRunPrefs, type Fresh, type PlanPicks, type StepPick,
@@ -30,7 +30,7 @@ import { keyNumber, openItems, sortCheck, sortReply, type Item, type Sorted } fr
 import { useStepEvidence, type Material, type StepEvidence, type StepReport } from "./data";
 import { dt, tm } from "./fmt";
 import { boardMaterials, gathered } from "./materials";
-import { SrcLine, type SrcCtx } from "./SourceChip";
+import { gloss, SrcLine, type SrcCtx } from "./SourceChip";
 import { CoverageBar } from "./Coverage";
 import { Chunks, GlanceTest, RulesBox } from "./BoardRules";
 import { saveBoardSeen, useBoardSeen } from "./data";
@@ -211,6 +211,12 @@ function featureOf(ids: string[], steps: PlanStep[]) {
   return { state, open, key: newest ? keyNumber(newest.reply, newest.report) : "" };
 }
 
+// s8 glossary hover (the owner's pick "C: Both (section + hover)"): a board label with its meaning on hover or tap
+function Term({ parts, name, children }: { parts?: Parts; name: string; children: ReactNode }) {
+  const tip = gloss(parts, name);
+  return tip ? <span className="term" tabIndex={0} data-tip={tip} data-term={name}>{children}</span> : <>{children}</>;
+}
+
 export function ReportBoard({ plan, v, steps, evidence, asked, onOpenItem, stale }: {
   plan: Plan; v: PlanVersion; steps: PlanStep[]; evidence: StepEvidence[]; asked: InboxItem[]; onOpenItem: (id: string) => void; stale?: string;
 }) {
@@ -246,19 +252,18 @@ export function ReportBoard({ plan, v, steps, evidence, asked, onOpenItem, stale
   const CARD_STATE: Record<string, string> = { done: "done", now: "doing", checking: "doing", failed: "failed", next: "next" };
   const CARD_GROUPS: [string, string][] = [["doing", "Steps running"], ["failed", "Steps failed"], ["next", "Steps not run yet"], ["done", "Steps done"]];
   const cardOf = (id: string) => b?.stepCards?.find((c) => c.step === id);
-  const resultOf = (id: string) => {
+  // the owner's words 2026-11-21: "the result must do as i read it i know what has been done and what missed, not
+  // number with meaningless": Result = Done (what was done, in words, from the card) + Missed (the card's words, else
+  // the step report's open items); the numbers stay behind the step chip
+  const openOf = (id: string) => { const l = lastOf(steps.find((x) => x.stepId === id)); return l ? openItems(l.reply, l.report).map((t) => t.split(" → ")[0]) : []; };
+  const resultOf = (id: string, c?: { done?: string; missed?: string }) => {
     const sv = steps.find((x) => x.stepId === id);
-    if (!sv || !sv.versions.length) return "not run yet";
-    const rep = [...sv.versions].reverse().find((x) => x.report)?.report ?? null;
-    const nums = (rep?.numbers ?? []).slice(0, 2).map((n) => `${n.metric}: ${n.before ? `${n.before} → ` : ""}${n.after}`);
-    if (nums.length) return nums.join(" · ");
-    // a step not done or failed has no result yet: never a number picked from a running or stopped reply
-    if (sv.state === "next") return "not run yet";
-    if (sv.state !== "done" && sv.state !== "failed") return "running, no result yet";
-    return keyNumber(lastOf(sv)?.reply ?? "", rep) || "no numbers in the report";
+    const done = c?.done || (!sv || sv.state === "next" ? "nothing yet" : "not written yet");
+    const missed = c?.missed || openOf(id).join(" · ") || "nothing";
+    return { done, missed };
   };
-  const cards = rows.map((st) => ({ st, c: cardOf(st.id), state: CARD_STATE[stOf(st.id)] ?? "next", result: resultOf(st.id) }));
-  const cardKey = (x: (typeof cards)[number]) => `card|${x.st.id}|${x.state}|${x.c?.for ?? ""}|${x.c?.how ?? ""}|${x.result}`;
+  const cards = rows.map((st) => { const c = cardOf(st.id); return { st, c, state: CARD_STATE[stOf(st.id)] ?? "next", result: resultOf(st.id, c) }; });
+  const cardKey = (x: (typeof cards)[number]) => `card|${x.st.id}|${x.state}|${x.c?.for ?? ""}|${x.c?.how ?? ""}|${x.result.done}|${x.result.missed}`;
   // s7 rule B7, the owner's pick "Bridge, all devices": each line as a key; a key the last look did not hold is changed.
   // The last look is read once when the board opens; the lines shown are saved after they stay the same for 3 s.
   const keys = {
@@ -286,6 +291,14 @@ export function ReportBoard({ plan, v, steps, evidence, asked, onOpenItem, stale
   const doneIds = rows.filter((st) => stOf(st.id) === "done").map((st) => st.id);
   const nowRows = rows.filter((st) => ["now", "checking"].includes(stOf(st.id)));
   const nextRows = nowRows.length ? nowRows : rows.filter((st) => !["done", "failed"].includes(stOf(st.id))).slice(0, 1);
+  // the owner's words 2026-11-21: "i don't need what done answer me the count, i want the summarized what has been done":
+  // Done lists what each done step did (its card's Done), Next names the running step and the one after, Waits names
+  // each item (failed steps, questions, open items by step)
+  const doneLines = cards.filter((x) => x.state === "done").map((x) => ({ id: x.st.id, text: x.c?.done || x.st.title }));
+  const afterRows = rows.filter((st) => stOf(st.id) === "next" && !nextRows.some((n) => n.id === st.id)).slice(0, 1);
+  const waitLines = [...failed.map((st) => ({ id: st.id, text: `${st.title} failed` })),
+    ...waiting.map((q) => ({ id: q.stepId ?? "", text: `question: ${q.title}` })),
+    ...rows.flatMap((st) => openOf(st.id).map((t) => ({ id: st.id, text: t })))];
   const waitN = failed.length + waiting.length + (openTotal ? 1 : 0);
   const waitText = [failed.length ? `${failed.length} failed` : "", waiting.length ? `${waiting.length} question${waiting.length > 1 ? "s" : ""}` : "",
     openTotal ? `${openTotal} open item${openTotal > 1 ? "s" : ""}` : ""].filter(Boolean).join(" · ");
@@ -306,35 +319,41 @@ export function ReportBoard({ plan, v, steps, evidence, asked, onOpenItem, stale
       {b && (
         <>
           <div className="board-box glance-strip" data-strip>
-            <p className="board-lab">At a glance</p>
+            <p className="board-lab"><Term parts={v.parts} name="At a glance">At a glance</Term></p>
             <SrcLine ids={b.src?.whatFor ?? null} ctx={ctx} changed={changed(keys.what)}>
-              <p data-strip-line="for"><b>For</b> {b.whatFor}</p>
+              <p data-strip-line="for"><b><Term parts={v.parts} name="For">For</Term></b> {b.whatFor}</p>
             </SrcLine>
-            <SrcLine ids={doneIds.length ? doneIds : ["steps"]} ctx={ctx}>
-              <p data-strip-line="done"><b data-state="done">Done {doneIds.length} of {rows.length}</b>{doneIds.length ? "" : " · none yet"}</p>
-            </SrcLine>
+            <div data-strip-line="done">
+              {doneLines.length
+                ? <Chunks head="Done" state="done" items={doneLines.map((d) => (
+                    <SrcLine key={d.id} ids={[d.id]} ctx={ctx} className="src-bullet"><span><b>{d.id}</b> {d.text}</span></SrcLine>))} />
+                : <p><b data-state="done">Done</b> nothing yet</p>}
+            </div>
             <SrcLine ids={nextRows.length ? nextRows.map((st) => st.id) : ["steps"]} ctx={ctx}>
               <p data-strip-line="next">{nextRows.length
-                ? <><b data-state={nowRows.length ? "doing" : "next"}>Next</b> {nextRows.map((st) => `${st.id} ${st.title}${nowRows.length ? " (running)" : ""}`).join(" · ")}</>
+                ? <><b data-state={nowRows.length ? "doing" : "next"}><Term parts={v.parts} name="Next">Next</Term></b> {[...nextRows.map((st) => `${st.id} ${st.title}${nowRows.length ? " (running)" : ""}`),
+                    ...afterRows.map((st) => `then ${st.id} ${st.title}`)].join(" · ")}</>
                 : <><b data-state="done">Next</b> nothing: every step is done or failed</>}</p>
             </SrcLine>
             <SrcLine ids={waitN ? [...failed.map((st) => st.id), ...(openTotal ? ["leftover"] : [])] : ["leftover"]} ctx={ctx}
               own={waiting[0] ? { label: "inbox", open: () => onOpenItem(waiting[0].id) } : undefined}>
-              <p data-strip-line="waits">{waitN
-                ? <><b data-state="need">Waits for you</b> <span data-state="need">{waitText}</span></>
-                : <><b data-state="done">Waits for you</b> nothing</>}</p>
+              <div data-strip-line="waits">{waitLines.length
+                ? <Chunks head="Waits for you" state="need" items={waitLines.map((w, i) => (
+                    <p key={i} className="src-bullet" data-state="need">{w.id ? <b>{w.id}</b> : null} {w.text}</p>))} />
+                : <p><b data-state="done">Waits for you</b> nothing</p>}</div>
             </SrcLine>
           </div>
           <div className="board-box" data-step-cards>
-            <p className="board-lab">Steps · For / How / Result</p>
+            <p className="board-lab"><Term parts={v.parts} name="Step card">Steps · For / How / Done / Missed</Term></p>
             {CARD_GROUPS.map(([state, head]) => (
               <Chunks key={state} head={head} state={state} wrap="step-cards" items={cards.filter((x) => x.state === state).map((x) => (
                 <div key={x.st.id} className="step-card" data-state={state} data-step-card={x.st.id}>
                   <SrcLine ids={[x.st.id, ...(x.c?.src ?? [])]} ctx={ctx} changed={changed(cardKey(x))}>
                     <p className="step-card-head"><b data-state={state}>{x.st.id}</b> {x.st.title}</p>
-                    <p data-card-line="for"><b>For</b> {x.c?.for || <span className="muted">not written yet</span>}</p>
-                    <p data-card-line="how"><b>How</b> {x.c?.how || <span className="muted">not written yet</span>}</p>
-                    <p data-card-line="result"><b>Result</b> <span data-state={state === "next" ? "next" : state}>{x.result}</span></p>
+                    <p data-card-line="for"><b><Term parts={v.parts} name="For">For</Term></b> {x.c?.for || <span className="muted">not written yet</span>}</p>
+                    <p data-card-line="how"><b><Term parts={v.parts} name="How">How</Term></b> {x.c?.how || <span className="muted">not written yet</span>}</p>
+                    <p data-card-line="result"><b><Term parts={v.parts} name="Done (list)">Done</Term></b> {x.result.done}</p>
+                    <p data-card-line="missed"><b><Term parts={v.parts} name="Missed">Missed</Term></b> <span data-state={x.result.missed === "nothing" ? undefined : "need"}>{x.result.missed}</span></p>
                   </SrcLine>
                 </div>
               ))} />
@@ -342,7 +361,7 @@ export function ReportBoard({ plan, v, steps, evidence, asked, onOpenItem, stale
           </div>
           {latest && (
             <div className="board-box" data-latest>
-              <p className="board-lab">Latest result · {latest.sv.stepId} {title(latest.sv.stepId)}</p>
+              <p className="board-lab"><Term parts={v.parts} name="Latest result">Latest result</Term> · {latest.sv.stepId} {title(latest.sv.stepId)}</p>
               <SrcLine ids={[latest.sv.stepId]} ctx={ctx} changed={changed(keys.latest)}>
                 <p className="small"><span className={"status " + latest.sv.state} data-state={latest.sv.state === "done" ? "done" : latest.sv.state === "failed" ? "failed" : "doing"}>{latest.sv.state}</span> <span className="muted">· {when(latest.last.at)}</span></p>
               </SrcLine>
@@ -365,7 +384,7 @@ export function ReportBoard({ plan, v, steps, evidence, asked, onOpenItem, stale
             </div>
           )}
           <div className="board-box">
-            <p className="board-lab">Progress vs the final product</p>
+            <p className="board-lab"><Term parts={v.parts} name="Progress vs the final product">Progress vs the final product</Term></p>
             <div className="board-bar" role="img" aria-label={order.map((s) => `${FEATURE[s]} ${count(s)}`).join(", ")}>
               {order.map((s) => count(s) > 0 && <i key={s} className={"f-" + s} data-state={STATE_OF[s]} style={{ width: `${pct(count(s))}%` }} title={`${FEATURE[s]}: ${count(s)} of ${feats.length}`} />)}
             </div>
@@ -425,11 +444,23 @@ export function ReportBoard({ plan, v, steps, evidence, asked, onOpenItem, stale
         </div>
       </div>
       {b && (  // s5: after the board's content, so What for stays near the top (rule B1)
-        <div className="board-box"><p className="board-lab">Rules and glance</p>
+        <div className="board-box"><p className="board-lab"><Term parts={v.parts} name="Rules and glance">Rules and glance</Term></p>
           <RulesBox check={v.boardCheck} ctx={ctx} />
           {/* s8, the owner's pick "Fold it under the board": the board shows the answers; the test sits folded here */}
           <Section id="plan.board.glance" title="Glance test" open={false} extra="folded: the board above shows the answers">
             <GlanceTest plan={plan} version={v.n} />
+          </Section>
+        </div>
+      )}
+      {b && (b.glossary?.length ?? 0) > 0 && (
+        <div className="board-box" data-glossary={b.glossary!.length}>
+          {/* s8, the owner's pick "C: Both (section + hover)": every term of this plan, in groups of 4 */}
+          <Section id="plan.board.glossary" title={`Glossary (${b.glossary!.length})`} open={false}
+            extra={[...new Set(b.glossary!.map((g) => g.group || "Terms"))].join(" · ")}>
+            {[...new Set(b.glossary!.map((g) => g.group || "Terms"))].map((grp) => (
+              <Chunks key={grp} head={grp} items={b.glossary!.filter((g) => (g.group || "Terms") === grp).map((g) => (
+                <p key={g.term} className="gloss-line" data-gloss={g.term}><b>{g.term}</b> {g.means}</p>))} />
+            ))}
           </Section>
         </div>
       )}
