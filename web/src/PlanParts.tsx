@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  PLAN_KINDS, runAllSteps, runStep, sendPlanMessage, setMaxTogether, setStepPick, stopChain, useHarness, usePlanChain, usePlanPicks, usePlanSteps,
+  PLAN_KINDS, runAllSteps, runStep, sendPlanMessage, updateBoard, setMaxTogether, setStepPick, stopChain, useHarness, usePlanChain, usePlanPicks, usePlanSteps,
   EFFORTS, exactEffort, exactModel, MODELS, useRunPrefs, type Fresh, type PlanPicks, type StepPick,
   checkTicked, runCheck, saveCheckCommand, tickCheck, useClaims, useStepChecks, type StepCheck,
   type InboxItem, type Parts, type Plan, type PlanGenerated, type PlanKind, type PlanStep, type PlanVersion, type Run,
 } from "./data";
 import { isWaiting } from "./Inbox";
+import { boardGaps } from "./boardFormat";
 import { LocalImg, openFile, PcText } from "./FileView";
 import { askAbout, forPlan, QUOTE_EVENT, quotePart, quoteStep, takeQuote } from "./quote";
 import { staleMark, staleness, versionAt } from "./planStale";
@@ -217,6 +218,28 @@ function Term({ parts, name, children }: { parts?: Parts; name: string; children
   return tip ? <span className="term" tabIndex={0} data-tip={tip} data-term={name}>{children}</span> : <>{children}</>;
 }
 
+// s6 (the owner, 2026-11-21: "I don't want auto update on all plans, I want the update button so I can do manual update
+// for the roll out, the next run steps on a plan will auto generate to selfupdate the work to keep up with latest work"):
+// the board's gaps against the latest format and the button that sends this plan's update run; a Run step on a board
+// with gaps updates it first (bridge boardformat.py).
+function UpdateBoardBar({ plan, gaps }: { plan: Plan; gaps: string[] }) {
+  const [sent, setSent] = useState<string | null>(null);
+  const [err, setErr] = useState("");
+  return (
+    <div className="board-update small" data-board-update data-gaps={gaps.length}>
+      <button className="chip primary" disabled={!!sent}
+        title="Sends one run to this plan's session that brings the board up to the latest format; nothing else changes"
+        onClick={() => updateBoard(plan).then(() => setSent(new Date().toLocaleTimeString()), (e) => setErr(String(e)))}>
+        Update board
+      </button>{" "}
+      {sent ? <span>sent {sent}; the run shows in Runs</span>
+        : gaps.length ? <span className="muted">{gaps.length} behind the latest format: {gaps.join(" · ")}. The next Run step updates it first.</span>
+        : <span className="muted">up to date with the latest format</span>}
+      {err && <span className="error"> {err}</span>}
+    </div>
+  );
+}
+
 export function ReportBoard({ plan, v, steps, evidence, asked, onOpenItem, stale }: {
   plan: Plan; v: PlanVersion; steps: PlanStep[]; evidence: StepEvidence[]; asked: InboxItem[]; onOpenItem: (id: string) => void; stale?: string;
 }) {
@@ -316,6 +339,7 @@ export function ReportBoard({ plan, v, steps, evidence, asked, onOpenItem, stale
     <Section id="plan.board" main stale={stale} title="Report board"
       extra={b ? `${count("built") + count("open")} of ${feats.length} features built${noSrc ? ` · ${noSrc} lines without source` : ""}${v.boardCheck?.fail ? ` · rules: ${v.boardCheck.fail} fail` : ""}${nChanged ? ` · ${nChanged} changed since your last look` : ""}` : "no board yet"}>
       {!b && <p className="small muted">This plan has no board yet: its session adds What for, Idea and the product list with the next plan version.</p>}
+      {v.n === plan.current && <UpdateBoardBar plan={plan} gaps={boardGaps(v.parts)} />}
       {b && (
         <>
           <div className="board-box glance-strip" data-strip>

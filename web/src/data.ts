@@ -727,6 +727,17 @@ export const sendPlanMessage = (plan: Plan, kind: PlanKind, text: string, on?: {
   });
 };
 
+// s6 Update board (the owner, 2026-11-21: "I want the update button so I can do manual update for the roll out"): an
+// Action message to the plan's session; the bridge (boardformat.update_block) puts the board-update order in the run.
+export const updateBoard = (plan: Plan) => {
+  const id = newId();
+  const text = "Update board: bring this plan's board up to the latest format.";
+  return setDoc(doc(db, "commands", id), {
+    id, action: "message", machine: plan.machine, sessionId: plan.sessionId, cwd: plan.cwd, prompt: text, ownerText: text,
+    kind: "action", boardUpdate: true, planId: plan.id, status: "new", createdAt: new Date().toISOString(),
+  });
+};
+
 // Run step (the owner's words, 2026-11-03: "Add Ren step button"): a plain message to the plan's session.
 // G1 (the owner, 2026-11-18: "all 5 gap, fix one by one"): the step's text and its check go in the message; the same
 // words as the bridge's chain.py step_text.

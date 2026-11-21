@@ -299,3 +299,4 @@ span[data-state], b[data-state], p[data-state], .board-feat[data-state] .board-k
 .glance-timer { position: fixed; top: 0.5rem; left: 50%; transform: translateX(-50%); z-index: 2000; background: var(--fg); color: var(--bg); padding: 0.3rem 1rem; border-radius: 1rem; font-weight: bold; }
 .glance-cover { position: fixed; inset: 0; z-index: 2000; background: var(--bg); display: flex; align-items: center; justify-content: center; }
 .glance-form { max-width: 40rem; width: 90%; } .glance-form label { display: block; margin: 0.5rem 0; } .glance-form input { display: block; width: 100%; }
+.board-update { margin: 0 0 0.5rem; display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: baseline; } /* s6 Update board */

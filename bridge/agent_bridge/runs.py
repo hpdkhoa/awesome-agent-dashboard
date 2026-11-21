@@ -75,6 +75,7 @@ from .stepcheck import StepChecks
 from .coordinator import Coordinator
 from .evidence import Evidence
 from .glance import Glance
+from .boardformat import board_gaps, update_block
 from .planfrom import NO_EDITS, mark_quotes, note_command, plan_prompt, scoped, system_args
 from .redact import redact
 from .search import NO_KEY, SearchRun, settings as search_settings
@@ -830,6 +831,26 @@ class Runs:
                   "rulesAt": rules["versions"], "rulesChanged": rules["changed"]}
         return (text + "\n\n" + got["block"] if got["block"] else text), fields
 
+    def board_first(self, c: dict, text: str) -> tuple[str, dict]:
+        """s6 (the owner, 2026-11-21: "I want the update button so I can do manual update for the roll out, the next run
+        steps on a plan will auto generate to selfupdate the work to keep up with latest work"): the owner's Update board
+        button (boardUpdate on the command) always gets the board-update order; a Run step (a step id, no message kind)
+        gets it first only when the plan's board has gaps against the latest format. Every other run goes as it is, so
+        no plan is touched without the button or a step run."""
+        plan_id = str(c.get("planId") or "")
+        by_button = bool(c.get("boardUpdate"))
+        step_run = bool(c.get("stepId")) and not c.get("kind")
+        if not plan_id or not (by_button or step_run):
+            return text, {}
+        plan = self.store.get(f"plans/{plan_id}") or {}
+        parts = (self.store.get(f"planVersions/{plan_id}_v{plan.get('current', 0)}") or {}).get("parts")
+        if not parts:
+            return text, {}
+        gaps = board_gaps(parts)
+        if step_run and not by_button and not gaps:
+            return text, {}
+        return update_block(gaps, by_button) + "\n\n" + text, {"boardUpdated": {"gaps": gaps, "by": "button" if by_button else "step", "at": now_iso()}}
+
     def _start(self, c: dict) -> str:
         path = f"commands/{c['id']}"
         wt = folder_ok(c.get("folder", ""), self.roots)
@@ -847,6 +868,8 @@ class Runs:
         model, effort = self.run_with(c)
         keep = not c.get("noSession")
         prompt, kb = self.kb_first(c, prompt)
+        prompt, bu = self.board_first(c, prompt)
+        kb = {**kb, **bu}
         p = self._spawn(c["id"], start_command(self.claude, prompt, sid, mode, model, effort, keep), c["folder"])
         self.store.update(path, {"status": "running", "sessionId": sid, "workType": wt, "pid": p.pid,
                                  "startedAt": now_iso(), "permissionMode": mode, "model": model, "effort": effort, **kb})
@@ -955,6 +978,8 @@ class Runs:
                 pass  # a read-only .gitignore never stops the order; the session's files still go to .plan_data
         model, effort = self.run_with(c)
         text, kb = self.kb_first(c, text)
+        text, bu = self.board_first(c, text)
+        kb = {**kb, **bu}
         p = self._spawn(c["id"], message_command(self.claude, text, sid, mode, kind, str(c.get("stepId") or "")[:20], model, effort), cwd)
         self.store.update(path, {"status": "running", "workType": wt, "pid": p.pid, "startedAt": now_iso(),
                                  "permissionMode": mode, "model": model, "effort": effort, **kb})
@@ -1014,6 +1039,8 @@ class Runs:
         plan = self.store.get(f"plans/{plan_id}") if plan_id else None
         parts = ((self.store.get(f"planVersions/{plan_id}_v{plan.get('current', 0)}") or {}).get("parts") if plan else None)
         text, kb = self.kb_first(c, text)
+        text, bu = self.board_first(c, text)
+        kb = {**kb, **bu}
         prompt = handoff_prompt(sid, str(path or ""), turns, text, plan_id, context, parts)
         mode, kind = self.mode(c), c.get("kind") if c.get("kind") in KINDS else ""
         model, effort = self.run_with(c)
