@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { askGlance, usePlanGlance, type BoardCheck, type Plan } from "./data";
 import { SrcLine, type SrcCtx } from "./SourceChip";
 
@@ -8,21 +8,46 @@ import { SrcLine, type SrcCtx } from "./SourceChip";
 // later), "Button on the board".
 
 const STATE_CLASS = { pass: "rule-pass", fail: "rule-fail", "waits for s7": "rule-wait" } as const;
+const STATE_OF = { pass: "done", fail: "failed", "waits for s7": "next" } as const;  // s7 rule B4: the board's state colours
+
+// s7 (plan 44fc4979), rule B2 "Chunks of 4", the owner's pick "By meaning": a group shows up to 4 lines; a longer one
+// splits into sub-groups of up to 4, each headed by the group's meaning and its place ("Features built (6) · 1-4").
+// Nothing is dropped. data-group-lines lets the s7 check count lines per group.
+export const CHUNK = 4;
+export function Chunks({ head, items, state, wrap }: { head: string; items: ReactNode[]; state?: string; wrap?: string }) {
+  if (!items.length) return null;
+  const parts: ReactNode[][] = [];
+  for (let i = 0; i < items.length; i += CHUNK) parts.push(items.slice(i, i + CHUNK));
+  return (
+    <>
+      {parts.map((c, k) => (
+        <div key={k} className="board-group" data-group={head} data-group-lines={c.length}>
+          <p className="board-sub small" data-state={state}>
+            <b>{head}</b> <span className="muted">({items.length}{parts.length > 1 ? ` · ${k * CHUNK + 1}-${k * CHUNK + c.length}` : ""})</span>
+          </p>
+          {wrap ? <div className={wrap}>{c}</div> : c}
+        </div>
+      ))}
+    </>
+  );
+}
 
 export function RulesBox({ check, ctx }: { check?: BoardCheck; ctx: SrcCtx }) {
   if (!check) return <p className="small muted" data-rules="none">Rules: no check on this version (made before s5).</p>;
   return (
     <details className="rules-box" data-rules={check.fail ? "fail" : "pass"} data-rules-fail={check.fail} open={check.fail > 0}>
       <summary className="small">
-        <b className={check.fail ? "rule-fail" : "rule-pass"}>Rules: {check.fail} fail</b> · {check.pass} pass · {check.wait} wait for s7
+        <b className={check.fail ? "rule-fail" : "rule-pass"} data-state={check.fail ? "failed" : "done"}>Rules: {check.fail} fail</b> · {check.pass} pass{check.wait ? ` · ${check.wait} wait for s7` : ""}
       </summary>
-      {check.rules.map((r) => (
-        <SrcLine key={r.id} ids={[r.kb]} ctx={ctx} className="src-bullet">
-          <span className={STATE_CLASS[r.state]} data-rule={r.id} data-rule-state={r.state}>
-            {r.id} {r.name}: {r.state}{r.n ? ` (${r.n})` : ""}
-          </span>
-          {r.lines.length > 0 && <span className="small muted"> · {r.lines.join(" · ")}</span>}
-        </SrcLine>
+      {([["fail", "Rules failing"], ["pass", "Rules passing"], ["waits for s7", "Rules waiting"]] as const).map(([st, head]) => (
+        <Chunks key={st} head={head} state={STATE_OF[st]} items={check.rules.filter((r) => r.state === st).map((r) => (
+          <SrcLine key={r.id} ids={[r.kb]} ctx={ctx} className="src-bullet">
+            <span className={STATE_CLASS[r.state]} data-rule={r.id} data-rule-state={r.state} data-state={STATE_OF[r.state]}>
+              {r.id} {r.name}: {r.state}{r.n ? ` (${r.n})` : ""}
+            </span>
+            {r.lines.length > 0 && <span className="small muted"> · {r.lines.join(" · ")}</span>}
+          </SrcLine>
+        ))} />
       ))}
     </details>
   );
@@ -58,7 +83,8 @@ export function GlanceTest({ plan, version }: { plan: Plan; version: number }) {
           </summary>
           {last.error && <p className="bad">{last.error}</p>}
           {last.marks.map((m) => (
-            <p key={m.q} className={m.verdict === "right" ? "rule-pass" : m.verdict === "partly" ? "rule-wait" : "rule-fail"}>
+            <p key={m.q} className={m.verdict === "right" ? "rule-pass" : m.verdict === "partly" ? "rule-wait" : "rule-fail"}
+              data-state={m.verdict === "right" ? "done" : m.verdict === "partly" ? "next" : "failed"}>
               {QS.find(([k]) => k === m.q)?.[1]} {m.verdict}: <span className="muted">"{last.answers[m.q] ?? ""}"</span> · {m.why}
             </p>
           ))}

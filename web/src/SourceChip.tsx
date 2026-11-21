@@ -37,15 +37,17 @@ function label(id: string): string {
 }
 
 // own: a line that is itself a stored item (an inbox question): its chip opens that item, its own full text
-export function SrcLine({ ids, ctx, children, className, own }: {
+export function SrcLine({ ids, ctx, children, className, own, changed }: {
   ids: string[] | null; ctx: SrcCtx; children: ReactNode; className?: string; own?: { label: string; open: () => void };
+  changed?: boolean;  // s7 rule B7: the line differs from the owner's last look
 }) {
   const [open, setOpen] = useState<string | null>(null);
   return (
-    <div className={"src-line" + (className ? " " + className : "")} data-src-line={ids?.length || own ? "ok" : "none"}>
+    <div className={"src-line" + (className ? " " + className : "")} data-src-line={ids?.length || own ? "ok" : "none"} data-changed={changed ? "1" : undefined}>
       <div className="src-row">
         <div className="src-text">{children}</div>
         <span className="src-chips">
+          {changed && <span className="changed-mark" title="changed since your last look at this board">changed</span>}
           {own && <button className="src-chip k-own" data-src="own" title="source: this item itself · click to open it" onClick={own.open}>{own.label}</button>}
           {ids?.length
             ? ids.map((id) => (

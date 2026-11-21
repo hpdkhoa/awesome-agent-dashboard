@@ -14,7 +14,7 @@ from datetime import datetime
 SKIP = {"liveSessions", "recordVecs", "boxClaims"}  # boxClaims: this box's copy of its claims (claims.py), Firestore has the truth  # recordVecs: the records' vectors (records.py), remade from the records on any box
 MONEY = {"moneyEntries", "fxRates", "goldPrices"}  # stay on Firestore: the page reads and writes them there
 KEY = "mirror_seq"
-COLLECTIONS = ["commands", "inbox", "liveSessions", "machines", "meta", "planChains", "planChecks", "planEvidence", "planGenerated", "planGlance",
+COLLECTIONS = ["boardSeen", "commands", "inbox", "liveSessions", "machines", "meta", "planChains", "planChecks", "planEvidence", "planGenerated", "planGlance",
                "planHarness", "planPicks", "planSteps", "planVersions", "plans", "pushSubs", "sessions", "usage", "workTypes"]
 
 

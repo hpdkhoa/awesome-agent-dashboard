@@ -3,6 +3,7 @@ import { collection, getDocs, query, where } from "./fs";
 import { db } from "./firebase";
 import { ticket } from "./FileView";
 import { countReads } from "./pageReads";
+import { Chunks } from "./BoardRules";
 import { SrcLine, type SrcCtx } from "./SourceChip";
 import { Section } from "./Section";
 import { coverage, covStats, firstSentence, isLogRow, LOG_NAME, type CovInput, type LogRow } from "./covCount";
@@ -13,6 +14,9 @@ import { coverage, covStats, firstSentence, isLogRow, LOG_NAME, type CovInput, t
 // coverage section at plan need to have collapse feature"): the whole box folds under a header that carries the counts.
 // Each missing item carries its chip, so a click opens the item's full text under its line.
 type Base = Omit<CovInput, "records" | "logRows">;
+
+// the plan's own parts among the coverage sources (covCount.ts); the rest are records and logs
+const PLAN_SOURCES: readonly string[] = ["goal lines", "rules", "lessons", "leftover"];
 
 export function CoverageBar({ planId, base, ctx }: { planId: string; base: Base; ctx: SrcCtx }) {
   const [records, setRecords] = useState<{ id: string; title: string; source: string }[] | null>(null);
@@ -58,44 +62,58 @@ export function CoverageBar({ planId, base, ctx }: { planId: string; base: Base;
       <Section id="plan.board.coverage" title={`Coverage · ${st.covered} of ${st.total} truth items reachable (${st.pct}%)`}
         extra={st.missing ? `${st.missing} missing` : "none missing"}>
       <div className="board-bar" role="img" aria-label={`covered ${st.covered}, missing ${st.missing}`}>
-        {st.covered > 0 && <i className="cov-in" style={{ width: `${st.pct}%` }} title={`covered: ${st.covered} of ${st.total}`} />}
-        {st.missing > 0 && <i className="cov-out" style={{ width: `${100 - st.pct}%` }} title={`missing: ${st.missing} of ${st.total}`} />}
+        {st.covered > 0 && <i className="cov-in" data-state="done" style={{ width: `${st.pct}%` }} title={`covered: ${st.covered} of ${st.total}`} />}
+        {st.missing > 0 && <i className="cov-out" data-state="next" style={{ width: `${100 - st.pct}%` }} title={`missing: ${st.missing} of ${st.total}`} />}
       </div>
       <p className="board-legend small">
-        <span><i className="sw cov-in" />covered: a chip on the board opens it</span>
-        <span><i className="sw cov-out" />missing: no chip on the board opens it</span>
+        <span><i className="sw cov-in" data-state="done" />covered: a chip on the board opens it</span>
+        <span><i className="sw cov-out" data-state="next" />missing: no chip on the board opens it</span>
       </p>
+      {/* s7 rule B2 "By meaning": the source rows in two headed groups, the plan's own parts and the records and logs */}
+      {([["Counts from the plan parts", PLAN_SOURCES], ["Counts from records and logs", null]] as const).map(([head, list]) => {
+        const rowsOf = used.filter((g) => (list ? list.includes(g.source) : !PLAN_SOURCES.includes(g.source)));
+        return rowsOf.length > 0 && (
+      <div key={head} className="board-group" data-group={head} data-group-lines={rowsOf.length}>
+      <p className="board-sub small"><b>{head}</b> <span className="muted">({rowsOf.length})</span></p>
       <table className="cov-rows small">
         <tbody>
-          {used.map((g) => {
+          {rowsOf.map((g) => {
             const n = g.items.filter((i) => i.covered).length, p = Math.round((100 * n) / g.items.length);
             return (
               <tr key={g.source} data-cov-source={g.source}>
                 <td>{g.source}</td>
-                <td className="cov-mini"><span className="board-bar"><i className="cov-in" style={{ width: `${p}%` }} /><i className="cov-out" style={{ width: `${100 - p}%` }} /></span></td>
+                <td className="cov-mini"><span className="board-bar"><i className="cov-in" data-state="done" style={{ width: `${p}%` }} /><i className="cov-out" data-state="next" style={{ width: `${100 - p}%` }} /></span></td>
                 <td className="num">{n} / {g.items.length}</td><td className="num">{p}%</td>
               </tr>
             );
           })}
         </tbody>
       </table>
-      <ul className="cov-stats small">
-        <li><b>Total {st.total}</b>: truth items of this plan (goal lines, rules, lessons, leftover, step reports, KB records, log rows)</li>
-        <li><b>Covered {st.covered}, missing {st.missing}</b>: reachable through a board chip, or not</li>
-        <li><b>Sources {st.sources}</b>: kinds of truth that hold items now; mean per source {st.meanPct}%</li>
-        {st.lowest && st.highest && <li><b>Lowest {st.lowest.source} {st.lowest.pct}%, highest {st.highest.source} {st.highest.pct}%</b>: where the board traces least and most</li>}
-        <li><b>Period</b>: now, the plan's current version and today's records and logs</li>
-      </ul>
+      </div>
+        );
+      })}
+      <div className="board-group" data-group="Counts" data-group-lines={3}>
+        <p className="board-sub small"><b>Counts</b></p>
+        <ul className="cov-stats small">
+          <li><b>Total {st.total}</b>: truth items of this plan (goal lines, rules, lessons, leftover, step reports, KB records, log rows)</li>
+          <li><b>Covered {st.covered}, missing {st.missing}</b>: reachable through a board chip, or not</li>
+          <li><b>Sources {st.sources}</b>: kinds of truth that hold items now; mean per source {st.meanPct}%</li>
+        </ul>
+      </div>
+      <div className="board-group" data-group="Spread" data-group-lines={st.lowest && st.highest ? 2 : 1}>
+        <p className="board-sub small"><b>Spread</b></p>
+        <ul className="cov-stats small">
+          {st.lowest && st.highest && <li><b>Lowest {st.lowest.source} {st.lowest.pct}%, highest {st.highest.source} {st.highest.pct}%</b>: where the board traces least and most</li>}
+          <li><b>Period</b>: now, the plan's current version and today's records and logs</li>
+        </ul>
+      </div>
       {missing.length > 0 && (
         <div className="cov-missing" data-cov-missing={st.missing}>
           <p className="small"><b>Missing ({st.missing})</b> · no chip on the board opens these yet</p>
           {missing.map((g) => (
-            <div key={g.source}>
-              <p className="small muted">{g.source} ({g.items.filter((i) => !i.covered).length})</p>
-              {g.items.filter((i) => !i.covered).map((i, k) => (
-                <SrcLine key={k} ids={[i.chip]} ctx={ctx} className="src-bullet cov-miss"><span>{i.label}</span></SrcLine>
-              ))}
-            </div>
+            <Chunks key={g.source} head={`Missing ${g.source}`} state="next" items={g.items.filter((i) => !i.covered).map((i, k) => (
+              <SrcLine key={k} ids={[i.chip]} ctx={ctx} className="src-bullet cov-miss"><span data-state="next">{i.label}</span></SrcLine>
+            ))} />
           ))}
         </div>
       )}

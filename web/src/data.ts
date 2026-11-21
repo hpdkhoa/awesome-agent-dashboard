@@ -132,7 +132,9 @@ export type Parts = {
 export type Material = { name: string; kind: "story" | "material" | "file"; path?: string; note?: string };
 // src (plan 44fc4979 s3, the owner's pick "Source field per line"): the source ids of What for and of each Idea line
 export type Board = { whatFor: string; idea: string[]; product: { feature: string; steps: string[] }[]; materials?: Material[];
-  src?: { whatFor?: string[]; idea?: string[][] } };
+  src?: { whatFor?: string[]; idea?: string[][] };
+  // s7 (plan 44fc4979), the owner's pick "By meaning" (rule B2): Idea over 4 lines in named sub-groups, in order
+  ideaGroups?: { head: string; count: number }[] };
 // The message kinds on a plan: four change it (a new plan version), Q&A never does; Action does the work asked and makes
 // no version (step i11, the owner's words, 2026-11-16: "need action type to cover this case when I ask you to perform an action").
 export type PlanKind = "qa" | "goal" | "step" | "rule" | "lesson" | "action";
@@ -170,6 +172,25 @@ export type PlanVersion = {
 // s5 (plan 44fc4979): the owner's picks "Check all 10, B2/B4/B7 'waits s7'", "Save + red flag"
 export type BoardRule = { id: string; name: string; kb: string; state: "pass" | "fail" | "waits for s7"; n: number; lines: string[]; note: string };
 export type BoardCheck = { at: string; rules: BoardRule[]; pass: number; fail: number; wait: number };
+
+// s7 (plan 44fc4979), rule B7 "Changes are marked", the owner's pick "Bridge, all devices": the board lines the owner
+// saw at the last look, one record per plan (boardSeen/<plan id>), so phone and PC share it. A line is a key
+// "part|text|state"; a line whose key the last look did not hold carries "changed".
+export type BoardSeen = { id: string; planId: string; lines: string[]; version: number; at: string };
+export function useBoardSeen(planId: string): { loaded: boolean; prev: BoardSeen | null } {
+  const [got, setGot] = useState<{ id: string; prev: BoardSeen | null } | null>(null);
+  useEffect(() => {
+    let live = true;
+    getDocs(query(collection(db, "boardSeen"), where("planId", "==", planId))).then((s) => {
+      countReads(s.docs.length, "boardSeen");
+      if (live) setGot({ id: planId, prev: (s.docs[0]?.data() as BoardSeen) ?? null });
+    }, () => live && setGot({ id: planId, prev: null }));
+    return () => { live = false; };
+  }, [planId]);
+  return got?.id === planId ? { loaded: true, prev: got.prev } : { loaded: false, prev: null };
+}
+export const saveBoardSeen = (planId: string, version: number, lines: string[]) =>
+  setDoc(doc(db, "boardSeen", planId), { id: planId, planId, lines, version, at: new Date().toISOString() });
 
 export type Machine = {
   name: string;

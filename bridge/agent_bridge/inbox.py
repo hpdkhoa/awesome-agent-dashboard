@@ -355,8 +355,27 @@ def clean_board(board, step_ids: list[str]) -> dict:
         raise ValueError("board needs what_for and product: " + BOARD_SHAPE)
     mats = clean_materials(board.get("materials"))
     has_src = bool(src["whatFor"]) or any(src["idea"])
+    groups = clean_idea_groups(board.get("idea_groups", board.get("ideaGroups")))
     return {"whatFor": what, "idea": idea, "product": product[:30], **({"materials": mats} if mats else {}),
-            **({"src": src} if has_src else {})}
+            **({"src": src} if has_src else {}), **({"ideaGroups": groups} if groups else {})}
+
+
+def clean_idea_groups(groups) -> list[dict]:
+    """Idea sub-groups (plan 44fc4979 s7, the owner's pick "By meaning"): [{"head", "count"}] in order. Kept as sent
+    (shape only); a split that breaks B2 (a group over 4, counts not adding up) is flagged by the rule check, never
+    refused (the owner's pick "Save + red flag")."""
+    out = []
+    for g in groups or []:
+        if not isinstance(g, dict):
+            continue
+        head = redact(str(g.get("head", g.get("heading", "")) or "").strip(), 60)
+        try:
+            n = int(g.get("count", 0))
+        except (TypeError, ValueError):
+            n = 0
+        if head and n > 0:
+            out.append({"head": head, "count": n})
+    return out[:8]
 
 
 NO_BOARD = (" This plan has no board yet: add parts.board (what_for, idea, product with step ids) in the next "
@@ -369,7 +388,13 @@ def board_markdown(b: dict) -> str:
         return f" [src: {', '.join(ids)}]" if ids else " [src: none]" if src else ""
     ideas = src.get("idea") or []
     lines = [f"- What for: {b['whatFor']}{tag(src.get('whatFor') or [])}"]
-    lines += [f"- Idea: {x}{tag(ideas[i] if i < len(ideas) else [])}" for i, x in enumerate(b.get("idea", []))]
+    heads, at = {}, 0
+    for g in b.get("ideaGroups") or []:
+        heads[at] = g["head"]; at += g["count"]
+    for i, x in enumerate(b.get("idea", [])):
+        if i in heads:
+            lines.append(f"- Idea group: {heads[i]}")
+        lines.append(f"- Idea: {x}{tag(ideas[i] if i < len(ideas) else [])}")
     lines += [f"- Feature: {f['feature']} (steps {', '.join(f['steps']) or 'none'})" for f in b.get("product", [])]
     return "\n".join(lines)
 
@@ -1296,6 +1321,9 @@ def server():
         what_for and each idea line may be {"text", "src": [ids]}; an id is a part (goal, summary, rules, lessons,
         leftover, steps), a step id, a KB record (dec:N, rule:N, find:N, att:N, les:N) or a full file path
         (path#"quoted words" for a feedback log row, which never drifts; path:line for one line). Each id must exist; a line with no src shows a red "no source" chip.
+        idea_groups (plan 44fc4979 s7, the owner's pick "By meaning", rule B2 chunks of 4): when idea has over 4
+        lines, name its sub-groups in order, [{"head": a short heading that starts with an information word,
+        "count": lines in it, 1 to 4}], counts adding up to the idea lines; the page heads each group with it.
         source: the command id the dashboard gave you when it asked for a plan from a session."""
         try:
             plan_id = await asyncio.to_thread(inbox.plan_start, title, text, note, parts, source, harness)

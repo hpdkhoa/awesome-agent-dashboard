@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   PLAN_KINDS, runAllSteps, runStep, sendPlanMessage, setMaxTogether, setStepPick, stopChain, useHarness, usePlanChain, usePlanPicks, usePlanSteps,
   EFFORTS, exactEffort, exactModel, MODELS, useRunPrefs, type Fresh, type PlanPicks, type StepPick,
@@ -32,7 +32,8 @@ import { dt, tm } from "./fmt";
 import { boardMaterials, gathered } from "./materials";
 import { SrcLine, type SrcCtx } from "./SourceChip";
 import { CoverageBar } from "./Coverage";
-import { GlanceTest, RulesBox } from "./BoardRules";
+import { Chunks, GlanceTest, RulesBox } from "./BoardRules";
+import { saveBoardSeen, useBoardSeen } from "./data";
 
 // A plan with six parts (plan from a session; the owner's words, 2026-11-03, in cc/dashboard/SESSION_PLAN.md).
 // Plan versions change only with the plan's data; each step shows its own versions, the last reply like a message.
@@ -186,6 +187,14 @@ type FeatureState = "built" | "open" | "doing" | "failed" | "next";
 const FEATURE: Record<FeatureState, string> = {
   built: "built, no open item", open: "built, open item", doing: "being built", failed: "failed", next: "not built",
 };
+// s7 (plan 44fc4979), rule B4 "One cue per meaning", the owner's pick "Amber = needs you only": one colour per state,
+// the same on every board part (ui.css [data-state]): done green, doing blue, next grey, failed red, need amber.
+// A feature built with an open item waits for the owner, so it takes the needs-you colour.
+const STATE_OF: Record<FeatureState, string> = { built: "done", open: "need", doing: "doing", failed: "failed", next: "next" };
+// rule B2, the owner's pick "By meaning": features grouped by state, each group headed by what it holds
+const FEATURE_HEAD: Record<FeatureState, string> = {
+  built: "Features built", open: "Features with open items", doing: "Features being built", failed: "Features failed", next: "Features not built",
+};
 
 // The board's materials, grouped (the owner's pick: the recommended three groups); the session sends only the latest
 // version of each, and the bridge drops older vN of the same file.
@@ -230,41 +239,71 @@ export function ReportBoard({ plan, v, steps, evidence, asked, onOpenItem, stale
     ...failed.map((st) => st.id), ...waiting.map((q) => q.stepId ?? "").filter(Boolean), ...(openTotal > 0 ? ["leftover"] : []),
     ...(latest ? [latest.sv.stepId] : [])] : [];
   const reports = rows.filter((st) => (steps.find((x) => x.stepId === st.id)?.versions ?? []).length > 0).map((st) => ({ id: st.id, title: st.title }));
+  // s7 rule B7, the owner's pick "Bridge, all devices": each line as a key; a key the last look did not hold is changed.
+  // The last look is read once when the board opens; the lines shown are saved after they stay the same for 3 s.
+  const keys = {
+    what: b ? `what|${b.whatFor}` : "", idea: (b?.idea ?? []).map((x) => `idea|${x}`),
+    open: `open|${openTotal}`, latest: latest ? `latest|${latest.sv.stepId}|${latest.sv.state}|${latest.last.at}` : "",
+  };
+  const featKey = (f: { feature: string; state: FeatureState }) => `feat|${f.feature}|${f.state}`;
+  const allKeys = [keys.what, ...keys.idea, ...feats.map(featKey), ...failed.map((st) => `failed|${st.id}`),
+    ...waiting.map((q) => `wait|${q.id}`), ...(openTotal ? [keys.open] : []), keys.latest].filter(Boolean);
+  const seen = useBoardSeen(plan.id);
+  const isCurrent = v.n === plan.current;
+  const prev = useMemo(() => (seen.prev ? new Set(seen.prev.lines) : null), [seen.prev]);
+  const changed = (k: string) => !!(isCurrent && prev && k && !prev.has(k));
+  const nChanged = allKeys.filter(changed).length;
+  const keyStr = allKeys.join("\n");
+  useEffect(() => {
+    if (!seen.loaded || !isCurrent || !b) return;
+    if (seen.prev && seen.prev.lines.join("\n") === keyStr) return;
+    const t = setTimeout(() => saveBoardSeen(plan.id, v.n, keyStr.split("\n")), 3000);
+    return () => clearTimeout(t);
+  }, [seen.loaded, keyStr, isCurrent, plan.id, v.n]);
+  // Idea in its named sub-groups (ideaGroups, rule B2); a board that names none shows one list and the rule check flags it
+  const ideaLine = (x: string, i: number) => (
+    <SrcLine key={i} ids={ideaSrc[i] ?? null} ctx={ctx} className="src-bullet" changed={changed(keys.idea[i])}>{md(x, plan)}</SrcLine>);
+  const ig = b?.ideaGroups ?? [];
+  const igOk = !!b && ig.length > 0 && ig.reduce((n, g) => n + g.count, 0) === b.idea.length;
+  let at = 0;
+  const ideaGroups = igOk ? ig.map((g) => { const from = at; at += g.count; return { head: g.head, idx: b!.idea.map((_, i) => i).slice(from, at) }; }) : [];
   return (
     <Section id="plan.board" main stale={stale} title="Report board"
-      extra={b ? `${count("built") + count("open")} of ${feats.length} features built${noSrc ? ` · ${noSrc} lines without source` : ""}${v.boardCheck?.fail ? ` · rules: ${v.boardCheck.fail} fail` : ""}` : "no board yet"}>
+      extra={b ? `${count("built") + count("open")} of ${feats.length} features built${noSrc ? ` · ${noSrc} lines without source` : ""}${v.boardCheck?.fail ? ` · rules: ${v.boardCheck.fail} fail` : ""}${nChanged ? ` · ${nChanged} changed since your last look` : ""}` : "no board yet"}>
       {!b && <p className="small muted">This plan has no board yet: its session adds What for, Idea and the product list with the next plan version.</p>}
       {b && (
         <>
           <CoverageBar planId={plan.id} ctx={ctx} base={{ boardIds, goal: v.parts?.goal ?? "", rules: v.parts ? partLines(v.parts, "rules") : [],
             lessons: v.parts ? partLines(v.parts, "lessons") : [], leftover: v.parts?.leftover ?? [], reports }} />
-          <div className="board-box"><p className="board-lab">What for</p><SrcLine ids={b.src?.whatFor ?? null} ctx={ctx}><p>{b.whatFor}</p></SrcLine></div>
+          <div className="board-box"><p className="board-lab">What for</p><SrcLine ids={b.src?.whatFor ?? null} ctx={ctx} changed={changed(keys.what)}><p>{b.whatFor}</p></SrcLine></div>
           {b.idea.length > 0 && (
             <div className="board-box">
               <p className="board-lab">Idea</p>
-              {b.idea.map((x, i) => <SrcLine key={i} ids={ideaSrc[i] ?? null} ctx={ctx} className="src-bullet">{md(x, plan)}</SrcLine>)}
+              {igOk
+                ? ideaGroups.map((g) => <Chunks key={g.head} head={g.head} items={g.idx.map((i) => ideaLine(b.idea[i], i))} />)
+                : b.idea.map(ideaLine)}
             </div>
           )}
           <div className="board-box">
             <p className="board-lab">Progress vs the final product</p>
             <div className="board-bar" role="img" aria-label={order.map((s) => `${FEATURE[s]} ${count(s)}`).join(", ")}>
-              {order.map((s) => count(s) > 0 && <i key={s} className={"f-" + s} style={{ width: `${pct(count(s))}%` }} title={`${FEATURE[s]}: ${count(s)} of ${feats.length}`} />)}
+              {order.map((s) => count(s) > 0 && <i key={s} className={"f-" + s} data-state={STATE_OF[s]} style={{ width: `${pct(count(s))}%` }} title={`${FEATURE[s]}: ${count(s)} of ${feats.length}`} />)}
             </div>
             <p className="board-legend small">
-              {order.filter((s) => count(s)).map((s) => <span key={s}><i className={"sw f-" + s} />{FEATURE[s]}: {count(s)} of {feats.length} ({pct(count(s))}%)</span>)}
+              {order.filter((s) => count(s)).map((s) => <span key={s}><i className={"sw f-" + s} data-state={STATE_OF[s]} />{FEATURE[s]}: {count(s)} of {feats.length} ({pct(count(s))}%)</span>)}
             </p>
             <p className="small muted">each feature takes its color from its steps: all done and nothing open = built; done with open items = open item; any failed = failed</p>
-            <div className="board-feats">
-              {feats.map((f) => (
-                <div key={f.feature} className={"board-feat f-" + f.state} title={f.steps.map(title).join(" · ")}>
-                  <SrcLine ids={f.steps.length ? f.steps : null} ctx={ctx}>
+            {order.map((s) => (
+              <Chunks key={s} head={FEATURE_HEAD[s]} state={STATE_OF[s]} wrap="board-feats" items={feats.filter((f) => f.state === s).map((f) => (
+                <div key={f.feature} className={"board-feat f-" + f.state} data-state={STATE_OF[f.state]} title={f.steps.map(title).join(" · ")}>
+                  <SrcLine ids={f.steps.length ? f.steps : null} ctx={ctx} changed={changed(featKey(f))}>
                     <b>{f.feature}</b>
                     <span className="board-key">{f.state === "next" ? FEATURE.next : f.key || FEATURE[f.state]}</span>
                     {f.open > 0 && <span className="small muted">{f.open} open</span>}
                   </SrcLine>
                 </div>
-              ))}
-            </div>
+              ))} />
+            ))}
           </div>
           {mats.length > 0 && (
             <div className="board-box">
@@ -275,12 +314,11 @@ export function ReportBoard({ plan, v, steps, evidence, asked, onOpenItem, stale
                 const list = mats.filter((m) => m.kind === kind);
                 return list.length > 0 && (
                   <div key={kind} className="board-mats">
-                    <p className="small"><b>{label}</b> <span className="muted">({list.length})</span></p>
-                    {list.map((m, i) => (
+                    <Chunks head={label} items={list.map((m, i) => (
                       <SrcLine key={i} ids={m.path ? [m.path] : null} ctx={ctx} className="src-bullet">
                         {md(`${m.path ? `[${m.name}](<${m.path}>)` : m.name}${m.note ? ` · ${m.note}` : ""}${m.auto ? " · *tự gom*" : ""}`, plan)}
                       </SrcLine>
-                    ))}
+                    ))} />
                   </div>
                 );
               })}
@@ -294,20 +332,22 @@ export function ReportBoard({ plan, v, steps, evidence, asked, onOpenItem, stale
           <p className="board-lab">Needs you ({failed.length + waiting.length + (openTotal ? 1 : 0)})</p>
           {failed.length + waiting.length + openTotal === 0 && <p className="small muted">Nothing waits for you.</p>}
           <div className="board-need">
-            {failed.map((st) => <SrcLine key={st.id} ids={[st.id]} ctx={ctx}><span className="bad">✖ {st.id} {st.title} failed</span></SrcLine>)}
-            {waiting.map((q) => (
-              <SrcLine key={q.id} ids={q.stepId ? [q.stepId] : null} ctx={ctx} own={{ label: "inbox", open: () => onOpenItem(q.id) }}>
-                <span className="wait-fg">? <button className="link" onClick={() => onOpenItem(q.id)}>{q.title}</button></span>
+            <Chunks head="Steps failed" state="need" items={failed.map((st) => (
+              <SrcLine key={st.id} ids={[st.id]} ctx={ctx} changed={changed(`failed|${st.id}`)}><span className="need" data-state="need">✖ {st.id} {st.title} failed</span></SrcLine>))} />
+            <Chunks head="Questions waiting" state="need" items={waiting.map((q) => (
+              <SrcLine key={q.id} ids={q.stepId ? [q.stepId] : null} ctx={ctx} own={{ label: "inbox", open: () => onOpenItem(q.id) }} changed={changed(`wait|${q.id}`)}>
+                <span className="need" data-state="need">? <button className="link need" onClick={() => onOpenItem(q.id)}>{q.title}</button></span>
               </SrcLine>
-            ))}
-            {openTotal > 0 && <SrcLine ids={["leftover"]} ctx={ctx}>○ {openTotal} open items</SrcLine>}
+            ))} />
+            <Chunks head="Open items" state="need" items={openTotal > 0 ? [
+              <SrcLine key="o" ids={["leftover"]} ctx={ctx} changed={changed(keys.open)}><span className="need" data-state="need">○ {openTotal} open items</span></SrcLine>] : []} />
           </div>
         </div>
         {latest && (
           <div className="board-box">
             <p className="board-lab">Latest result · {latest.sv.stepId} {title(latest.sv.stepId)}</p>
-            <SrcLine ids={[latest.sv.stepId]} ctx={ctx}>
-              <p className="small"><span className={"status " + latest.sv.state}>{latest.sv.state}</span> {keyNumber(latest.last.reply, latest.last.report)} <span className="muted">· {when(latest.last.at)}</span></p>
+            <SrcLine ids={[latest.sv.stepId]} ctx={ctx} changed={changed(keys.latest)}>
+              <p className="small"><span className={"status " + latest.sv.state} data-state={latest.sv.state === "done" ? "done" : latest.sv.state === "failed" ? "failed" : "doing"}>{latest.sv.state}</span> {keyNumber(latest.last.reply, latest.last.report)} <span className="muted">· {when(latest.last.at)}</span></p>
             </SrcLine>
             {latestPic ? <LocalImg src={latestPic} alt={latestPic.split(/[\/]/).pop()} cwd={plan.cwd} /> : <p className="small muted">no picture</p>}
           </div>
