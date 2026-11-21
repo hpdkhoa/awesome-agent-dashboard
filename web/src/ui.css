@@ -214,6 +214,10 @@ span[data-state], b[data-state], p[data-state], .board-feat[data-state] .board-k
 .board-feat[data-state="next"] .board-key { font-weight: normal; }
 .status[data-state] { color: var(--st); } .status[data-state]::before { background: var(--st); }
 .board-need .link.need { color: var(--wait-fg); }
+/* s8 the 4-line answer strip (plan 44fc4979, "4-line answer strip") and the latest result's numbers */
+.glance-strip p[data-strip-line] { margin: 0.15rem 0; font-size: 1.05rem; } .glance-strip b { margin-right: 0.4rem; }
+.board-box[data-latest] img { max-height: 14rem; max-width: 100%; width: auto; object-fit: contain; }
+.latest-nums { border-collapse: collapse; margin: 0.3rem 0; } .latest-nums td { padding: 0.1rem 0.6rem 0.1rem 0; } .latest-nums .num { text-align: right; }
 .board-group { margin: 0.25rem 0 0.4rem; } .board-sub { margin: 0.35rem 0 0.15rem; }
 /* rule B7: the "changed" mark carries no state colour, only an outline in the text colour */
 .changed-mark { font-size: 0.72rem; line-height: 1.5; padding: 0 0.45rem; border-radius: 999px; border: 1px solid var(--fg); color: var(--fg); font-weight: bold; white-space: nowrap; }

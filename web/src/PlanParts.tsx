@@ -260,6 +260,19 @@ export function ReportBoard({ plan, v, steps, evidence, asked, onOpenItem, stale
     const t = setTimeout(() => saveBoardSeen(plan.id, v.n, keyStr.split("\n")), 3000);
     return () => clearTimeout(t);
   }, [seen.loaded, keyStr, isCurrent, plan.id, v.n]);
+  // s8 (plan 44fc4979), the owner's pick "4-line answer strip": the glance test's 4 questions answered on top, one
+  // line each: For (What for), Done (steps done of all), Next (the step running now, else the first not done in plan
+  // order), Waits for you (failed steps, questions waiting, open items). The owner's words: "I don't see it yet".
+  const stOf = (id: string) => steps.find((x) => x.stepId === id)?.state ?? "next";
+  const doneIds = rows.filter((st) => stOf(st.id) === "done").map((st) => st.id);
+  const nowRows = rows.filter((st) => ["now", "checking"].includes(stOf(st.id)));
+  const nextRows = nowRows.length ? nowRows : rows.filter((st) => !["done", "failed"].includes(stOf(st.id))).slice(0, 1);
+  const waitN = failed.length + waiting.length + (openTotal ? 1 : 0);
+  const waitText = [failed.length ? `${failed.length} failed` : "", waiting.length ? `${waiting.length} question${waiting.length > 1 ? "s" : ""}` : "",
+    openTotal ? `${openTotal} open item${openTotal > 1 ? "s" : ""}` : ""].filter(Boolean).join(" · ");
+  // the newest version of the latest step that carries a report (a receipt version after a done report has none)
+  const latestReport = latest ? [...latest.sv.versions].reverse().find((x) => x.report)?.report ?? null : null;
+  const latestNums = (latestReport?.numbers ?? []).slice(0, 4);
   // Idea in its named sub-groups (ideaGroups, rule B2); a board that names none shows one list and the rule check flags it
   const ideaLine = (x: string, i: number) => (
     <SrcLine key={i} ids={ideaSrc[i] ?? null} ctx={ctx} className="src-bullet" changed={changed(keys.idea[i])}>{md(x, plan)}</SrcLine>);
@@ -273,15 +286,48 @@ export function ReportBoard({ plan, v, steps, evidence, asked, onOpenItem, stale
       {!b && <p className="small muted">This plan has no board yet: its session adds What for, Idea and the product list with the next plan version.</p>}
       {b && (
         <>
+          <div className="board-box glance-strip" data-strip>
+            <p className="board-lab">At a glance</p>
+            <SrcLine ids={b.src?.whatFor ?? null} ctx={ctx} changed={changed(keys.what)}>
+              <p data-strip-line="for"><b>For</b> {b.whatFor}</p>
+            </SrcLine>
+            <SrcLine ids={doneIds.length ? doneIds : ["steps"]} ctx={ctx}>
+              <p data-strip-line="done"><b data-state="done">Done {doneIds.length} of {rows.length}</b>{doneIds.length ? "" : " · none yet"}</p>
+            </SrcLine>
+            <SrcLine ids={nextRows.length ? nextRows.map((st) => st.id) : ["steps"]} ctx={ctx}>
+              <p data-strip-line="next">{nextRows.length
+                ? <><b data-state={nowRows.length ? "doing" : "next"}>Next</b> {nextRows.map((st) => `${st.id} ${st.title}${nowRows.length ? " (running)" : ""}`).join(" · ")}</>
+                : <><b data-state="done">Next</b> nothing: every step is done or failed</>}</p>
+            </SrcLine>
+            <SrcLine ids={waitN ? [...failed.map((st) => st.id), ...(openTotal ? ["leftover"] : [])] : ["leftover"]} ctx={ctx}
+              own={waiting[0] ? { label: "inbox", open: () => onOpenItem(waiting[0].id) } : undefined}>
+              <p data-strip-line="waits">{waitN
+                ? <><b data-state="need">Waits for you</b> <span data-state="need">{waitText}</span></>
+                : <><b data-state="done">Waits for you</b> nothing</>}</p>
+            </SrcLine>
+          </div>
+          {latest && (
+            <div className="board-box" data-latest>
+              <p className="board-lab">Latest result · {latest.sv.stepId} {title(latest.sv.stepId)}</p>
+              <SrcLine ids={[latest.sv.stepId]} ctx={ctx} changed={changed(keys.latest)}>
+                <p className="small"><span className={"status " + latest.sv.state} data-state={latest.sv.state === "done" ? "done" : latest.sv.state === "failed" ? "failed" : "doing"}>{latest.sv.state}</span> <span className="muted">· {when(latest.last.at)}</span></p>
+              </SrcLine>
+              {latestNums.length > 0
+                ? <table className="latest-nums small"><tbody>{latestNums.map((n, i) => (
+                    <tr key={i}><td>{n.metric}</td><td className="num">{n.before || "·"}</td><td>→</td><td className="num"><b>{n.after}</b></td></tr>))}</tbody></table>
+                : <p className="small">{keyNumber(latest.last.reply, latestReport) || "no numbers in the report"}</p>}
+              {latestPic ? <LocalImg src={latestPic} alt={latestPic.split(/[\/]/).pop()} cwd={plan.cwd} /> : <p className="small muted">no picture</p>}
+            </div>
+          )}
           <CoverageBar planId={plan.id} ctx={ctx} base={{ boardIds, goal: v.parts?.goal ?? "", rules: v.parts ? partLines(v.parts, "rules") : [],
             lessons: v.parts ? partLines(v.parts, "lessons") : [], leftover: v.parts?.leftover ?? [], reports }} />
-          <div className="board-box"><p className="board-lab">What for</p><SrcLine ids={b.src?.whatFor ?? null} ctx={ctx} changed={changed(keys.what)}><p>{b.whatFor}</p></SrcLine></div>
           {b.idea.length > 0 && (
             <div className="board-box">
-              <p className="board-lab">Idea</p>
+              <Section id="plan.board.idea" title={`Idea (${b.idea.length})`} extra={igOk ? ideaGroups.map((g) => g.head).join(" · ") : ""}>
               {igOk
                 ? ideaGroups.map((g) => <Chunks key={g.head} head={g.head} items={g.idx.map((i) => ideaLine(b.idea[i], i))} />)
                 : b.idea.map(ideaLine)}
+              </Section>
             </div>
           )}
           <div className="board-box">
@@ -343,15 +389,6 @@ export function ReportBoard({ plan, v, steps, evidence, asked, onOpenItem, stale
               <SrcLine key="o" ids={["leftover"]} ctx={ctx} changed={changed(keys.open)}><span className="need" data-state="need">○ {openTotal} open items</span></SrcLine>] : []} />
           </div>
         </div>
-        {latest && (
-          <div className="board-box">
-            <p className="board-lab">Latest result · {latest.sv.stepId} {title(latest.sv.stepId)}</p>
-            <SrcLine ids={[latest.sv.stepId]} ctx={ctx} changed={changed(keys.latest)}>
-              <p className="small"><span className={"status " + latest.sv.state} data-state={latest.sv.state === "done" ? "done" : latest.sv.state === "failed" ? "failed" : "doing"}>{latest.sv.state}</span> {keyNumber(latest.last.reply, latest.last.report)} <span className="muted">· {when(latest.last.at)}</span></p>
-            </SrcLine>
-            {latestPic ? <LocalImg src={latestPic} alt={latestPic.split(/[\/]/).pop()} cwd={plan.cwd} /> : <p className="small muted">no picture</p>}
-          </div>
-        )}
       </div>
       {b && (  // s5: after the board's content, so What for stays near the top (rule B1)
         <div className="board-box"><p className="board-lab">Rules and glance</p>

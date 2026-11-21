@@ -26,7 +26,7 @@ def now_iso() -> str:
 
 S7 = "waits for s7"  # the state older versions' saved checks hold (s5); s7 made B2, B4 and B7 real checks
 # the page's group headings on the report board (web/src/PlanParts.tsx ReportBoard, BoardRules.tsx, Coverage.tsx); keep in step
-HEADINGS = ["Coverage", "What for", "Idea", "Progress vs the final product", "Materials", "Needs you", "Latest result", "Rules and glance",
+HEADINGS = ["At a glance", "Coverage", "Idea", "Progress vs the final product", "Materials", "Needs you", "Latest result", "Rules and glance",
             "Features built", "Features with open items", "Features being built", "Features failed", "Features not built",
             "Steps failed", "Questions waiting", "Open items", "Rules failing", "Rules passing", "Rules waiting",
             "Missing", "Stories", "Other files", "Counts", "Spread"]
