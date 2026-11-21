@@ -40,6 +40,8 @@ import { saveBoardSeen, useBoardSeen } from "./data";
 // Plan versions change only with the plan's data; each step shows its own versions, the last reply like a message.
 
 const KIND_NAME = Object.fromEntries(PLAN_KINDS) as Record<PlanKind, string>;
+// a version posted by the owner's Update board button (bridge inbox.py refuse_not_board_only): a board-only change
+const CHANGE_NAME: Record<string, string> = { ...KIND_NAME, board: "Update board" };
 const HINT: Record<PlanKind, string> = {
   qa: "Ask about the plan. Nothing changes; if a change is needed, the session asks you to switch first.",
   goal: "The new goal. Steps that no longer fit change with it. A new plan version.",
@@ -943,7 +945,7 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
         </ul>
       )}
       <p className="change-note small">
-        v{v.n} · {when(v.createdAt)} · {v.change ? <b>{KIND_NAME[v.change.kind]}</b> : null}
+        v{v.n} · {when(v.createdAt)} · {v.change ? <b>{CHANGE_NAME[v.change.kind]}</b> : null}
         {v.change ? `: ${v.change.message}` : v.note} <MoreMenu path={`planVersions/${plan.id}_v${v.n}`} />
       </p>
 

@@ -543,6 +543,28 @@ class Inbox:
             out["text"] = v.get("text", "")
         return {**out, "parts": parts, "harness": harness, "stepStates": states}
 
+    def refuse_not_board_only(self, plan_id: str, plan: dict, parts: dict | None, text: str, phase: str,
+                              harness: list | None) -> None:
+        """An Update board run (the owner's button) posts with no switch only a version whose one change is the board:
+        same phase, same harness, every other part equal to the current version's. Anything else still needs plan_switch."""
+        cur = self.store.get(f"planVersions/{plan_id}_v{plan.get('current', 0)}") or {}
+        why = ""
+        if parts is None:
+            why = "it sends no parts"
+        elif (phase or "").strip().lower() not in ("", plan.get("phase") or PHASES[0]):
+            why = "it moves the phase"
+        elif harness is not None and clean_harness(harness) != clean_harness(cur.get("harness")):
+            why = "it changes the harness"
+        else:
+            new, old = clean_parts(parts), clean_parts(cur.get("parts") or {})
+            diff = sorted(k for k in set(new) | set(old) if k != "board" and new.get(k) != old.get(k))
+            if diff:
+                why = "it changes " + ", ".join(diff)
+        if why:
+            raise ValueError(f"This is an Update board run: it posts only a board change with no switch, and {why}. "
+                             "Send the current parts with only parts.board changed, or ask the owner with plan_switch. "
+                             "Nothing was saved.")
+
     def refuse_bad_sources(self, parts: dict) -> None:
         """Each board source id points to something real (plan 44fc4979 s3): a KB record in the store, a file on this
         PC (with :line, a line it has). Nothing is saved when one does not."""
@@ -649,7 +671,13 @@ class Inbox:
         if not plan:
             raise ValueError(f"no plan {plan_id}")
         run = self.running_command()
-        if run and run.get("kind") in NO_PLAN_CHANGE and not run.get("switchedTo"):
+        # the owner's Update board button is the owner's order (the owner, 2026-11-21: "this workflow should be at most
+        # one time accept only, I don't even want to accept it because it is my manual button press action"): its run
+        # posts a board-only version with no switch; any other change in it still needs plan_switch
+        if run and run.get("kind") in NO_PLAN_CHANGE and not run.get("switchedTo") and run.get("boardUpdate"):
+            self.refuse_not_board_only(plan_id, plan, parts, text, phase, harness)
+            change = "board"
+        elif run and run.get("kind") in NO_PLAN_CHANGE and not run.get("switchedTo"):
             raise ValueError(f"This is a {KINDS[run['kind']]} message: it never changes the plan. If the plan needs a "
                              "change, ask the owner with plan_switch first.")
         if run and run.get("kind") in KINDS and not change:
@@ -714,7 +742,7 @@ class Inbox:
                 version["boardCheck"] = bc
         if harness:
             version["harness"] = harness
-        if change in KINDS:
+        if change in KINDS or change == "board":
             version["change"] = {"kind": change, "message": redact((run or {}).get("ownerText") or (run or {}).get("prompt", ""), 2000)}
         self.store.put_many({f"planVersions/{plan_id}_v{n}": version})
         self.store.update(f"plans/{plan_id}", {"current": n, "last": n, "chosen": n, "updatedAt": now_iso(), "phase": phase})

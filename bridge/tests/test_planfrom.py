@@ -470,3 +470,28 @@ def test_board_without_materials_has_no_materials_key():
     from agent_bridge.inbox import clean_board
 
     assert "materials" not in clean_board({"what_for": "x", "product": [{"feature": "f", "steps": ["s1"]}]}, ["s1"])
+
+
+def test_an_update_board_run_posts_a_board_only_version_with_no_switch():
+    # the owner, 2026-11-21: "this workflow should be at most one time accept only, I don't even want to accept it
+    # because it is my manual button press action"
+    store = FakeStore()
+    ib = Inbox(store, "PC", [], "s1", "/x")
+    pid = ib.plan_start("p", parts=PARTS)
+    cur = store.get(f"planVersions/{pid}_v1")["parts"]
+    store.put_many({"commands/b1": {"id": "b1", "action": "message", "kind": "action", "boardUpdate": True,
+                                    "sessionId": "s1", "status": "running", "prompt": "Update board", "startedAt": "t"}})
+    board = {"what_for": "x", "product": [{"feature": "f", "steps": ["s1"]}], "glossary": [{"group": "g", "term": "t", "means": "m"}]}
+    with pytest.raises(ValueError, match="it changes goal"):
+        ib.plan_version(pid, "", "x", parts={**cur, "goal": "another goal", "board": board})
+    with pytest.raises(ValueError, match="moves the phase"):
+        ib.plan_version(pid, "", "x", parts={**cur, "board": board}, phase="build", order="go")
+    n = ib.plan_version(pid, "", "board", parts={**cur, "board": board})
+    v = store.get(f"planVersions/{pid}_v{n}")
+    assert n == 2 and v["change"]["kind"] == "board" and v["parts"]["board"]["glossary"]
+    # a plain Action run (no button) is still refused
+    store.update("commands/b1", {"status": "done"})
+    store.put_many({"commands/a2": {"id": "a2", "action": "message", "kind": "action", "sessionId": "s1",
+                                    "status": "running", "prompt": "fix it", "startedAt": "t2"}})
+    with pytest.raises(ValueError, match="Action message"):
+        ib.plan_version(pid, "", "x", parts={**cur, "board": board})

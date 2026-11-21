@@ -169,7 +169,7 @@ export type StepReport = {
 export type Decision = { id: string; title: string; choice: string; text: string };
 export type PlanVersion = {
   id: string; planId: string; n: number; text: string; note: string; createdAt: string; parent?: number; madeBy?: Decision[];
-  parts?: Parts; change?: { kind: PlanKind; message: string };
+  parts?: Parts; change?: { kind: PlanKind | "board"; message: string };
   phase?: Phase; phaseMove?: { from: Phase; to: Phase; order: string }; // phases.ts
   harness?: HarnessItem[]; // harness.ts: the list as it is in this version
   boardCheck?: BoardCheck; // s5: the auto rule check B1 to B10 the bridge ran on this version (boardrules.py)

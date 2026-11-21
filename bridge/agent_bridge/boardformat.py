@@ -49,4 +49,6 @@ def update_block(gaps: list[str], by_button: bool) -> str:
             "groups when the idea has more than 4 lines, a source chip on every line (rules B1 to B10, "
             "cc/dashboard/ATTENTION.md). Change only the board; keep every other part as it is. Count steps, rules, "
             "lessons, leftover, harness, idea and features before and after: any loss stops the call (rule:23). Post "
-            "it with plan_version, read it back, and say in the reply what changed on the board.")
+            "it with plan_version, read it back, and say in the reply what changed on the board."
+            + (" The button is the owner's order: this run posts the board-only plan_version with no plan_switch "
+               "(a change to any other part is refused)." if by_button else ""))
