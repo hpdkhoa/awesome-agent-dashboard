@@ -138,6 +138,19 @@ def test_runs_lost_by_a_restart_are_marked_or_finished_from_their_out_file(tmp_p
     assert any("c2: done" in x and "finished from its .out" in x for x in log) and sum("lost" in x for x in log) == 2
 
 
+def test_answer_back_leaves_a_reopened_or_handed_on_item_alone(tmp_path):
+    """find:24 (the owner, 2026-11-21: "close what is still delivering"): a result reopened while the run that delivers
+    an earlier answer on it went stays open; an item now delivering under another command stays with it."""
+    store = FakeStore()
+    store.put_many({"inbox/a": {"id": "a", "status": "delivering", "commandId": "c1"},
+                    "inbox/b": {"id": "b", "status": "open", "commandId": "c1", "answer": None},
+                    "inbox/d": {"id": "d", "status": "delivering", "commandId": "c9"}})
+    Runs(store, "PC", [], "claude", tmp_path)._answer_back({"id": "c1", "inboxIds": ["a", "b", "d"]}, {"status": "delivered", "deliveredVia": "resume"})
+    assert store.get("inbox/a")["status"] == "delivered"
+    assert store.get("inbox/b")["status"] == "open" and "deliveredVia" not in store.get("inbox/b")
+    assert store.get("inbox/d")["status"] == "delivering"
+
+
 def test_command_shape_and_folder_match():
     c = start_command("claude", "do x", "sid")
     assert c[:3] == ["claude", "-p", "do x"] and c[c.index("--permission-prompt-tool") + 1] == APPROVAL_TOOL

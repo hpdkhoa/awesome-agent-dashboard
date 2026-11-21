@@ -542,8 +542,15 @@ class Runs:
         return log + self.chains.resume()  # chain.py: a chain left on goes on with the steps not done
 
     def _answer_back(self, c: dict, fields: dict) -> None:
-        """Writes a delivered answer's outcome on its inbox item."""
+        """Writes a delivered answer's outcome on its inbox item, only while the item is still delivering under this
+        run's command. An item reopened while the run went (a result edited back to open, F12) or handed to another
+        delivery is left alone: the end of a run once closed 3 unread results (find:24; the owner, 2026-11-21:
+        "close what is still delivering")."""
         for i in c.get("inboxIds") or ([c["inboxId"]] if c.get("inboxId") else []):
+            item = self.store.get(f"inbox/{i}") or {}
+            other = item.get("commandId") and c.get("id") and item.get("commandId") != c.get("id")
+            if item.get("status") != "delivering" or other:
+                continue
             self.store.update(f"inbox/{i}", fields)
 
     def prefs(self) -> dict:
