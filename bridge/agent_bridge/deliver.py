@@ -62,6 +62,7 @@ def deliver(store, machine: str, claude: str | None, rows: list[dict] | None = N
         if item.get("machine") == machine and c and c.get("status") == "cancelled":
             store.update(f"inbox/{item['id']}", {"status": "closed", "error": "Cancelled on the page.", "waitReason": None})
             log.append(f"{item['id']}: cancelled")
+    ready: dict[str, list[dict]] = {}
     for item in by("answered"):
         if item.get("kind") == "approval":
             continue  # approvals are only ever answered live, inside the waiting run
@@ -87,14 +88,26 @@ def deliver(store, machine: str, claude: str | None, rows: list[dict] | None = N
                          "error": "No signed-in claude CLI on this machine. Install Claude Code and sign in, or set CLAUDE_BIN."})
             log.append(f"{item['id']}: no claude CLI")
             continue
+        ready.setdefault(item["sessionId"], []).append(item)
+    # all in one turn (the owner's pick, 2026-11-21, plan 44fc4979: "All in one turn"): every answer waiting for a
+    # session goes in one message run, in the order the owner answered, so the session sees them together
+    for sid, items in ready.items():
+        items.sort(key=lambda i: ((i.get("answer") or {}).get("at") or "", i.get("batchIndex", 0)))
+        ids = [i["id"] for i in items]
+        texts = [answer_text(i, store) for i in items]
+        sep = "\n\n"
+        head = (f"The owner answered {len(items)} items; all their answers come together in this message.{sep}"
+                if len(items) > 1 else "")
         cid = uuid.uuid4().hex[:20]
         store.put_many({f"commands/{cid}": {
-            "id": cid, "action": "message", "machine": machine, "sessionId": item["sessionId"], "cwd": item.get("cwd", ""),
-            "prompt": answer_text(item), "inboxId": item["id"], "force": bool(item.get("force")), "status": "new",
-            "createdAt": now_iso(), **answer_place(item),
+            "id": cid, "action": "message", "machine": machine, "sessionId": sid, "cwd": items[0].get("cwd", ""),
+            "prompt": head + sep.join(texts), "inboxId": ids[0], "inboxIds": ids,
+            "force": any(bool(i.get("force")) for i in items), "status": "new", "createdAt": now_iso(),
+            **answer_place(items[0]),
         }})
-        store.update(f"inbox/{item['id']}", {"status": "delivering", "commandId": cid, "lastTryAt": now_iso(), "error": None})
-        log.append(f"{item['id']}: handed to run {cid}")
+        for i in ids:
+            store.update(f"inbox/{i}", {"status": "delivering", "commandId": cid, "lastTryAt": now_iso(), "error": None})
+        log.append(f"{', '.join(ids)}: handed to run {cid}")
     for item in by("open"):
         if item.get("kind") != "question" or item.get("machine") != machine or item.get("sessionId") in (None, "", "unknown"):
             continue

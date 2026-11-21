@@ -435,3 +435,54 @@ def test_plan_get_reads_the_current_parts_harness_and_step_states():
         ib.plan_get(pid, "nope")
     with pytest.raises(ValueError):
         ib.plan_get("missing")
+
+
+# Inbox send fix (the owner's picks, 2026-11-21, plan 44fc4979): "Refuse the re-ask", "Ask me if they differ",
+# "All in one turn", "fix now no need new plan or step".
+OPT = [{"label": "A", "differs": "d", "example": {"type": "text", "draft": "x"}}]
+
+
+def test_a_re_ask_of_a_waiting_question_on_the_same_plan_is_refused():
+    from agent_bridge.inbox import repeat_of
+    store = FakeStore()
+    qid = make(store).post("question", "s8 check", "q", OPT, extra={"planId": "p1"})
+    assert qid in repeat_of(store, "p1", ["S8 check?"]) and "inbox_redraw" in repeat_of(store, "p1", ["s8 check"])
+    assert repeat_of(store, "p2", ["s8 check"]) == "" and repeat_of(store, "p1", ["s8 ship"]) == ""
+    assert qid in repeat_of(store, "p1", ["s8 check, with previews"])  # same start too
+    assert repeat_of(store, "p1", ["s8"]) != "" and repeat_of(store, "p1", ["s8 checks"]) == ""  # whole words only
+    owner_answers(store, qid, "A")
+    assert "on its way" in repeat_of(store, "p1", ["s8 check"])  # answered, not delivered yet
+    store.update(f"inbox/{qid}", {"status": "delivered"})
+    assert repeat_of(store, "p1", ["s8 check"]) == ""  # the session has the answer: asking again is allowed
+
+
+def test_two_different_answers_to_one_question_ask_the_owner_which_counts():
+    store = FakeStore()
+    ib = make(store)
+    a = ib.post("question", "s8 check", "q", OPT, extra={"planId": "p1"})
+    b = ib.post("question", "s8 check", "q", OPT, extra={"planId": "p1"})  # asked again before a was delivered
+    owner_answers(store, a, "Your ok")
+    owner_answers(store, b, "", "no test")
+    text = answer_text(store.get(f"inbox/{b}"), store)
+    assert "answers differ" in text and a in text and "Your ok" in text
+    owner_answers(store, b, "Your ok")
+    assert "differ" not in answer_text(store.get(f"inbox/{b}"), store)  # the same answer twice: no note
+
+
+def test_every_waiting_answer_of_a_session_goes_in_one_turn_in_answer_order():
+    store = FakeStore()
+    ib = make(store)
+    ids = ib.post_batch([{"title": t, "text": "?", "options": OPT} for t in ("one", "two", "three")])
+    for k, i in enumerate(ids):
+        store.update(f"inbox/{i}", {"status": "answered", "answer": {"choice": "A", "text": "", "at": f"t{3 - k}"}})
+    other = make(store, "s2").post("question", "x", "x")
+    owner_answers(store, other, "A")
+    beat(store, "s1", 10)
+    beat(store, "s2", 10)
+    deliver(store, "PC", "claude")
+    cs = store.where("commands", "action", "message")
+    assert len(cs) == 2  # one run per session, not one per answer
+    c = next(x for x in cs if x["sessionId"] == "s1")
+    assert c["inboxIds"] == list(reversed(ids)) and "answered 3 items" in c["prompt"]
+    assert c["prompt"].index('"three"') < c["prompt"].index('"one"')
+    assert all(store.get(f"inbox/{i}")["commandId"] == c["id"] for i in ids)

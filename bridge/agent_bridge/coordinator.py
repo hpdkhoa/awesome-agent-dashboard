@@ -54,6 +54,11 @@ def ask(inbox, question: str, title: str = "", options: list[dict] | None = None
              q.get("recommended")) for q in more_questions or []]
     if routes[0] == COORDINATOR:
         return COORDINATOR, [post(inbox, *q) for q in [first, *rest]]
+    from .inbox import repeat_of
+    plan = inbox.open_plan()
+    why = repeat_of(inbox.store, (plan or {}).get("id", ""), [q[0] for q in [first, *rest]])
+    if why:
+        raise ValueError(why.removeprefix("Not asked: "))
     if rest:
         batch = [{"title": t, "text": x, "options": o, "recommended": r, "extra": {"topic": topic}}
                  for (t, x, o, r), topic in zip([first, *rest], routes)]

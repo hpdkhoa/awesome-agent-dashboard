@@ -1056,7 +1056,7 @@ class Inbox:
         except OSError:
             pass
         self.store.update(f"inbox/{item_id}", {"status": "delivered", "deliveredAt": now_iso(), "deliveredVia": "live"})
-        return answer_text(item)
+        return answer_text(item, self.store)
 
     def other_replies(self, skip: str = "") -> list[str]:
         """Answers to this session's other items, so a live session picks them up on any inbox call."""
@@ -1081,7 +1081,78 @@ def approval_reply(item: dict | None, tool_input: dict) -> str:
     return json.dumps({"behavior": "deny", "message": "The owner denied this call." + (f" Note: {a['text']}" if a.get("text") else "")})
 
 
-def answer_text(item: dict) -> str:
+def same_title(title: str) -> str:
+    """A question's title for the repeat check: lower case, words only (so "s8 check" and "S8 check?" match)."""
+    return " ".join(re.findall(r"[0-9a-z]+", str(title or "").lower()))
+
+
+WAITING = ("open", "answered", "delivering")  # a question the session has not got the answer of yet
+
+
+def repeat_of(store, plan_id: str, titles: list[str]) -> str:
+    """The refusal for a re-ask (the owner's pick, 2026-11-21, plan 44fc4979: "Refuse the re-ask"): a question with
+    the same title on the same plan that is still open, or answered but not yet delivered, refuses the new ask, so
+    the owner only ever sees one copy. Returns "" when none, else why."""
+    if not plan_id:
+        return ""
+    want = [same_title(t).split() for t in titles if same_title(t)]
+
+    def starts(a: list[str], b: list[str]) -> bool:  # "Same start too" (the owner's pick, 2026-11-21): one title's
+        n = min(len(a), len(b))                        # words begin with all of the other's words
+        return n > 0 and a[:n] == b[:n]
+
+    for item in store.where("inbox", "planId", plan_id):
+        if item.get("kind") != "question" or item.get("status") not in WAITING or item.get("withdrawn"):
+            continue
+        if any(starts(same_title(item.get("title", "")).split(), w) for w in want):
+            i = item["id"]
+            if item.get("status") == "open":
+                return (f'Not asked: "{item.get("title", "")}" is already open on this plan (id {i}). Change it in place '
+                        f'with inbox_redraw(item_id="{i}", ...) or wait with inbox_wait(item_id="{i}"); never ask it again.')
+            return (f'Not asked: the owner already answered "{item.get("title", "")}" (id {i}); the answer is on its way '
+                    f'to this session. Wait for it (inbox_wait(item_id="{i}")) and read it before asking again.')
+    return ""
+
+
+def differ_note(store, item: dict) -> str:
+    """The owner's pick, 2026-11-21 ("Ask me if they differ"): when the same question (same plan, same title) was
+    asked twice while the first was still waiting, and the 2 answers differ, the session asks the owner which counts."""
+    if not item.get("planId") or item.get("kind") != "question":
+        return ""
+    now = now_iso()
+
+    def says(x: dict) -> tuple:
+        a = x.get("answer") or {}
+        return (str(a.get("choice") or "").strip(), str(a.get("text") or "").strip())
+
+    def shown(x: dict) -> str:
+        c, t = says(x)
+        return " / ".join(v for v in (c, t[:160]) if v) or "no choice"
+
+    me, out = same_title(item.get("title", "")), []
+    for s in store.where("inbox", "planId", item["planId"]):
+        if (s.get("id") == item.get("id") or s.get("kind") != "question" or not s.get("answer")
+                or same_title(s.get("title", "")) != me or s.get("status") not in (*WAITING, "delivered")):
+            continue
+        overlap = (s.get("createdAt", "") <= (item.get("deliveredAt") or now)
+                   and item.get("createdAt", "") <= (s.get("deliveredAt") or now))
+        if overlap and says(s) != says(item):
+            out.append(f'"{shown(s)}" (id {s["id"]})')
+    if not out:
+        return ""
+    return (f'This question was asked more than once and the answers differ: "{shown(item)}" (id {item.get("id")}) and '
+            + ", ".join(out) + ". Ask the owner which one counts before acting on either (the owner's pick, "
+            '2026-11-21: "Ask me if they differ").')
+
+
+def answer_text(item: dict, store=None) -> str:
+    """The answer as text for the session; with store, plus the differ note when the same question got 2 answers."""
+    text = _answer_text(item)
+    note = differ_note(store, item) if store is not None else ""
+    return text + (" " + note if note else "")
+
+
+def _answer_text(item: dict) -> str:
     a = item.get("answer") or {}
     kind = {"question": "your question", "suggestion": "your suggestion", "result": "your result"}.get(item.get("kind"), "")
     parts = [f'The owner answered {kind} "{item.get("title", "")}" on the dashboard.']

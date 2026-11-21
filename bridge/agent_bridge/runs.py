@@ -543,8 +543,8 @@ class Runs:
 
     def _answer_back(self, c: dict, fields: dict) -> None:
         """Writes a delivered answer's outcome on its inbox item."""
-        if c.get("inboxId"):
-            self.store.update(f"inbox/{c['inboxId']}", fields)
+        for i in c.get("inboxIds") or ([c["inboxId"]] if c.get("inboxId") else []):
+            self.store.update(f"inbox/{i}", fields)
 
     def prefs(self) -> dict:
         """meta/runs, the owner's run settings: from the listen once it answered, else read once now (p16)."""
@@ -668,7 +668,7 @@ class Runs:
         else:
             new = {"action": "message", "sessionId": old.get("sessionId", ""), "cwd": old.get("cwd") or old.get("folder", ""),
                    "prompt": prompt if prompt.startswith(CONTINUE_NOTE) else CONTINUE_NOTE + prompt,
-                   **{k: old[k] for k in ("kind", "planId", "stepId", "inboxId", "ownerText", "generate", "planCheck",
+                   **{k: old[k] for k in ("kind", "planId", "stepId", "inboxId", "inboxIds", "ownerText", "generate", "planCheck",
                                           "phaseOrder", "chain") if k in old}}
         self.store.put_many({f"commands/{nid}": {"id": nid, "machine": self.machine, "status": "new",
                                                  "createdAt": now_iso(), "continueOf": target, **new}})
@@ -1460,7 +1460,7 @@ class Runs:
             return 0
         for status in ("answered", "delivering"):
             for item in self.store.where("inbox", "status", status):
-                if item.get("id") != c.get("inboxId") and item.get("sessionId") == sid and item.get("machine") == self.machine:
+                if item.get("id") not in (c.get("inboxIds") or [c.get("inboxId")]) and item.get("sessionId") == sid and item.get("machine") == self.machine:
                     self.store.update(f"inbox/{item['id']}", {"status": "closed", "error": ORPHAN_NOTE})
                     n += 1
         return n
