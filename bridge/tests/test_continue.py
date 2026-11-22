@@ -80,3 +80,20 @@ def test_continue_button_and_its_refusals(tmp_path, monkeypatch):
     runs.step()
     again = store.get(f"commands/{store.get('commands/k4')['continuedAs']}")
     assert again["prompt"] == CONTINUE_NOTE + "limit"  # the note is never doubled
+
+
+def test_a_continued_message_closes_the_answers_it_carries(tmp_path, monkeypatch):
+    """s14, 2026-11-22: answers handed to a run cut by the limit stayed "delivering" after its continue finished."""
+    store, runs, work = setup(tmp_path, monkeypatch)
+    store.put_many({"inbox/q1": {"id": "q1", "status": "delivering", "commandId": "m1"},
+                    "inbox/q2": {"id": "q2", "status": "delivering", "commandId": "m1"}})
+    cmd(store, "m1", action="message", sessionId="s9", cwd=str(work), prompt="limit", inboxId="q1",
+        inboxIds=["q1", "q2"], createdAt="1")
+    wait_done(runs, "m1", store)
+    cmd(store, "k1", action="continue", target="m1", createdAt="2")
+    runs.step()
+    nid = store.get("commands/k1")["continuedAs"]
+    assert all(store.get(f"inbox/{i}")["commandId"] == nid for i in ("q1", "q2"))
+    store.update(f"commands/{nid}", {"prompt": CONTINUE_NOTE + "hello"})
+    wait_done(runs, nid, store)
+    assert [store.get(f"inbox/{i}")["status"] for i in ("q1", "q2")] == ["delivered", "delivered"]

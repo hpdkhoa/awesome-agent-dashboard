@@ -690,6 +690,12 @@ class Runs:
         with self.auto_lock:
             (self.auto or {}).pop(target, None)
         self.store.update(f"commands/{target}", {"continuedBy": nid, "autoContinue": False, "autoBy": None})
+        # the answers this run carried now ride on the leftover run: _answer_back only writes an item whose commandId
+        # is the ending run, so items left on the paused run stayed "delivering" forever (s14, 2026-11-22)
+        for i in new.get("inboxIds") or ([new["inboxId"]] if new.get("inboxId") else []):
+            item = self.store.get(f"inbox/{i}") or {}
+            if item.get("status") == "delivering" and item.get("commandId") == target:
+                self.store.update(f"inbox/{i}", {"commandId": nid})
         return nid, f"{target}: continued as {nid}"
 
     def _continue(self, c: dict) -> str:
