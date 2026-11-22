@@ -13,7 +13,13 @@ export type HealthAnswer = {
   alive: boolean; machine: string; pid: number; startedAt: string; uptimeSeconds: number; runningCommit: string;
   repoCommit: string; newCode: boolean; lastSync: string; runsGoing: number; lastRestart: string; at: string;
   errors: { count: number; hours: number; last: { at: string; line: string }[] };
+  // F10 (bridge resources.py): free disk per drive, RAM, GPU, the limits a run needs, and what is under them now
+  resources?: { disks: { drive: string; freeGB: number; totalGB: number }[]; ramGB: number; ramTotalGB: number;
+    gpus: { name: string; freeGB: number; totalGB: number }[]; limits: { diskGB: number; ramGB: number; gpuGB: number };
+    low: string[]; error?: string };
 };
+const gb = (x: number) => `${Math.round(x * 10) / 10} GB`;
+const lim = (x: number) => (x ? ` (runs need ${x} GB)` : " (not gated)");
 export type HealthState =
   | { kind: "wait" }
   | { kind: "ok"; h: HealthAnswer; at: number }
@@ -149,9 +155,32 @@ export function HealthPanel({ st, restart }: { st: HealthState; restart: (why: "
               <td>Log errors, last {h.errors.hours} h</td>
               <td className={"num" + (h.errors.count ? " warn-text" : "")}>{h.errors.count}</td>
             </tr>
+            {h.resources?.disks?.map((d) => (
+              <tr key={d.drive} data-resource="disk">
+                <td>Free disk {d.drive}{lim(h.resources!.limits.diskGB)}</td>
+                <td className={"num" + (h.resources!.limits.diskGB && d.freeGB < h.resources!.limits.diskGB ? " bad-text" : "")}>{gb(d.freeGB)} of {gb(d.totalGB)}</td>
+              </tr>
+            ))}
+            {h.resources && !h.resources.error && (
+              <tr data-resource="ram">
+                <td>Free RAM{lim(h.resources.limits.ramGB)}</td>
+                <td className={"num" + (h.resources.limits.ramGB && h.resources.ramGB < h.resources.limits.ramGB ? " bad-text" : "")}>{gb(h.resources.ramGB)} of {gb(h.resources.ramTotalGB)}</td>
+              </tr>
+            )}
+            {h.resources?.gpus?.map((g) => (
+              <tr key={g.name} data-resource="gpu">
+                <td>Free GPU {g.name}{lim(h.resources!.limits.gpuGB)}</td>
+                <td className={"num" + (h.resources!.limits.gpuGB && g.freeGB < h.resources!.limits.gpuGB ? " bad-text" : "")}>{gb(g.freeGB)} of {gb(g.totalGB)}</td>
+              </tr>
+            ))}
           </tbody>
         </table>
       )}
+      {h?.resources && (h.resources.low?.length || h.resources.error) ? (
+        <p className="small bad-text" data-resources-low>
+          {h.resources.error ? `Resource check failed: ${h.resources.error}` : `New runs wait: ${h.resources.low.join("; ")}`}
+        </p>
+      ) : null}
       {h && h.errors.last.length > 0 && (
         <ul className="small muted">
           {h.errors.last.map((e, i) => (

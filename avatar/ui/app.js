@@ -1343,15 +1343,181 @@ function cfgSave() {   // a risky key opens the CONFIRM box first; nothing is se
   if (k.risky) { cConf = { name: k.name, old: k.value, value: v }; cfgRender(); fit(); return; }
   cfgSend(k, v, false);
 }
-function cfgOn() { cSay = ""; cConf = null; cfgLoad(); cTick = setInterval(() => setText($("cclock"), hhmmss(new Date())), 1000); }
-function cfgOff() { clearInterval(cTick); cTick = null; $("cval").value = ""; cKeys = null; cSay = ""; cConf = null; }
+function cfgOn() { cSay = ""; cConf = null; cfgLoad(); suAuto(); cTick = setInterval(() => setText($("cclock"), hhmmss(new Date())), 1000); }
+function cfgOff() { if (SU && SU.view !== "run") { SU = null; suRender(); } clearInterval(cTick); cTick = null; $("cval").value = ""; cKeys = null; cSay = ""; cConf = null; }
 $("cbx").addEventListener("change", (e) => { cBox = e.target.value; localStorage.setItem("cfgBox", cBox); $("cval").value = ""; cSay = ""; cfgLoad(); });
 $("ckeys").addEventListener("click", (e) => { const r = e.target.closest(".ckey[data-k]"); if (r && !cBusy) cfgSelect(r.dataset.k); });
 $("cval").addEventListener("input", () => { cSay = ""; cfgRender(); });
 $("cval").addEventListener("keydown", (e) => { if (e.key === "Enter") cfgSave(); });
 $("cyes").addEventListener("click", () => { const k = cfgKey(); if (k && cConf && !cBusy) cfgSend(k, cConf.value, true); });
 $("cno").addEventListener("click", () => { cConf = null; cSay = "not saved: cancelled"; cSayCls = "bad"; cfgRender(); fit(); });
+
+// plan c5cb9485 s14: SET UP BRIDGE (the owner's words 2026-11-16: "I want to add the bridge install inside hayaku setting
+// node, make it as I come to windows, linux, mac still can setup the bridge up, the other setting can show interactive
+// panel to ask for the configuration or start login?"; preview "Approve", Linux "both ways", repo missing "CLONE button").
+// ASK each value (checked here and again in Rust) -> REVIEW the exact setup-box command -> RUN or DRY RUN with its 8 steps
+// live and START LOGIN -> DONE. Opens by itself when this box has no bridge. Reads nothing while CONFIG is closed.
+const SSTEPS = ["1. Python", "2. The bridge's packages", "3. .env", "4. Sign in", "5. The local database", "6. The inbox in Claude Code", "7. The background task", "8. Registered?"];
+let SU = null;   // {view, probe, v: values, repo, note, cmd, steps, cur, log, login, code, busy, dry}
+const suPosix = () => SU.v.target === "ssh" || (SU.probe && SU.probe.os !== "windows");
+const suOkDir = (d) => (suPosix() ? /^\/[^"'`$;&|<>*?%!]*$/ : /^[A-Za-z]:[\\/][^"'`$;&|<>*?%!]*$/).test(d) && !d.includes("..");
+function suBad(k) {   // the same checks as setup.rs, said in words
+  const v = SU.v[k].trim();
+  if (k === "host") return SU.v.target !== "ssh" ? "" : /^[A-Za-z0-9._@-]{1,80}$/.test(v) && !v.startsWith("-") ? "" : "host or user@host";
+  if (k === "name") return /^[A-Za-z0-9_-]{1,40}$/.test(v) ? "" : "1 to 40 letters, digits, - or _";
+  if (k === "url") return /^https:\/\/[A-Za-z0-9.:\/_-]+$/.test(v) ? "" : "must start with https://";
+  if (k === "port") return /^\d+$/.test(v) && +v >= 1024 && +v <= 65535 ? "" : "1024 to 65535";
+  if (k === "roots") return v && v.split(";").every((p) => { const [n, ...r] = p.split("="); return /^[A-Za-z0-9_-]{1,40}$/.test(n) && suOkDir(r.join("=").trim()); }) ? "" : "name=absolute folder, ; between them";
+  if (k === "dir") return suOkDir(v) ? "" : "an absolute folder path";
+  return "";
+}
+const suHost = () => (SU.v.target === "ssh" ? SU.v.host.trim() : null);
+async function suProbe() {
+  SU.probe = await invoke("setup_probe").catch(() => ({ os: "windows", bridge: false }));
+  const sep = SU.probe.os === "windows" ? "\\" : "/";
+  if (!SU.v.dir) SU.v.dir = (SU.probe.home || (SU.probe.os === "windows" ? "C:\\Users\\me" : "/home/me")) + sep + "awesome-agent-dashboard";
+  suRender(); suRepo();
+}
+let suRepoT = null;
+function suRepo() {   // the folder's state, asked once the path is a real absolute path (and the host is set, over ssh)
+  clearTimeout(suRepoT); SU.repo = null;
+  if (suBad("dir") || suBad("host")) return suRender();
+  suRepoT = setTimeout(async () => {
+    const want = SU.v.dir + "|" + suHost();
+    try { const r = await invoke("setup_repo", { dir: SU.v.dir.trim(), host: suHost() }); if (want === SU.v.dir + "|" + suHost()) SU.repo = r; }
+    catch (e) { SU.repo = { err: String(e).slice(0, 100) }; }
+    suRender();
+  }, 400);
+}
+function suField(k, label, ph, note) {
+  const bad = SU.v[k] && suBad(k);
+  return `<div class="sk">${label}</div><input data-s="${k}" value="${esc(SU.v[k])}" placeholder="${esc(ph)}" spellcheck="false" class="${bad ? "bad" : ""}">`
+    + `<div class="sn${bad ? " bad" : note && note.cls ? " " + note.cls : ""}">${esc(bad || (note && note.t) || "")}</div>`;
+}
+function suRepoNote() {
+  const r = SU.repo;
+  if (suBad("dir")) return null;
+  if (!r) return { t: "checking the folder..." };
+  if (r.err) return { t: r.err, cls: "bad" };
+  if (r.script) return { t: `repo found${r.env ? ", .env found" : ", no .env: written from hayaku's sign-in at RUN"} (${r.os})`, cls: "ok" };
+  return { t: r.exists ? "folder is there but has no repo: pick an empty or new folder" : "repo not found: CLONE gets it", cls: "bad" };
+}
+function suRender() {
+  const el = $("csetup");
+  $("cbox").classList.toggle("setup", !!SU);
+  el.hidden = !SU;
+  if (!SU) return;
+  const p = SU.probe || {};
+  const where = SU.v.target === "ssh" ? `${SU.v.host || "a box"} over ssh` : `this box (${p.os || "..."})`;
+  let h = `<div class="sh">${p.bridge ? "This box has a bridge. Set one up on another box, or here again." : `No bridge on this box (${p.os || "..."}). Set one up here.`}</div>`;
+  if (SU.view === "ask") {
+    h += `<div class="sk">WHERE</div><select data-s="target"><option value="here"${SU.v.target === "here" ? " selected" : ""}>this box (${p.os || "..."})</option>`
+      + `<option value="ssh"${SU.v.target === "ssh" ? " selected" : ""}>another box over ssh (Linux, Mac)</option></select>`;
+    if (SU.v.target === "ssh") h += suField("host", "SSH HOST", "linux or me@192.168.1.222", { t: "ssh with a key, no password prompt" });
+    h += suField("name", "BOX NAME", "Mac-Studio", { t: "its name on the dashboard" }) + suField("url", "ADDRESS URL", "https://box2-files.example.com", { t: "this box's own tunnel address" })
+      + suField("port", "PORT", "8793", { t: "the local port the address routes to" })
+      + suField("roots", "WORK FOLDERS (WORK_ROOTS)", suPosix() ? "projects=/home/me/projects" : "projects=C:\\Users\\me\\Projects", { t: "folders runs may touch" })
+      + suField("dir", "BRIDGE FOLDER", suPosix() ? "/home/me/awesome-agent-dashboard" : "C:\\Users\\me\\awesome-agent-dashboard", suRepoNote());
+    h += `<div class="sk">SHARED SETTINGS</div><div class="sn">${p.signedIn ? "from hayaku's own sign-in: Firebase project, page key, auth domain, owner email, page origin; no secrets" : "hayaku has no sign-in settings here: sign in first"}</div>`;
+    const ready = ["host", "name", "url", "port", "roots", "dir"].every((k) => !suBad(k)) && SU.repo && SU.repo.script && !SU.busy;
+    const clone = SU.repo && !SU.repo.err && !SU.repo.script && !SU.repo.exists && !suBad("dir") && !SU.busy;
+    h += `<div class="sbt"><button data-a="next"${ready ? "" : " disabled"}>NEXT</button>${clone ? `<button class="o" data-a="clone">CLONE</button>` : ""}<button class="g" data-a="cancel">CANCEL</button></div>`;
+    if (SU.note) h += `<div class="sn ${SU.noteCls || ""}">${esc(SU.note)}</div>`;
+    if (SU.log.length && SU.cloning) h += `<div class="slog">${esc(SU.log.slice(-6).join("\n"))}</div>`;
+  } else if (SU.view === "review") {
+    h += `<div class="sk">IT WILL RUN (${esc(where)})</div><div class="scmd">${esc(SU.cmd || "")}</div>`
+      + `<div class="sn">only this script, from the list Rust allows; DRY RUN shows each step and changes nothing else${SU.repo && !SU.repo.env ? "; the new .env is written first, from hayaku's sign-in" : ""}</div>`
+      + `<div class="sbt"><button data-a="run">RUN</button><button class="w" data-a="dry">DRY RUN</button><button class="g" data-a="back">BACK</button></div>`;
+    if (SU.note) h += `<div class="sn ${SU.noteCls || ""}">${esc(SU.note)}</div>`;
+  } else {
+    h += `<div class="sk">${SU.dry ? "DRY RUN" : "SETUP"} · ${esc(SU.v.name)} · ${esc(where)}</div>`;
+    h += SSTEPS.map((n, i) => { const st = SU.steps[i]; return `<div class="sst ${st.s}"><span>${{ ok: "✓", run: "●", wait: "○", skip: "↷", fail: "✕" }[st.s]} ${esc(n)}</span><span>${esc(st.note || "")}</span></div>`; }).join("");
+    if (SU.login && SU.code == null) h += `<div class="sh">Sign in with Google in your browser, with the owner email.<div class="sbt"><button class="o" data-a="login">START LOGIN</button></div></div>`;
+    if (SU.code != null) h += SU.code === 0
+      ? `<div class="sn ok">${SU.dry ? "Dry run done: nothing changed. RUN to set it up." : "Bridge up. CONFIG lists its settings once the box shows on the dashboard."}</div>`
+        + `<div class="sbt">${SU.dry ? `<button data-a="run">RUN</button>` : `<button data-a="settings">OPEN SETTINGS</button>`}<button class="g" data-a="back">BACK</button></div>`
+      : `<div class="sn bad">Stopped (exit ${SU.code}): ${esc(SU.stop || "see the lines below")}</div><div class="sbt"><button class="g" data-a="back">BACK</button></div>`;
+    h += `<div class="slog">${esc(SU.log.slice(-8).join("\n"))}</div>`;
+  }
+  const focus = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.s : null;
+  const pos = focus ? document.activeElement.selectionStart : 0;
+  if (el.innerHTML !== h) {
+    el.innerHTML = h;
+    if (focus) { const f = el.querySelector(`[data-s="${focus}"]`); if (f) { f.focus(); try { f.setSelectionRange(pos, pos); } catch (_) {} } }
+    if (shown === "config") fit();
+  }
+}
+function suLine(l) {   // one output line of setup-box: "== N. ..." starts a step; STOP: ends it; the sign-in link opens START LOGIN
+  if (!SU) return;
+  SU.log.push(l); if (SU.log.length > 200) SU.log.shift();
+  const m = /^== (\d)\./.exec(l);
+  if (m) {
+    const i = +m[1] - 1;
+    for (let j = 0; j < i; j++) if (SU.steps[j].s === "run") SU.steps[j].s = "ok";
+    SU.steps[i] = { s: "run", note: "" }; SU.cur = i;
+  } else if (SU.cur != null && l.trim() && !/^Unplug later/.test(l)) {
+    const st = SU.steps[SU.cur];
+    if (/^STOP:/.test(l)) { st.s = "fail"; SU.stop = l.slice(5).trim(); }
+    else { if (/already|skipped|not checked/i.test(l)) st.s = "skip"; st.note = l.trim().slice(0, 80); }
+  }
+  const lg = /(http:\/\/localhost:(\d+)\/)/.exec(l);
+  if (lg) SU.login = +lg[2];
+  if (SU.cur === 4 || (SU.cur > 3 && SU.steps[3].s !== "run")) SU.login = null;
+  suRender();
+}
+T.event.listen("setup-line", (e) => suLine(String(e.payload)));
+async function suClone() {
+  SU.busy = true; SU.cloning = true; SU.log = []; SU.note = "cloning the repo..."; SU.noteCls = ""; suRender();
+  try {
+    const code = await invoke("setup_clone", { dir: SU.v.dir.trim(), host: suHost() });
+    SU.note = code === 0 ? "cloned" : `git clone ended with ${code}`; SU.noteCls = code === 0 ? "ok" : "bad";
+  } catch (e) { SU.note = "not cloned: " + String(e).slice(0, 100); SU.noteCls = "bad"; }
+  SU.busy = false; SU.cloning = false; suRepo();
+}
+const suArgs = (dry) => ({ dir: SU.v.dir.trim(), url: SU.v.url.trim(), roots: SU.v.roots.trim(), name: SU.v.name.trim(), port: +SU.v.port, dry, host: suHost() });
+async function suRun(dry) {
+  SU.view = "run"; SU.dry = dry; SU.code = null; SU.stop = ""; SU.login = null; SU.cur = null; SU.log = [];
+  SU.steps = SSTEPS.map(() => ({ s: "wait", note: "" })); suRender();
+  try {
+    if (SU.repo && !SU.repo.env) suLine("hayaku: " + await invoke("setup_env", { dir: SU.v.dir.trim(), host: suHost() }));
+    SU.code = await invoke("setup_run", suArgs(dry));
+  } catch (e) { SU.code = -1; SU.stop = String(e).slice(0, 120); }
+  if (SU.code === 0) SU.steps.forEach((st) => { if (st.s === "run") st.s = "ok"; });
+  else if (SU.cur != null && SU.steps[SU.cur].s === "run") SU.steps[SU.cur].s = "fail";
+  SU.login = null; suRender();
+  if (SU.code === 0 && !dry) setTimeout(() => suProbe(), 3000);
+}
+$("csetup").addEventListener("input", (e) => {
+  const k = e.target.dataset.s; if (!k || !SU) return;
+  SU.v[k] = e.target.value; SU.note = "";
+  if (k === "dir" || k === "host" || k === "target") suRepo(); else suRender();
+});
+$("csetup").addEventListener("change", (e) => { if (e.target.dataset.s === "target" && SU) { SU.v.target = e.target.value; SU.v.dir = ""; suProbe(); } });
+$("csetup").addEventListener("click", async (e) => {
+  const a = e.target.dataset && e.target.dataset.a; if (!a || !SU || e.target.disabled) return;
+  if (a === "cancel") { SU = null; suRender(); return cfgLoad(); }
+  if (a === "clone") return suClone();
+  if (a === "next") {
+    try { SU.cmd = await invoke("setup_command", suArgs(false)); SU.note = ""; SU.view = "review"; }
+    catch (err) { SU.note = String(err); SU.noteCls = "bad"; }
+    return suRender();
+  }
+  if (a === "back") { SU.view = "ask"; SU.note = ""; return suRepo(); }
+  if (a === "run" || a === "dry") return suRun(a === "dry");
+  if (a === "login" && SU.login) return invoke("setup_login", { port: SU.login }).catch(() => {});
+  if (a === "settings") { SU = null; suRender(); return cfgLoad(); }
+});
+function suOpen() {
+  SU = { view: "ask", probe: null, v: { target: "here", host: "", name: "", url: "", port: "8793", roots: "", dir: "" }, repo: null, note: "", log: [], steps: [] };
+  suRender(); suProbe();
+}
+$("csopen").addEventListener("click", suOpen);
+async function suAuto() {   // CONFIG opens SET UP BRIDGE by itself when this box has no bridge
+  const p = await invoke("setup_probe").catch(() => null);
+  if (p && !p.bridge && layer === "config" && !SU) { suOpen(); }
+}
 window.addEventListener("keydown", (e) => {
   if (e.key !== "Escape" || layer !== "config") return;
+  if (SU && SU.view !== "run") { SU = null; suRender(); cfgLoad(); fit(); return; }
   if (cConf) { cConf = null; cfgRender(); fit(); } else go("menu");
 });

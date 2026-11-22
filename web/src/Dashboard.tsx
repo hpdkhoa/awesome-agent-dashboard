@@ -6,8 +6,8 @@ import { SettingsSide, SettingsView } from "./Settings";
 import { useSettings, type TabId } from "./prefs";
 import { signOut } from "firebase/auth";
 import { auth } from "./firebase";
-import { RECENT_DAYS, newestFirst, useInbox, useMachines, usePager, usePlanInbox, usePlanRuns, usePlans, useRuns, useSessions, useUsage, useWorkTypes, type InboxItem, type Pager, type Plan, type Run, type Session, type Tokens } from "./data";
-import { MessageBox, ModeSwitch, PlanFromSession, RunList, SearchBox, StartForm } from "./Runs";
+import { RECENT_DAYS, newestFirst, useInbox, useJobs, useMachines, usePager, usePlanInbox, usePlanRuns, usePlans, useRuns, useSessions, useUsage, useWorkTypes, type InboxItem, type Pager, type Plan, type Run, type Session, type Tokens } from "./data";
+import { JobList, MessageBox, ModeSwitch, PlanFromSession, RunList, SearchBox, StartForm } from "./Runs";
 import { PlanBoard, PlanList, PlanView } from "./Plans";
 import { usePush, type PushState } from "./notify";
 import { FileViewer, PcText } from "./FileView";
@@ -85,6 +85,7 @@ export function Dashboard() {
   const liveInbox = useInbox();
   const inbox = liveInbox ? newestFirst(dedupe([...liveInbox, ...moreInbox.rows]), "createdAt") : null;
   const liveRuns = useRuns();
+  const jobs = useJobs();
   const runs = liveRuns ? newestFirst(dedupe([...liveRuns, ...moreRuns.rows]), "createdAt") : null;
   const plans = livePlans ? newestFirst(dedupe([...livePlans, ...morePlans.rows]), "updatedAt") : null;
   const [pickedPlan, setPickedPlan] = useState<string | null>(opened.get("plan"));
@@ -329,6 +330,7 @@ export function Dashboard() {
             <SearchBox machines={machines ?? []} runs={runs ?? []} />
             <ModeSwitch />
             <RunList runs={liveRuns ?? []} title="Runs going now" />
+            <JobList jobs={jobs ?? []} />
             {moreRuns.rows.length > 0 && <RunList runs={moreRuns.rows.filter((r) => !(liveRuns ?? []).some((x) => x.id === r.id))} title="Older runs" />}
             <ul className="list"><MoreRow pager={moreRuns} what="runs" /></ul>
           </>

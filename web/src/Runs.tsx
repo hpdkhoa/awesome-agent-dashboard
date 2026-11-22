@@ -3,8 +3,7 @@ import { forSession, QUOTE_EVENT, takeQuote } from "./quote";
 import {
   addRoot, localRun, newestFirst, PAGE, cancelMessage, checkSession, continueRun, forceMessage, setAutoContinue, planFromSession, PLAN_KINDS, searchRun, sendMessage, setRunMode, startRun, stopRun, useRunMode,
   EFFORTS, exactEffort, exactModel, FRESH_OVER, MODELS, setRunPrefs, useRunPrefs, type Fresh, type RunWith,
-  type LocalModel, type Machine, type Run, type Session,
-} from "./data";
+  type LocalModel, type Machine, type Run, type Session, type Job } from "./data";
 import { boxes, bridgePost, postTo } from "./bridge";
 import { num, usd } from "./Dashboard";
 import { Md } from "./Markdown";
@@ -310,6 +309,7 @@ const WAIT_LABEL: Record<string, string> = {
   turn: "waiting for the session's turn to end",
   app: "waiting: last used in the app or a terminal, send it with Remote Control",
   upgrade: "waiting: the plan is being moved to the latest format first",
+  resources: "waiting for free disk / RAM / GPU",
 };
 
 // What the wait rule saw on the last "Check now" (the owner's choice, 2026-11-02: "do both").
@@ -529,6 +529,9 @@ export function RunList({ runs, title = "Runs from the dashboard", paged = false
               <span>{(r.prompt ?? "").split("\n")[0].slice(0, 90)}</span>
               {(r.headline || r.status === "running") && <Headline r={r} />}
               {r.endGuard && <EndGuard g={r.endGuard} />}
+              {r.status === "waiting" && r.waitReason === "resources" && (r.resources?.low?.length ?? 0) > 0 && (
+                <span className="end-guard" data-resources-wait>⚠ {r.resources!.low!.join("; ")}</span>
+              )}
             </span>
           }
           extra={
@@ -664,5 +667,43 @@ function Headline({ r }: { r: Run }) {
       {h.eta && <> · ETA {clock(h.eta)}</>}
       <span className="muted"> · {Math.max(0, Math.round(age / 60000))} min ago{stale ? " (stale: over 5 min)" : ""}</span>
     </span>
+  );
+}
+
+// F9 (plan bf73af63): the detached long jobs, read by the bridge from their folders. Each row: state, name, the job's
+// own PROGRESS line (done / total or %), the last output line, how long it ran and the last beat; the files on the PC.
+const JOB_STATE: Record<Job["state"], string> = { starting: "starting", running: "running", done: "done", failed: "failed", lost: "lost" };
+const mins = (s?: number) => (s == null ? "" : s < 90 ? `${s} s` : `${Math.round(s / 60)} min`);
+export function JobList({ jobs }: { jobs: Job[] }) {
+  const going = jobs.filter((j) => j.state === "running" || j.state === "starting").length;
+  return (
+    <Section id="runs.jobs" title="Detached jobs" extra={going ? `${going} going, ${jobs.length} shown` : jobs.length}>
+      {jobs.length === 0 && <p className="muted small">None yet. A session starts one with job_start (any job over about 20 min).</p>}
+      {jobs.map((j) => {
+        const r = j.report;
+        const pct = r?.pct ?? null;
+        return (
+          <Section key={j.id} id={"job." + j.id} open={j.state === "running" || j.state === "starting"}
+            title={
+              <span className="run-head">
+                <span className={"status " + (j.state === "starting" ? "new" : j.state)}>{JOB_STATE[j.state] ?? j.state}</span>
+                <span>{j.name}</span>
+                {pct != null && <span className="headline" data-job-progress>{r?.done != null ? `${r.done}/${r.total} ` : ""}{pct}%{r?.note ? ` ${r.note}` : ""}</span>}
+              </span>
+            }
+            extra={<>{mins(j.seconds)}{j.exit != null && j.state !== "running" ? ` · exit ${j.exit}` : ""}</>}>
+            {pct != null && <div className="job-bar" aria-label={`${pct}%`}><span style={{ width: `${pct}%` }} /></div>}
+            <ul className="list small">
+              <li>Last line: <code>{j.lastLine || "(no output yet)"}</code></li>
+              <li>Started {j.startedAt ? new Date(j.startedAt).toLocaleString() : ""}{j.beatAt && j.state === "running" ? `, last beat ${new Date(j.beatAt).toLocaleTimeString()}` : ""}{j.endedAt ? `, ended ${new Date(j.endedAt).toLocaleString()}` : ""}{j.expectMinutes ? `, expected ${j.expectMinutes} min` : ""}</li>
+              {j.state === "lost" && <li className="end-guard">No done marker and the runner is gone: the job stopped without ending</li>}
+              <li>Started by session {j.sessionId?.slice(0, 8) ?? "?"}{j.planId ? `, plan ${j.planId.slice(0, 8)}` : ""}{j.stepId ? ` step ${j.stepId}` : ""}{j.runId ? `, run ${j.runId.slice(0, 8)}` : ""}</li>
+              <li>Command: <code>{j.command}</code></li>
+              <li>Files: <code>{j.out}</code> · <code>{j.progress}</code> · <code>{j.doneMarker}</code></li>
+            </ul>
+          </Section>
+        );
+      })}
+    </Section>
   );
 }

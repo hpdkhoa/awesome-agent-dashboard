@@ -8,6 +8,7 @@ mod avatar;
 mod packs;
 mod hotkey;
 mod voice;
+mod setup;
 
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
@@ -39,6 +40,8 @@ fn fetch_status() -> Result<String, String> {
     Ok(body.to_string())
 }
 
+/// s14: this box's own bridge answers /status
+fn bridge_up() -> bool { fetch_status().is_ok() }
 #[tauri::command]
 async fn status() -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(fetch_status).await.map_err(|e| e.to_string())?
@@ -465,7 +468,8 @@ fn main() {
         .manage(Load { sys: Mutex::new(sys), nvml: nvml_wrapper::Nvml::init().ok() })
         .manage(avatar::Pending(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![status, load, price, box_data, box_text, box_picture, box_file_text, box_open_file, open_web, open_run, open_item, hotkey::hotkey_get, hotkey::hotkey_set, voice::voice_start, voice::voice_stop, voice::voice_on, menu, avatar::avatars, avatar::drop_ask, box_packs, packs::pack_current, packs::pack_apply, auth::fb_config,
-            auth::auth_get, auth::auth_set])
+            auth::auth_get, auth::auth_set, setup::setup_probe, setup::setup_repo, setup::setup_clone, setup::setup_env,
+            setup::setup_command, setup::setup_run, setup::setup_login])
         .on_menu_event(|app, e| match e.id().as_ref() {
             "hide" => toggle(app, Some(false)),
             "show" => toggle(app, Some(true)),

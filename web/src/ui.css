@@ -300,3 +300,6 @@ span[data-state], b[data-state], p[data-state], .board-feat[data-state] .board-k
 .glance-cover { position: fixed; inset: 0; z-index: 2000; background: var(--bg); display: flex; align-items: center; justify-content: center; }
 .glance-form { max-width: 40rem; width: 90%; } .glance-form label { display: block; margin: 0.5rem 0; } .glance-form input { display: block; width: 100%; }
 .board-update { margin: 0 0 0.5rem; display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: baseline; } /* s6 Update board */
+/* F9 detached jobs: the job's own PROGRESS as a bar */
+.job-bar { height: 0.45rem; background: var(--line, #333); border-radius: 0.25rem; overflow: hidden; margin: 0.3rem 0; }
+.job-bar span { display: block; height: 100%; background: var(--ok, #3a3); }

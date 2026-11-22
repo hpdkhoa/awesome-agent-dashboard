@@ -73,6 +73,7 @@ from .inbox import KINDS, PLAN_FORMAT, Inbox, format_of, now_iso
 from .chain import Chains
 from .stepcheck import StepChecks
 from .coordinator import Coordinator
+from .jobs import Jobs
 from .evidence import Evidence
 from .glance import Glance
 from .boardformat import board_gaps, update_block
@@ -502,6 +503,8 @@ class Runs:
         self.glance = Glance(self)  # s5 glance test scoring (plan 44fc4979)
         # F7: a coordinator question is answered by a fork of the plan's session (coordinator.py)
         self.coordinator = Coordinator(self)
+        # F9: detached long jobs (jobs.py): the bridge reads their folders and keeps jobs/<id> for the Runs tab
+        self.jobs = Jobs(store, machine)
         # F8: claims across boxes (claims.py); set by the CLI when a control plane (Firestore) is reachable
         self.claims = None
         # step i4: a work folder added on the page joins self.roots in place (the same list the sync and the inbox
@@ -616,6 +619,10 @@ class Runs:
                 log.append(self._finish(cid, p))
         log += self._archiver_freed()
         log += self._continue_due()
+        try:
+            log += self.jobs.scan()
+        except Exception as e:  # noqa: BLE001: a bad job folder never stops the runs
+            log.append(f"jobs scan failed: {type(e).__name__}: {str(e)[:200]}")
         return log
 
     def _auto_runs(self) -> dict[str, dict]:
@@ -864,6 +871,9 @@ class Runs:
         if not self.claude:
             self.store.update(path, {"status": "failed", "error": NO_CLI})
             return f"{c['id']}: no claude CLI"
+        waits = self._resources_wait(c, c["folder"])
+        if waits is not None:
+            return waits or None
         sid, mode = str(uuid.uuid4()), self.mode(c)
         model, effort = self.run_with(c)
         keep = not c.get("noSession")
@@ -952,6 +962,9 @@ class Runs:
             self.store.update(path, {"status": "failed", "error": NO_CLI})
             self._answer_back(c, {"status": "answered", "error": NO_CLI})
             return f"{c['id']}: no claude CLI"
+        waits = self._resources_wait(c, cwd)
+        if waits is not None:
+            return waits or None
         refused = self._claim_step(c, sid)
         if refused:
             return refused
@@ -988,6 +1001,29 @@ class Runs:
             self.archiver.ask_unarchive(c["id"])
             self.store.update(path, {"archive": "unarchiving"})
         return f"{c['id']}: sent to session {sid}"
+
+    def _resources_wait(self, c: dict, folder: str) -> str | None:
+        """F10: free disk, RAM and GPU before a run starts (resources.py). Under a limit the run waits (waitReason
+        "resources") with the numbers on its row, and is checked again each round. Returns None to go on, "" while it
+        keeps waiting, or the log line when it starts to wait."""
+        from .resources import low, measure, run_paths
+        path = f"commands/{c['id']}"
+        try:
+            m = measure(run_paths(folder, self.out_dir))
+            under = low(m)
+        except Exception as e:  # a failed reading never stops a run; it is shown on the row
+            self.store.update(path, {"resources": {"error": redact(str(e), 200), "at": now_iso()}})
+            return None
+        if not under:
+            if c.get("waitReason") == "resources":
+                self.store.update(path, {"resources": {"low": [], "startedAfter": now_iso(), "at": m["at"]}})
+            return None
+        if c.get("status") == "waiting" and c.get("waitReason") == "resources" and (c.get("resources") or {}).get("low") == under:
+            return ""
+        self.store.update(path, {"status": "waiting", "waitReason": "resources", "waitingSince": c.get("waitingSince") or now_iso(),
+                                 "resources": {"low": under, "at": m["at"]}})
+        self._answer_back(c, {"waitReason": "resources"})
+        return f"{c['id']}: waits for resources: " + "; ".join(under)
 
     def _claim_step(self, c: dict, sid: str) -> str | None:
         """F8: a Run step claims its step for this box before it starts; another box's claim refuses it, and the run

@@ -453,6 +453,8 @@ export function InboxView({ item, session, plan, onOpenPlan, items = [], phone =
           <p className="small">
             {item.waitReason === "turn"
               ? "The session is in a turn: your answer goes when it ends."
+              : item.waitReason === "resources"
+              ? "This PC is low on free disk, RAM or GPU: your answer goes when there is room again (numbers on the Runs tab)."
               : item.waitReason === "upgrade"
               ? "The plan is being moved to the latest format first: your answer goes to the new plan's session."
               : "The session was last used in the app or a terminal and may still be open there: tell it through Remote Control, or send it anyway."}

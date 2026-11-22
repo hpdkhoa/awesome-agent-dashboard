@@ -64,7 +64,7 @@ export type InboxItem = {
   answer: { choice: string; text: string; at: string } | null;
   deliveredAt?: string;
   deliveredVia?: "live" | "resume";
-  waitReason?: "turn" | "app" | "upgrade" | null; // why an answer has not reached the session yet (bridge runs.py)
+  waitReason?: "turn" | "app" | "upgrade" | "resources" | null; // why an answer has not reached the session yet (bridge runs.py)
   commandId?: string; // the message run that carries the answer to the session
   force?: boolean;
   error?: string | null;
@@ -244,7 +244,9 @@ export type Run = {
   generate?: { kinds: Kind[]; formats?: Format[]; base?: Base; note?: string }; // the owner's Generate order (planCheck.ts)
   phaseOrder?: boolean; // the owner's order to move the plan's phase (phases.ts)
   quotes?: { checked: number; marked: number }; // plan from a session: quotes in the notes not found on their page
-  waitReason?: "turn" | "app" | "upgrade";
+  waitReason?: "turn" | "app" | "upgrade" | "resources";
+  // F10: the readings under their limits when the run waits (bridge runs.py _resources_wait), each with its number
+  resources?: { low?: string[]; at?: string; startedAfter?: string; error?: string };
   upgradeId?: string; upgradedFrom?: string; // a message on an older plan waits while the plan moves to the latest format
   // the archiver (bridge archiver.py, 2026-11-06): asked, archived, unarchiving, done, refused, unarchive failed
   archive?: string; archiveNote?: string | null;
@@ -437,6 +439,17 @@ export const chooseVersion = (planId: string, n: number) => updateDoc(doc(db, "p
 export const RUN_LIVE = ["new", "waiting", "running", "stopping", "paused"];
 // newest first, so the 10 kept are the newest (before: no order, the oldest 10 came back)
 export const useRuns = () => useCollection<Run>("commands", where("status", "in", RUN_LIVE), orderBy("createdAt", "desc"), limit(PAGE));
+// F9 detached long jobs (bridge jobs.py): started by a session with job_start, they run outside it; the bridge keeps
+// jobs/<id> from each job's folder (progress.json beat, done.json marker). Newest first.
+export type Job = {
+  id: string; name: string; command: string; cwd: string; startedAt: string; expectMinutes?: number;
+  state: "starting" | "running" | "done" | "failed" | "lost"; beatAt?: string; seenAt?: string; endedAt?: string;
+  exit?: number | null; seconds?: number; lines?: number; lastLine?: string;
+  report?: { done?: number; total?: number; pct?: number; note?: string } | null;
+  out?: string; progress?: string; doneMarker?: string; sessionId?: string; runId?: string | null;
+  planId?: string | null; stepId?: string | null; machine?: string; runnerPid?: number;
+};
+export const useJobs = () => useCollection<Job>("jobs", orderBy("startedAt", "desc"), limit(PAGE));
 
 const newId = () => crypto.randomUUID().replace(/-/g, "").slice(0, 20);
 

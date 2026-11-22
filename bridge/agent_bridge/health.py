@@ -98,7 +98,19 @@ class Health:
             "newCode": bool(repo and self.commit and repo != self.commit), "lastSync": self.last_sync,
             "runsGoing": going, "errors": log_errors(self.data / "bridge.log", now),
             "lastRestart": last_restart(self.data / "restarts.log"), "at": _iso(now),
+            "resources": self.resources(),
         }
+
+    def resources(self) -> dict:
+        """F10: free disk (each work folder's drive, the data folder, the user folder), RAM and GPU, with the limits
+        and what is under them now."""
+        from .resources import low, measure
+        try:
+            roots = [p for _, p in getattr(self.runs, "roots", []) or []]
+            m = measure([*roots, str(self.data), str(Path.home())])
+            return {**m, "low": low(m)}
+        except Exception as e:
+            return {"error": str(e)[:200]}
 
     def restart(self, body: dict, who: str) -> dict:
         """One confirm tap on the page: body {"confirm": true, "why": "restart" or "update"}. Logs, answers, then exits

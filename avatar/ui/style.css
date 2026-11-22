@@ -195,6 +195,22 @@ html,body{margin:0;background:transparent;overflow:hidden;font-family:Tahoma,Ver
 .nact button.o{border-color:#888;color:#aaa}
 .nact button.no{border-color:var(--pink);color:var(--pink)}
 .nact button.ab{border-color:var(--orange);color:var(--orange)}
+/* s14: SET UP BRIDGE */
+.csl{margin-top:6px;font-size:10px;letter-spacing:1px;color:#7a8a90}.csl span{cursor:pointer;border-bottom:1px dotted #7a8a90}
+#cbox.setup > :not(.title):not(#csetup){display:none}
+.sh{border:1px solid #ff9f0a;background:#2a1a05;padding:4px 6px;font-size:11px;color:#f8f8f8;margin-top:4px}
+.sk{font-size:9px;color:#6a7a80;letter-spacing:1px;margin:7px 0 2px}
+#csetup input,#csetup select{width:100%;box-sizing:border-box;background:#03070a;color:#dfe;border:1px solid #1f3a40;font:11px Tahoma;padding:3px 6px;outline:none;user-select:text}
+#csetup input.bad{border-color:#ff453a}
+.sn{font-size:10px;color:#7a8a90;margin-top:2px;word-break:break-word}.sn.bad{color:#ff453a}.sn.ok{color:var(--green)}
+.scmd{border:1px solid #1f3a40;padding:4px 6px;font:10px Consolas,monospace;color:#cfc;white-space:pre-wrap;word-break:break-all;user-select:text}
+.sbt{margin-top:8px;display:flex;gap:6px;flex-wrap:wrap}
+.sbt button{font:11px Tahoma;letter-spacing:1px;background:transparent;color:var(--green);border:1px solid var(--green);padding:2px 10px;cursor:pointer}
+.sbt button.w{color:#e8f0ff;border-color:#e8f0ff}.sbt button.g{color:#cfe;border-color:#3a4a50}.sbt button.o{color:#ff9f0a;border-color:#ff9f0a}
+.sbt button:disabled{color:#4a5a60;border-color:#4a5a60;cursor:default}
+.sst{display:flex;justify-content:space-between;gap:8px;font-size:11px;padding:1px 0}.sst span:last-child{color:#7a8a90;text-align:right;max-width:55%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sst.ok{color:var(--green)}.sst.run{color:#ff9f0a}.sst.wait{color:#6a7a80}.sst.skip{color:#7a8a90}.sst.fail{color:#ff453a}
+.slog{max-height:70px;overflow:auto;font:10px Consolas,monospace;color:#7a8a90;white-space:pre-wrap;margin-top:4px;user-select:text}
 /* s12: the ask's thread (you asked, the session's reply, a redraw) */
 .nthr{margin-top:6px;max-height:150px;overflow:auto;resize:vertical;min-height:30px}
 .nfiles{margin:4px 0 6px;max-height:96px;overflow:auto;resize:vertical;min-height:24px}

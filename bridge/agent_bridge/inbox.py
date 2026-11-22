@@ -1573,6 +1573,34 @@ def server():
             return str(e)
         return f"Headline set on run {h['run']}."
 
+    @mcp.tool()
+    async def job_start(command: str, name: str = "", cwd: str = "", expect_minutes: float = 0) -> str:
+        """Start a long job detached (F9): any job you expect to run over about 20 minutes (a render, a build, a
+        benchmark, a training run). It runs outside this session, so a stopped, killed or handed-off session leaves
+        it going, and the owner's Runs tab shows it under Detached jobs. command: one PowerShell command line (sh on
+        Linux); cwd: its folder (this session's folder when empty); expect_minutes: your estimate.
+        The job writes out.log (all output), progress.json (a beat every 15 s, the last line) and, when it ends, the
+        done marker done.json (exit code). To show done / total, print lines like "PROGRESS 12/40 rendering" or
+        "PROGRESS 30% note". Returns the job id and the three file paths: read them to follow the job."""
+        from . import jobs
+
+        def go():
+            run = inbox.running_command() or {}
+            meta = {"sessionId": inbox.session_id, "machine": inbox.machine, "runId": run.get("id"),
+                    "planId": run.get("planId") or (inbox.open_plan() or {}).get("id"), "stepId": run.get("stepId")}
+            job = jobs.start(command, cwd or inbox.cwd, name, expect_minutes, meta)
+            row = {k: job.get(k) for k in ("id", "name", "command", "cwd", "startedAt", "expectMinutes", "dir", "out",
+                                           "progress", "doneMarker")}
+            store.put_many({f"jobs/{job['id']}": {**row, **meta, "state": "starting"}})
+            return job
+
+        try:
+            job = await asyncio.to_thread(go)
+        except (ValueError, OSError) as e:
+            return f"Job not started: {e}"
+        return json.dumps({"id": job["id"], "out": job["out"], "progress": job["progress"],
+                           "doneMarker": job["doneMarker"]}, ensure_ascii=False)
+
     # Records with ids (plan bf73af63 F1, the owner's pick "Best"): the knowledge base sessions write and read.
     from .records import Records, Refused, TYPES as RECORD_TYPES
 
