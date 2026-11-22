@@ -486,3 +486,32 @@ def test_every_waiting_answer_of_a_session_goes_in_one_turn_in_answer_order():
     assert c["inboxIds"] == list(reversed(ids)) and "answered 3 items" in c["prompt"]
     assert c["prompt"].index('"three"') < c["prompt"].index('"one"')
     assert all(store.get(f"inbox/{i}")["commandId"] == c["id"] for i in ids)
+
+
+def test_a_live_session_that_does_not_poll_still_gets_its_answer():
+    # 2026-11-22: a result answered while the session's process stayed up (a background job) without any inbox_ask /
+    # inbox_wait polling stayed "answered" for hours; only a polling session takes its answers itself
+    store = FakeStore()
+    rid = make(store).post("result", "S6 done", "test it")
+    owner_answers(store, rid, "Reviewed, see note", "passed")
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    store.put_many({"liveSessions/s1": {"sessionId": "s1", "beatAt": now, "waitingOn": ["q9"]}})
+    assert deliver(store, "PC", "claude") == [] and store.get(f"inbox/{rid}")["status"] == "answered"  # polls: takes it
+    store.put_many({"liveSessions/s1": {"sessionId": "s1", "beatAt": now}})
+    assert deliver(store, "PC", "claude") == []  # an older inbox server (no waitingOn) counts as polling, as before
+    store.put_many({"liveSessions/s1": {"sessionId": "s1", "beatAt": now, "waitingOn": []}})
+    log = deliver(store, "PC", "claude")
+    item, c = handed(store, rid)
+    assert item["status"] == "delivering" and log == [f"{rid}: handed to run {c['id']}"] and "passed" in c["prompt"]
+
+
+def test_set_waiting_writes_waiting_on_with_the_beat():
+    store = FakeStore()
+    ib = make(store)
+    ib.set_waiting("q1", True)
+    assert store.get("liveSessions/s1")["waitingOn"] == ["q1"]
+    ib.set_waiting("q1", True)
+    ib.set_waiting("q1", False)
+    assert store.get("liveSessions/s1")["waitingOn"] == ["q1"]  # a second wait on the same item still polls
+    ib.set_waiting("q1", False)
+    assert store.get("liveSessions/s1")["waitingOn"] == []

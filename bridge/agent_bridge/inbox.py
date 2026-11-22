@@ -505,6 +505,11 @@ class Inbox:
         # choice, 2026-11-01, "do #1 and #2"); approvals push from inbox_approve with the call in the body
         self.push = push
         self.beats = 0  # the heartbeat is made once; after that it is only updated, so a deleted one stays deleted
+        # the items an inbox_ask / inbox_wait of this session polls right now, written with each beat as waitingOn: the
+        # bridge holds an answer back only while the session really polls (deliver.is_polling); a session that is merely
+        # running (a turn, a background job keeping the process alive) gets its answers as a message after the run
+        # (2026-11-22: an answer stayed "answered" for hours while the session's process stayed up without polling)
+        self.waiting: dict[str, int] = {}
 
     def open_plan(self) -> dict | None:
         """This session's plan: the newest, open or closed. Closed is only a label the owner sets on the page; it never
@@ -1064,13 +1069,27 @@ class Inbox:
         if self.session_id == "unknown" or self.beats < 0:
             return
         path = f"liveSessions/{self.session_id}"
+        waiting = sorted(self.waiting)
         if self.beats == 0:
             self.store.put_many({path: {"sessionId": self.session_id, "machine": self.machine, "cwd": self.cwd,
-                                        "beatAt": now_iso()}})
-        elif not self.store.update(path, {"beatAt": now_iso()}):
+                                        "beatAt": now_iso(), "waitingOn": waiting}})
+        elif not self.store.update(path, {"beatAt": now_iso(), "waitingOn": waiting}):
             self.beats = -1  # the owner deleted it: no more beats from this session
             return
         self.beats += 1
+
+    def set_waiting(self, item_id: str, on: bool) -> None:
+        """Marks item_id as polled (on) or not, and beats at once so the bridge sees it before its next round."""
+        if on:
+            self.waiting[item_id] = self.waiting.get(item_id, 0) + 1
+        elif self.waiting.get(item_id, 0) > 1:
+            self.waiting[item_id] -= 1
+        else:
+            self.waiting.pop(item_id, None)
+        try:
+            self.beat()
+        except Exception:
+            pass
 
     def take_answer(self, item_id: str) -> str | None:
         """The owner's answer as text for the session, marking the item delivered; None while it is still open."""
@@ -1218,6 +1237,17 @@ def ask_back_text(item: dict, ask: dict) -> str:
             f'(never a new batch); then call inbox_wait(item_id="{item.get("id", "")}") for the answers.')
 
 
+def is_polling(store, session_id: str) -> bool:
+    """The session's inbox_ask or inbox_wait polls right now, so it takes its answers itself (Inbox.set_waiting). A
+    beat without waitingOn comes from an inbox server older than this field: it counts as polling while live, as
+    before. A live session that does not poll (a running turn, a process kept up by a background job) is not polling:
+    the bridge hands its answers over as a message, which the runs path starts when the running turn ends."""
+    beat = store.get(f"liveSessions/{session_id}")
+    if not is_live(store, session_id):
+        return False
+    return "waitingOn" not in beat or bool(beat.get("waitingOn"))
+
+
 def is_live(store, session_id: str) -> bool:
     beat = store.get(f"liveSessions/{session_id}")
     if not beat or not beat.get("beatAt"):
@@ -1276,6 +1306,14 @@ def server():
     )
 
     async def wait_for(item_id: str, minutes: float, ctx: Context) -> str:
+        """Polls for item_id's answer with the session marked as polling (waitingOn) for the whole wait."""
+        await asyncio.to_thread(inbox.set_waiting, item_id, True)
+        try:
+            return await poll_for(item_id, minutes, ctx)
+        finally:
+            await asyncio.to_thread(inbox.set_waiting, item_id, False)
+
+    async def poll_for(item_id: str, minutes: float, ctx: Context) -> str:
         """Waits for the answer to item_id, or to every question of its batch. Returns early when the owner asks back."""
         minutes = max(1.0, min(minutes, MAX_WAIT_MINUTES))
         end = time.time() + minutes * 60

@@ -21,7 +21,7 @@ import shutil
 import uuid
 from datetime import datetime, timezone
 
-from .inbox import answer_text, ask_back_text, is_live, now_iso, open_ask
+from .inbox import answer_text, ask_back_text, is_polling, now_iso, open_ask
 from .snapshot import take as take_snapshot
 
 RETRY_SECONDS = 600
@@ -73,8 +73,8 @@ def deliver(store, machine: str, claude: str | None, rows: list[dict] | None = N
                 log.append(f"{item['id']}: pictures kept in the plan folder")
         except OSError as e:
             log.append(f"{item['id']}: snapshot failed, {e}")
-        if is_live(store, item["sessionId"]):
-            continue  # the session's inbox_ask is still waiting and takes the answer itself
+        if is_polling(store, item["sessionId"]):
+            continue  # the session's inbox_ask / inbox_wait polls now and takes the answer itself
         a = item.get("answer") or {}
         if item.get("kind") == "result" and not a.get("text") and not a.get("choice"):
             store.update(f"inbox/{item['id']}", {"status": "closed", "deliveredAt": now_iso()})
@@ -114,7 +114,7 @@ def deliver(store, machine: str, claude: str | None, rows: list[dict] | None = N
         ask = open_ask(item.get("thread") or [])
         if not ask or item.get("askBackSentAt") == ask.get("at"):
             continue  # no open ask back, or this one already went
-        if is_live(store, item["sessionId"]):
+        if is_polling(store, item["sessionId"]):
             continue  # the session's inbox_ask or inbox_wait still polls and sees the ask back itself
         if not claude:
             store.update(f"inbox/{item['id']}", {"error": "No signed-in claude CLI on this machine for your ask back."})
