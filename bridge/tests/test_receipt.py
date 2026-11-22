@@ -109,3 +109,25 @@ def test_the_page_button_llm_check_on_a_done_step_still_marks_only(tmp_path):
     on_done(store, store.get("plans/p1"), "S1", ["a.png"], 1, "PC")
     wait(runs, store, queue(store, store.get("plans/p1"), "S1", "check", "button", "PC"))
     assert store.get("planSteps/p1_S1")["state"] == "done"  # "Mark only" for a step not waiting
+
+
+def test_owner_receipt_turns_a_reported_step_done_and_refuses_one_never_reported():
+    # the owner, 2026-11-22, plan 41188c93: "option C": a check only a person can run gets the owner's word as receipt
+    from agent_bridge.stepcheck import owner_confirm
+    store = FakeStore()
+    setup(store, tick=False)
+    pl = {**store.get("plans/p1"), "id": "p1"}
+    with pytest.raises(ValueError, match="not started"):
+        owner_confirm(store, pl, "S1", "iPhone ok")
+    store.put_many({"planSteps/p1_S1": {"id": "p1_S1", "planId": "p1", "stepId": "S1", "state": "failed", "versions": [
+        {"n": 1, "state": "checking", "receiptBy": "pictures", "reply": "built"},
+        {"n": 2, "state": "failed", "by": "llm", "reply": "- No receipt: picture unclear"}]}})
+    r = owner_confirm(store, pl, "S1", "iPhone ok")
+    st = store.get("planSteps/p1_S1")
+    assert st["state"] == "done" and st["versions"][-1]["by"] == "owner" and r["kind"] == "owner" and r["note"] == "iPhone ok"
+    with pytest.raises(ValueError, match="is done"):
+        owner_confirm(store, pl, "S1", "again")  # only a step waiting for or failing its receipt
+    store.put_many({"planSteps/p1_S2": {"id": "p1_S2", "planId": "p1", "stepId": "S2", "state": "failed",
+                                        "versions": [{"n": 1, "state": "failed", "reply": "check failed"}]}})
+    with pytest.raises(ValueError, match="reported done"):
+        owner_confirm(store, pl, "S2", "x")  # failed without a done report: no receipt by word

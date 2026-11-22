@@ -77,6 +77,30 @@ def settle(store, plan: dict, sid: str, receipt: dict | None, why: str, by: str,
     return True
 
 
+def owner_confirm(store, plan: dict, sid: str, note: str = "", push=None) -> dict:
+    """The owner's "I checked it" receipt (the owner, 2026-11-22, plan 41188c93: "option C and use it to mark S6
+    done"): for a check only a person can run (a real phone, a sign-in), the owner's own word on the page is the
+    receipt. Only for a step whose session reported done: waiting for its receipt (checking), or failed after a done
+    report. The step becomes done with receipt {kind "owner", at, note, commit}. Raises ValueError otherwise."""
+    pid = plan["id"]
+    path = f"planSteps/{pid}_{sid}"
+    step = store.get(path) or {}
+    versions = list(step.get("versions") or [])
+    reported = any(v.get("state") in ("checking", "done") or v.get("receiptBy") for v in versions)
+    if step.get("state") not in (CHECKING, "failed") or not reported:
+        raise ValueError(f"{sid} is {step.get('state') or 'not started'}: the owner's receipt is only for a step the "
+                         "session reported done (waiting for its receipt, or failed after a done report)")
+    receipt = {"kind": "owner", "at": now_iso(), "note": redact(str(note or "").strip(), 2000),
+               "commit": commit_of(plan.get("cwd", "")) if plan.get("cwd") else ""}
+    ver = {"n": len(versions) + 1, "state": "done", "at": receipt["at"], "planVersion": int(plan.get("current", 0)),
+           "by": "owner", "reply": "- Receipt: the owner checked it" + (f": {receipt['note']}" if receipt["note"] else ""),
+           "receipt": receipt}
+    store.put_many({path: {**step, "state": "done", "versions": versions + [ver], "updatedAt": now_iso()}})
+    if push is not None:
+        push.notify(f"Step done: {sid}", "receipt owner", f"/?plan={pid}", f"plan-{pid}-{sid}")
+    return receipt
+
+
 def check_hash(command: str) -> str:
     """The same hash as the page's checkHash (web/src/harness.ts itemHash with kind "check")."""
     return item_hash({"kind": "check", "item": command})

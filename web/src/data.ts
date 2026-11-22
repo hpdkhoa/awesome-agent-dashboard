@@ -154,7 +154,7 @@ export type PlanStep = {
 };
 // F4, done needs a receipt (bridge stepcheck.py settle; the owner's picks 2026-11-13 "Check or checked pictures",
 // 2026-11-19 "Done waits for its receipt"): what made a step done.
-export type Receipt = { kind: "check" | "pictures"; commit: string; at: string; runId: string;
+export type Receipt = { kind: "check" | "pictures" | "owner"; commit: string; at: string; runId: string;
   exit?: number; seconds?: number; command?: string; output?: string;
   overall?: string; set?: string; pictures?: string[]; marks?: { path: string; verdict: string; why: string }[]; note?: string;
   findings?: EvidenceFinding[] };
@@ -802,6 +802,16 @@ export const sendPhaseOrder = (plan: Plan, to: string, order: string) => {
   return setDoc(doc(db, "commands", id), {
     id, action: "phase", machine: plan.machine, planId: plan.id, phase: to, ownerText: order,
     phaseOrder: true, status: "new", createdAt: new Date().toISOString(),
+  });
+};
+
+// The owner's "I checked it" receipt (the owner, 2026-11-22, plan 41188c93: "option C"): for a check only a person can
+// run, the owner's word is the receipt; the bridge marks the step done itself (runs.py _owner_receipt), no Claude run.
+export const sendOwnerReceipt = (plan: Plan, stepId: string, note: string) => {
+  const id = newId();
+  return setDoc(doc(db, "commands", id), {
+    id, action: "owner_receipt", machine: plan.machine, planId: plan.id, stepId, note: note.trim(),
+    status: "new", createdAt: new Date().toISOString(),
   });
 };
 

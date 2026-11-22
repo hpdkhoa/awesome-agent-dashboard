@@ -23,7 +23,7 @@ import { RunList, RunWithPicker } from "./Runs";
 import type { RunWith } from "./data";
 import { FoldAll, Section } from "./Section";
 import { Clamp } from "./Clamp";
-import { ReceiptBox, ReceiptChip } from "./Receipt";
+import { OwnerReceipt, ReceiptBox, ReceiptChip } from "./Receipt";
 import { ClaimChip, ClaimLine } from "./ClaimChip";
 import { usePhone } from "./phone";
 import { StepEvidenceCard } from "./EvidenceView";
@@ -980,6 +980,7 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
               <ClaimLine c={claims.find((x) => x.kind === "step" && x.stepId === st.id)} />
               <Md text={linkEntries(`${st.does}\n\n**Check:** ${st.check}`, plan)} cwd={plan.cwd} />
               <ReceiptBox sv={sv} c={checks.find((x) => x.stepId === st.id)} />
+              <OwnerReceipt plan={plan} sv={sv} />
               <StepCheckBox plan={plan} stepId={st.id} c={checks.find((x) => x.stepId === st.id)} done={sv?.state === "done" || sv?.state === "failed" || sv?.state === "checking"} />
               <OnMessages runs={runs} plan={plan} where={{ stepId: st.id }} />
               {qs.map((q) => (

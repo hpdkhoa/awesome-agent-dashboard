@@ -602,6 +602,7 @@ class Runs:
                     else self._plan(c) if action == "plan" else self._approve_generated(c) if action == "approve_generated"
                     else self._delete_plan_files(c) if action == "delete_plan_files"
                     else self._phase(c) if action == "phase"
+                    else self._owner_receipt(c) if action == "owner_receipt"
                     else self.chains.start(c) if action == "chain"
                     else self.checks.start(c) if action == "step_check"
                     else self.evidence.start(c) if action == "evidence"
@@ -1249,6 +1250,26 @@ class Runs:
             return f"{c['id']}: phase refused, {e}"
         self.store.delete(path)
         return f"{c['id']}: plan {pid} moved to {c.get('phase')} as v{n}"
+
+    def _owner_receipt(self, c: dict) -> str:
+        """The owner's "I checked it" button on a step (stepcheck.owner_confirm): bridge work only, no Claude run.
+        Done, the command goes and the plan's chain moves on; refused, it stays failed with why, for the page."""
+        from .stepcheck import owner_confirm
+        path, pid, sid = f"commands/{c['id']}", str(c.get("planId") or ""), str(c.get("stepId") or "")
+        plan = self.store.get(f"plans/{pid}") if pid else None
+        try:
+            if not plan:
+                raise ValueError(f"no plan {pid}")
+            owner_confirm(self.store, {**plan, "id": pid}, sid, str(c.get("note") or ""), self.push)
+        except ValueError as e:
+            self.store.update(path, {"status": "failed", "endedAt": now_iso(), "error": str(e)})
+            return f"{c['id']}: owner receipt refused, {e}"
+        self.store.delete(path)
+        try:
+            self.chains.after({"planId": pid})
+        except Exception:  # the chain re-checks on the next run's end and at the bridge's start
+            pass
+        return f"{c['id']}: {pid} {sid} done on the owner's receipt"
 
     def _check(self, c: dict) -> str:
         """"Check now" on a session page: writes what the wait rule sees, once, on the command itself."""

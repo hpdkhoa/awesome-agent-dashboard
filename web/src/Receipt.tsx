@@ -4,7 +4,8 @@
 // or "no receipt" on a step done before F4. A step done before F4 whose ticked check last exited 0 shows that run.
 import { Md } from "./Markdown";
 import { Clamp } from "./Clamp";
-import { checkTicked, type PlanStep, type Receipt, type StepCheck } from "./data";
+import { useState } from "react";
+import { checkTicked, sendOwnerReceipt, type Plan, type PlanStep, type Receipt, type StepCheck } from "./data";
 import { dt } from "./fmt";
 import { Findings } from "./Findings";
 
@@ -21,7 +22,7 @@ export function receiptOf(sv?: PlanStep, c?: StepCheck): ReceiptView {
   return null;
 }
 
-const label = (r: Receipt) => r.kind === "check" ? `check exit ${r.exit}` : `pictures ${r.overall ?? "pass"}`;
+const label = (r: Receipt) => r.kind === "check" ? `check exit ${r.exit}` : r.kind === "owner" ? "owner checked it" : `pictures ${r.overall ?? "pass"}`;
 
 export function ReceiptChip({ sv, c }: { sv?: PlanStep; c?: StepCheck }) {
   if (sv?.state === "checking") {
@@ -58,4 +59,23 @@ export function ReceiptBox({ sv, c }: { sv?: PlanStep; c?: StepCheck }) {
       {r.kind === "pictures" && <Findings findings={r.findings} />}
     </div>
   );
+}
+
+// The owner's "I checked it" button: shown on a step the session reported done that waits for its receipt or failed
+// it (a check only a person can run: a real phone, a sign-in). The bridge marks it done with receipt kind "owner".
+export function OwnerReceipt({ plan, sv }: { plan: Plan; sv?: PlanStep }) {
+  const [state, setState] = useState<"" | "sent" | "error">("");
+  const reported = (sv?.versions ?? []).some((v) => v.state === "checking" || v.state === "done" || !!v.receiptBy);
+  if (!sv || !reported || (sv.state !== "checking" && sv.state !== "failed")) return null;
+  const go = async () => {
+    const note = window.prompt("What did you check? (kept as the receipt)", "");
+    if (note === null) return;
+    try { await sendOwnerReceipt(plan, sv.stepId, note); setState("sent"); } catch { setState("error"); }
+  };
+  return <p className="small" data-owner-receipt={sv.stepId}>
+    <button className="link" onClick={go} disabled={state === "sent"}
+      title="You checked it yourself: your word is the receipt and the step turns done">I checked it</button>
+    {state === "sent" && <span className="muted"> · sent, the bridge marks it done</span>}
+    {state === "error" && <span className="muted"> · not sent, try again</span>}
+  </p>;
 }
