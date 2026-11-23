@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   PLAN_KINDS, runAllSteps, runStep, sendPlanMessage, updateBoard, setMaxTogether, setStepPick, stopChain, useHarness, usePlanChain, usePlanPicks, usePlanSteps,
   EFFORTS, exactEffort, exactModel, MODELS, useRunPrefs, type Fresh, type PlanPicks, type StepPick,
-  checkTicked, runCheck, saveCheckCommand, tickCheck, useClaims, useStepChecks, type StepCheck,
+  checkTicked, runCheck, saveCheckCommand, setPlanRound, tickCheck, useClaims, usePlanRound, useStepChecks, type StepCheck,
   type InboxItem, type Parts, type Plan, type PlanGenerated, type PlanKind, type PlanStep, type PlanVersion, type Run,
 } from "./data";
 import { isWaiting } from "./Inbox";
@@ -886,6 +886,39 @@ function Part({ k, parts, before, plan }: { k: keyof Parts; parts: Parts; before
   }
 }
 
+// F6: this plan's round: hours and window share against the budget, the report when it is over, and the owner's button
+function RoundBudget({ plan }: { plan: Plan }) {
+  const r = usePlanRound(plan.id);
+  const [busy, setBusy] = useState(false);
+  const act = (op: "on" | "off" | "next") => { setBusy(true); setPlanRound(plan.machine, plan.id, op).finally(() => setTimeout(() => setBusy(false), 3000)); };
+  const on = !!r?.on;
+  const last = r?.reports?.[r.reports.length - 1];
+  return (
+    <Section id="plan.round" title="Round budget" extra={on ? `round ${r!.round} · ${r!.state === "over" ? "over" : "open"} · ${r!.hoursUsed.toFixed(2)} of ${r!.budgetHours} h · ${r!.windowPct.toFixed(1)} of ${r!.budgetWindowPct}%` : "off"}>
+      {!on && <p className="muted small">Off for this plan. On: one round is 6 agent-hours and 30% of the 5-hour window.</p>}
+      {on && (
+        <div data-round={r!.state}>
+          <p className="small">Hours <progress max={r!.budgetHours} value={Math.min(r!.hoursUsed, r!.budgetHours)} /> {r!.hoursUsed.toFixed(2)} of {r!.budgetHours} h</p>
+          <p className="small">Window <progress max={r!.budgetWindowPct} value={Math.min(r!.windowPct, r!.budgetWindowPct)} /> {r!.windowPct.toFixed(1)} of {r!.budgetWindowPct}%</p>
+          {r!.state === "over" && last && (
+            <ul className="list small" data-round-report>
+              <li><b>Round {last.round} over:</b> {last.why}</li>
+              <li>Spent {last.hoursUsed.toFixed(2)} h, {last.windowPct.toFixed(1)}% window, ${last.usd.toFixed(2)}, {last.runs.length} runs</li>
+              <li>Paused runs: {last.paused.length}</li>
+              <li>Steps not done: {last.stepsOpen.join(", ") || "none"}</li>
+            </ul>
+          )}
+        </div>
+      )}
+      <p>
+        {!on && <button disabled={busy} onClick={() => act("on")}>Turn on rounds</button>}
+        {on && r!.state === "over" && <button disabled={busy} data-round-next onClick={() => act("next")}>Open round {r!.round + 1}</button>}
+        {on && <> <button disabled={busy} onClick={() => act("off")}>Turn off</button></>}
+      </p>
+    </Section>
+  );
+}
+
 export function PartsView({ plan, versions, items, runs, onOpenItem }: {
   plan: Plan; versions: PlanVersion[]; items: InboxItem[]; runs: Run[]; onOpenItem: (id: string) => void;
 }) {
@@ -950,6 +983,8 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
       </p>
 
       <ReportBoard plan={plan} v={v} steps={steps} evidence={evidence} asked={asked} onOpenItem={onOpenItem} stale={v.n === plan.current ? staleMark(stale, "board") : undefined} />
+
+      <RoundBudget plan={plan} />
 
       <RunReports plan={plan} v={v} runs={runs} steps={steps} evidence={evidence} generated={generated} stale={staleMark(stale, "results")} />
 

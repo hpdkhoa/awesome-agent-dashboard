@@ -74,6 +74,7 @@ from .chain import Chains
 from .stepcheck import StepChecks
 from .coordinator import Coordinator
 from .jobs import Jobs
+from .rounds import Rounds
 from .evidence import Evidence
 from .glance import Glance
 from .boardformat import board_gaps, update_block
@@ -505,6 +506,7 @@ class Runs:
         self.coordinator = Coordinator(self)
         # F9: detached long jobs (jobs.py): the bridge reads their folders and keeps jobs/<id> for the Runs tab
         self.jobs = Jobs(store, machine)
+        self.rounds = Rounds(self)  # F6: the round budget per plan (rounds.py)
         # F8: claims across boxes (claims.py); set by the CLI when a control plane (Firestore) is reachable
         self.claims = None
         # step i4: a work folder added on the page joins self.roots in place (the same list the sync and the inbox
@@ -523,6 +525,7 @@ class Runs:
         "Finish from the .out file"); the rest can no longer be followed and are lost. Also reads the paused runs that
         continue by themselves at the reset, and the Run all steps chains left on."""
         log = [f"{k}: continues by itself at the reset" for k in self._auto_runs()]
+        self.rounds.load()  # F6: the plans with an open round
         for c in self.store.where("commands", "status", "running"):
             if c.get("machine") != self.machine or c["id"] in self.procs:
                 continue
@@ -607,6 +610,7 @@ class Runs:
                     else self.checks.start(c) if action == "step_check"
                     else self.evidence.start(c) if action == "evidence"
                     else self.glance.start(c) if action == "glance"
+                    else self.rounds.command(c) if action == "round"
                     else self.coordinator.start(c) if action == "coordinator"
                     else self._add_root(c) if action == "add_root"
                     else self._search(c) if action == "search"
@@ -615,6 +619,10 @@ class Runs:
                     else self._unknown(c))
             if line:
                 log.append(line)
+        try:
+            log += self.rounds.scan()
+        except Exception as e:  # noqa: BLE001: the round count never stops the runs
+            log.append(f"round budget failed: {type(e).__name__}: {str(e)[:200]}")
         for cid, p in list(self.procs.items()):
             if p.poll() is not None:
                 log.append(self._finish(cid, p))
@@ -969,6 +977,12 @@ class Runs:
             self.store.update(path, {"status": "failed", "error": NO_CLI})
             self._answer_back(c, {"status": "answered", "error": NO_CLI})
             return f"{c['id']}: no claude CLI"
+        if self.rounds.blocked(c):  # F6: the round is over; the message goes when the owner opens the next round
+            if c.get("status") != "waiting" or c.get("waitReason") != "round":
+                self.store.update(path, {"status": "waiting", "waitReason": "round", "workType": wt, "waitingSince": now_iso()})
+                self._answer_back(c, {"waitReason": "round"})
+                return f"{c['id']}: plan {c.get('planId')} round is over, the message waits"
+            return None
         waits = self._resources_wait(c, cwd)
         if waits is not None:
             return waits or None
@@ -1458,6 +1472,14 @@ class Runs:
             fields.update({k: r.get(k) for k in ("firstTokenMs", "loadMs", "promptTokens", "outputTokens", "tokensPerSec",
                                                  "stoppedOnRepeat", "numCtx", "context", "budgetCounts")})
             fields["totalMs"] = r.get("duration_ms")
+        if not stopped and p.returncode != 0 and (self.store.get(f"commands/{cid}") or {}).get("roundPausing"):
+            # F6: killed at the round budget: paused, and only the owner's Open next round continues it
+            self.store.update(f"commands/{cid}", {**fields, "status": "paused", "roundPaused": True, "roundPausing": False,
+                                                  "stage": "Paused: round budget", "pausedUntil": "you open the next round",
+                                                  "pausedUntilAt": None, "autoContinue": False, "autoBy": None})
+            self.procs.pop(cid, None)
+            self.sid_of.pop(cid, None)
+            return f"{cid}: paused, round budget"
         if not stopped and r.get("api_error") == "usage_limit_reached":
             # paused, not failed: Continue (or the auto continue at the reset) does the leftover work; an answer's
             # inbox item stays as it is until then

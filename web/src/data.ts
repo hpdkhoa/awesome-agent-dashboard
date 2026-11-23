@@ -64,7 +64,7 @@ export type InboxItem = {
   answer: { choice: string; text: string; at: string } | null;
   deliveredAt?: string;
   deliveredVia?: "live" | "resume";
-  waitReason?: "turn" | "app" | "upgrade" | "resources" | null; // why an answer has not reached the session yet (bridge runs.py)
+  waitReason?: "turn" | "app" | "upgrade" | "resources" | "round" | null; // why an answer has not reached the session yet (bridge runs.py)
   commandId?: string; // the message run that carries the answer to the session
   force?: boolean;
   error?: string | null;
@@ -244,7 +244,7 @@ export type Run = {
   generate?: { kinds: Kind[]; formats?: Format[]; base?: Base; note?: string }; // the owner's Generate order (planCheck.ts)
   phaseOrder?: boolean; // the owner's order to move the plan's phase (phases.ts)
   quotes?: { checked: number; marked: number }; // plan from a session: quotes in the notes not found on their page
-  waitReason?: "turn" | "app" | "upgrade" | "resources";
+  waitReason?: "turn" | "app" | "upgrade" | "resources" | "round";
   // F10: the readings under their limits when the run waits (bridge runs.py _resources_wait), each with its number
   resources?: { low?: string[]; at?: string; startedAfter?: string; error?: string };
   upgradeId?: string; upgradedFrom?: string; // a message on an older plan waits while the plan moves to the latest format
@@ -636,6 +636,25 @@ export function useStepChecks(planId: string | undefined): StepCheck[] {
   }, [planId, active]);
   return c;
 }
+// F6 round budget per plan (bridge rounds.py; the owner's picks 2026-11-23: "6 h + 30% window", "At once, resumable").
+export type RoundReport = { round: number; startedAt: string; endedAt: string; why: string; hoursUsed: number; windowPct: number;
+  budgetHours: number; budgetWindowPct: number; usd: number; runs: { id: string; step: string; minutes: number; status: string }[];
+  paused: string[]; stepsOpen: string[] };
+export type PlanRound = { planId: string; on: boolean; round: number; state: "open" | "over"; startedAt: string; hoursUsed: number;
+  windowPct: number; budgetHours: number; budgetWindowPct: number; reports?: RoundReport[] };
+export function usePlanRound(planId: string | undefined): PlanRound | null {
+  const [r, setR] = useState<PlanRound | null>(null);
+  const active = useActive();
+  useEffect(() => {
+    if (!planId || !active) return;
+    return onSnapshot(doc(db, "planRounds", planId), (s) => (countReads(1, "planRounds"), setR((s.data() as PlanRound) ?? null)));
+  }, [planId, active]);
+  return r;
+}
+export const setPlanRound = (machine: string, planId: string, op: "on" | "off" | "next") => {
+  const id = crypto.randomUUID().replace(/-/g, "").slice(0, 20);
+  return setDoc(doc(db, "commands", id), { id, action: "round", op, machine, planId, status: "new", createdAt: new Date().toISOString() });
+};
 // F8, claims across boxes (plan bf73af63, "a session claims a step or folder; shown on the page; a second box is
 // refused"): each box's copy of the claims it holds (bridge claims.py), read from the boxes, never from Firestore.
 export type Claim = { key: string; kind: "step" | "folder"; planId: string; stepId: string; folder: string; machine: string;

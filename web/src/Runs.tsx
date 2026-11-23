@@ -309,6 +309,7 @@ const WAIT_LABEL: Record<string, string> = {
   turn: "waiting for the session's turn to end",
   app: "waiting: last used in the app or a terminal, send it with Remote Control",
   upgrade: "waiting: the plan is being moved to the latest format first",
+  round: "waiting: this plan's round is over, open the next round on its page",
   resources: "waiting for free disk / RAM / GPU",
 };
 
