@@ -18,7 +18,8 @@ OPTS = [{"label": "Delete it", "detail": "frees 1.2 GB"}, {"label": "Keep it", "
 FAKE = r'''
 import json, sys
 a = sys.argv
-prompt = a[a.index("-p") + 1]
+_i = sys.argv.index("-p") + 1  # the prompt: after -p (a page-notes run), else on stdin (every run since 2026-11-25)
+prompt = sys.argv[_i] if _i < len(sys.argv) and not sys.argv[_i].startswith("--") else sys.stdin.buffer.read().decode("utf-8")
 assert a[a.index("--resume") + 1] == "plan-session" and "--fork-session" in a and "--no-session-persistence" in a
 assert "mcp__agent-inbox" in a[a.index("--disallowedTools") + 1] and "--permission-prompt-tool" not in a
 assert "never reaches the owner's inbox" in prompt

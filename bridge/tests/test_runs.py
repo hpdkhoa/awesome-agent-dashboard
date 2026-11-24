@@ -10,7 +10,8 @@ from test_inbox import FakeStore
 # A stand-in for claude: prints a JSON result like `claude -p --output-format json`, or sleeps when the prompt says so.
 FAKE = r'''
 import json, os, sys, time
-prompt = sys.argv[sys.argv.index("-p") + 1]
+_i = sys.argv.index("-p") + 1  # the prompt: after -p (a page-notes run), else on stdin (every run since 2026-11-25)
+prompt = sys.argv[_i] if _i < len(sys.argv) and not sys.argv[_i].startswith("--") else sys.stdin.buffer.read().decode("utf-8")
 if prompt == "sleep":
     time.sleep(60)
 if prompt == "fail":
@@ -761,3 +762,41 @@ def test_a_side_step_run_gets_its_own_session_and_the_plan_keeps_its_own(tmp_pat
     assert c["freshFrom"] == "main-session" and c["sessionId"] != "main-session"
     assert store.get("plans/pl")["sessionId"] == "main-session"
     wait_done(runs, "a1", store)
+
+
+def test_a_prompt_over_the_windows_command_line_limit_goes_on_stdin(tmp_path, monkeypatch):
+    # 2026-11-25: a fresh-session handoff of ~31,000 chars + the KB records passed the 32,767-char command line limit
+    # (WinError 206) and the run never started; the owner's pick "Prompt via stdin". 40,000 chars, Vietnamese included.
+    store, runs, work = setup(tmp_path, monkeypatch)
+    seen = []
+    real = runs.popen
+    runs.popen = lambda c, **kw: (seen.append(c), real(c, **kw))[1]
+    big = "Điểm danh: 3/3. " * 2500
+    cmd(store, "c1", action="start", folder=str(work), prompt=big)
+    c = wait_done(runs, "c1", store)
+    assert c["status"] == "done", c
+    assert Texts(None, tmp_path / "out").run("c1")["text"] == "did: " + big.strip() + " in work"
+    assert sum(len(a) for a in seen[0]) < 2000 and big.strip() not in seen[0]  # the command line keeps only the flags
+
+
+def test_a_run_that_cannot_start_is_marked_failed_and_the_next_command_still_goes(tmp_path, monkeypatch):
+    # 2026-11-25: the spawn error escaped step(), the watch loop retried every 6 s and every other run waited.
+    store, runs, work = setup(tmp_path, monkeypatch)
+    real = runs.popen
+
+    calls = []
+
+    def popen(c, **kw):
+        calls.append(c)
+        if len(calls) == 1:  # the first run cannot start
+            raise OSError(206, "The filename or extension is too long")
+        return real(c, **kw)
+
+    runs.popen = popen
+    cmd(store, "c1", action="start", folder=str(work), prompt="x", createdAt="2026-11-25T00:00:00")
+    cmd(store, "c2", action="start", folder=str(work), prompt="hello", createdAt="2026-11-25T00:00:01")
+    lines = runs.step()
+    c1 = store.get("commands/c1")
+    assert c1["status"] == "failed" and "too long" in c1["error"], c1
+    assert any("could not start" in l for l in lines)
+    assert wait_done(runs, "c2", store)["status"] == "done"

@@ -13,7 +13,8 @@ from test_inbox import FakeStore
 # A stand-in for claude: a picture run saves a png in the folder its prompt names; a check run answers with marks.
 FAKE = r'''
 import json, os, sys
-prompt = sys.argv[sys.argv.index("-p") + 1]
+_i = sys.argv.index("-p") + 1  # the prompt: after -p (a page-notes run), else on stdin (every run since 2026-11-25)
+prompt = sys.argv[_i] if _i < len(sys.argv) and not sys.argv[_i].startswith("--") else sys.stdin.buffer.read().decode("utf-8")
 assert "--no-session-persistence" in sys.argv
 if prompt.startswith("Take the evidence pictures"):
     folder = prompt.split("folder (make it): ")[1].split("\n")[0].strip()

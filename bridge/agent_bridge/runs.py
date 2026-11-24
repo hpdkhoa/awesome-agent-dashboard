@@ -308,6 +308,27 @@ def ensure_plan_data_ignored(cwd: str) -> bool:
     return True
 
 
+class SpawnFailed(RuntimeError):
+    """A run whose process could not start; its row is already marked failed."""
+
+
+def stdin_prompt(cmd: list[str]) -> tuple[list[str], str | None]:
+    """(the command without its prompt, the prompt) for a `claude -p <prompt> ...` command; claude -p reads the prompt
+    from stdin when none is given. Any other command comes back as it is, with no prompt."""
+    if len(cmd) >= 3 and cmd[1] == "-p" and not cmd[2].startswith("--"):
+        return [cmd[0], "-p", *cmd[3:]], cmd[2]
+    return cmd, None
+
+
+def feed_stdin(p, prompt: str) -> None:
+    """Writes the prompt to the run's stdin as UTF-8 and closes it (a thread: a full pipe never blocks the loop)."""
+    try:
+        p.stdin.write(prompt.encode("utf-8"))
+        p.stdin.close()
+    except (OSError, ValueError, AttributeError):
+        pass  # the run already ended; its .err file says why
+
+
 def message_command(claude: str, message: str, session_id: str, mode: str = "manual", kind: str = "",
                     step: str = "", model: str = "", effort: str = "") -> list[str]:
     """kind: a plan message's kind (qa, goal, step, rule, lesson, action); step: a Run step's step id. Either goes as an
@@ -600,7 +621,17 @@ class Runs:
                     continue
                 self.acted.add(c["id"])
             action = c.get("action")
-            line = (self._start(c) if action == "start" else self._message(c) if action == "message"
+            try:
+                line = self._act(c, action)
+            except SpawnFailed as e:  # the row is already marked failed; the other commands go on
+                line = str(e)
+            if line:
+                log.append(line)
+        return self._after_commands(log)
+
+    def _act(self, c: dict, action) -> str | None:
+        """One command, by its action."""
+        return (self._start(c) if action == "start" else self._message(c) if action == "message"
                     else self._stop(c) if action == "stop" else self._check(c) if action == "check"
                     else self._plan(c) if action == "plan" else self._approve_generated(c) if action == "approve_generated"
                     else self._delete_plan_files(c) if action == "delete_plan_files"
@@ -617,8 +648,9 @@ class Runs:
                     else self._local(c) if action == "local"
                     else self._continue(c) if action == "continue" else self._auto_continue(c) if action == "auto_continue"
                     else self._unknown(c))
-            if line:
-                log.append(line)
+
+    def _after_commands(self, log: list[str]) -> list[str]:
+        """The rest of a step after the commands: round budget, finished runs, archiver, continues, jobs."""
         try:
             log += self.rounds.scan()
         except Exception as e:  # noqa: BLE001: the round count never stops the runs
@@ -825,13 +857,26 @@ class Runs:
         return f"{c['id']}: refused, unknown action"
 
     def _spawn(self, cid: str, cmd: list[str], cwd: str) -> subprocess.Popen:
+        """The prompt goes on stdin, never on the command line (the owner's pick, 2026-11-25: "Prompt via stdin"): a
+        fresh-session handoff of ~31,000 chars passed the Windows command-line limit of 32,767 (WinError 206) and the
+        run never started. A spawn that still fails marks its row failed and raises SpawnFailed, which step() catches
+        for that one command, so one bad run never stalls the watch loop (it retried every 6 s, every other run waited)."""
         env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
         extra = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt" else {"start_new_session": True}
-        with (
-            open(self.out_dir / f"{cid}.out", "w", encoding="utf-8") as out,
-            open(self.out_dir / f"{cid}.err", "w", encoding="utf-8") as err,
-        ):
-            p = self.popen(cmd, cwd=cwd, env=env, stdout=out, stderr=err, stdin=subprocess.DEVNULL, **extra)
+        cmd, prompt = stdin_prompt(cmd)
+        try:
+            with (
+                open(self.out_dir / f"{cid}.out", "w", encoding="utf-8") as out,
+                open(self.out_dir / f"{cid}.err", "w", encoding="utf-8") as err,
+            ):
+                p = self.popen(cmd, cwd=cwd, env=env, stdout=out, stderr=err,
+                               stdin=subprocess.DEVNULL if prompt is None else subprocess.PIPE, **extra)
+        except OSError as e:
+            self.store.update(f"commands/{cid}", {"status": "failed", "error": f"The run could not start: {e}"[:300],
+                                                  "finishedAt": now_iso()})
+            raise SpawnFailed(f"{cid}: could not start: {e}") from e
+        if prompt is not None:
+            threading.Thread(target=feed_stdin, args=(p, prompt), daemon=True).start()
         self.procs[cid] = p
         return p
 

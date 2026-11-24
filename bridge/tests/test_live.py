@@ -20,7 +20,7 @@ for t in ("Reading ", "the files."):
     out({"type": "stream_event", "event": {"type": "content_block_delta", "delta": {"type": "text_delta", "text": t}}})
 out({"type": "stream_event", "event": {"type": "content_block_start", "content_block": {"type": "tool_use", "name": "Read"}}})
 out({"type": "stream_event", "parent_tool_use_id": "x", "event": {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "SUBAGENT"}}})
-time.sleep(float(sys.argv[sys.argv.index("-p") + 1]))
+time.sleep(float(sys.stdin.read()))
 out({"type": "stream_event", "event": {"type": "message_start"}})
 out({"type": "stream_event", "event": {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "Done."}}})
 out({"type": "result", "subtype": "success", "is_error": False, "result": "Done.", "session_id": "s1", "total_cost_usd": 0.1})
