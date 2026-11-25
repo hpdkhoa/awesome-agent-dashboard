@@ -15,7 +15,7 @@ SKIP = {"liveSessions", "recordVecs", "boxClaims"}  # boxClaims: this box's copy
 MONEY = {"moneyEntries", "fxRates", "goldPrices"}  # stay on Firestore: the page reads and writes them there
 KEY = "mirror_seq"
 COLLECTIONS = ["boardSeen", "commands", "inbox", "liveSessions", "machines", "meta", "planChains", "planChecks", "planEvidence", "planGenerated", "planGlance",
-               "planHarness", "planPicks", "planSteps", "planVersions", "plans", "pushSubs", "sessions", "usage", "workTypes"]
+               "planHarness", "planPicks", "planRevises", "planSteps", "planVersions", "plans", "pushSubs", "sessions", "usage", "workTypes"]
 
 
 class Mirror:

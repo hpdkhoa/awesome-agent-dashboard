@@ -14,6 +14,7 @@ export const COLLECTIONS: { name: string; label: string; order?: string; bridge?
   { name: "planSteps", label: "Plan steps", order: "updatedAt", show: ["planId", "stepId", "state", "updatedAt"] },
   { name: "planHarness", label: "Harness ticks", show: ["planId"] },
   { name: "planPicks", label: "Per-step picks", show: ["planId"] },
+  { name: "planRevises", label: "Plan revises", order: "at", show: ["planId", "after", "round", "change", "at"] },
   { name: "boardSeen", label: "Board last look", show: ["planId", "at"] },
   { name: "planGenerated", label: "Generated files (approved)", show: ["planId"] },
   { name: "planVersions", label: "Plan versions", order: "createdAt", show: ["planId", "n", "note", "createdAt"] },

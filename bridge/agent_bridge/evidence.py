@@ -238,7 +238,7 @@ class Evidence:
             store.put_many({path: {**rec, "id": f"{pid}_{sid}", "planId": pid, "stepId": sid, "state": "idle", "what": None,
                                    "error": why, "updatedAt": now_iso()}})
             if what == "check" and plan:
-                self._settle({**plan, "id": pid}, sid, None, f"- No receipt: the LLM check of the pictures could not run: {why}")
+                self._gate({**plan, "id": pid}, sid, "refused", f"The LLM check of the pictures could not run: {why}")
             return f"{cid}: evidence refused, {why}"
         if what == "pictures":
             sv = store.get(f"planSteps/{pid}_{sid}") or {}
@@ -291,10 +291,21 @@ class Evidence:
                        "set": check["set"], "pictures": c.get("checkedPictures") or [], "marks": check["pictures"],
                        "note": check["note"], "findings": check["findings"], "runId": c["id"]}
             self._settle({**plan, "id": pid}, sid, receipt, "")
-        else:
-            why = (f"- LLM check of the pictures: {check['overall']}" + (f": {check['note']}" if check["note"] else "")
-                   if check else "- No receipt: " + (error or "the LLM check gave no marks (no JSON line)."))
+        elif check and check["overall"] == "fail":
+            why = f"- LLM check of the pictures: fail" + (f": {check['note']}" if check["note"] else "")
             self._settle({**plan, "id": pid}, sid, None, why)
+        elif check:  # C: unclear goes to the owner, never failed by itself
+            self._gate({**plan, "id": pid}, sid, "unclear", check["note"] or "")
+        else:
+            self._gate({**plan, "id": pid}, sid, "refused", error or "The LLM check gave no marks (no JSON line).")
+
+    def _gate(self, plan: dict, sid: str, kind: str, detail: str) -> None:
+        """C: a step waiting for its receipt that the pictures cannot settle asks the owner (stepgate.py)."""
+        r = self.runs
+        if (r.store.get(f"planSteps/{plan['id']}_{sid}") or {}).get("state") != "checking":
+            return
+        from .stepgate import ask
+        ask(r.store, plan, sid, kind, detail, getattr(r, "machine", ""), getattr(r, "push", None))
 
     def _settle(self, plan: dict, sid: str, receipt: dict | None, why: str) -> None:
         from .stepcheck import settle

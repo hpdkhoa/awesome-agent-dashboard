@@ -116,6 +116,7 @@ export type Plan = {
   source?: { sessionId: string; commandId: string; pagesDir: string; pages: { file: string; first: number; last: number }[] };
   activeStep?: string | null;
   phase?: Phase; // where the plan is (phases.ts); none = Explore
+  reviseDue?: Record<string, { round: number; stepV: number; at: string }>; // B: steps whose revise is not posted yet
 };
 // The six parts, in the owner's order (2026-11-03): goal, summary, rules, lessons and how each was applied, leftover, steps.
 export type Parts = {
@@ -123,7 +124,10 @@ export type Parts = {
   rules: { rule: string; source: string }[];
   lessons: { lesson: string; taughtBy: string; appliedIn: string }[];
   leftover: string[];
-  steps: { id: string; title: string; does: string; check: string; new?: boolean }[]; // new: work the record does not hold
+  // new: work the record does not hold. v, vSince (A, the owner 2026-11-25: "each step has a version and when any work
+  // not change the step then the version is kept"): the bridge counts the changes of the step's text; vSince is the plan
+  // version where this text began. None on versions made before A: v1.
+  steps: { id: string; title: string; does: string; check: string; new?: boolean; v?: number; vSince?: number }[];
   cite?: string; // the owner's words the plan reads, in log order (2026-11-05); part 1 says what the plan is for
   board?: Board; // the plan's main look (bridge inbox.py clean_board; the owner's pick, 2026-11-16, "Product board, new fields")
 };
@@ -150,7 +154,7 @@ export const PLAN_KINDS: [PlanKind, string][] = [
 export type PlanStep = {
   id: string; planId: string; stepId: string; state: "next" | "now" | "checking" | "done" | "failed"; updatedAt: string;
   versions: { n: number; state: string; reply: string; at: string; planVersion: number; report?: StepReport;
-    by?: string; receiptBy?: "check" | "pictures"; receipt?: Receipt }[];
+    by?: string; receiptBy?: "check" | "pictures" | "owner"; receipt?: Receipt; stepV?: number }[]; // stepV: the step's v this round ran on
 };
 // F4, done needs a receipt (bridge stepcheck.py settle; the owner's picks 2026-11-13 "Check or checked pictures",
 // 2026-11-19 "Done waits for its receipt"): what made a step done.
@@ -173,7 +177,23 @@ export type PlanVersion = {
   phase?: Phase; phaseMove?: { from: Phase; to: Phase; order: string }; // phases.ts
   harness?: HarnessItem[]; // harness.ts: the list as it is in this version
   boardCheck?: BoardCheck; // s5: the auto rule check B1 to B10 the bridge ran on this version (boardrules.py)
+  revise?: { after: string; round: number; stepV: number; why: string; result: string; changed: { id: string; from: number | null; to: number }[] };
 };
+// B, the revise after each step's result (the owner, 2026-11-25: "any work will change the plan and show it out, so the
+// step in future will have the flexible the adjust due to previous step result"): one record per step round
+// (planRevises/<plan>_<step>_r<round>, bridge inbox.py plan_revise); change "none" keeps every step's version.
+export type PlanRevise = { id: string; planId: string; after: string; round: number; stepV: number; why: string; result: string;
+  at: string; change: "none" | "steps"; planVersion: number; changed: { id: string; from: number | null; to: number }[] };
+export function usePlanRevises(planId: string | undefined): PlanRevise[] {
+  const [r, setR] = useState<PlanRevise[]>([]);
+  const active = useActive();
+  useEffect(() => {
+    if (!planId || !active) return;
+    return onSnapshot(query(collection(db, "planRevises"), where("planId", "==", planId)), (s) =>
+      (countReads(s.docChanges().length, "planRevises"), setR(s.docs.map((d) => d.data() as PlanRevise).sort((a, b) => a.at.localeCompare(b.at)))));
+  }, [planId, active]);
+  return r;
+}
 // s5 (plan 44fc4979): the owner's picks "Check all 10, B2/B4/B7 'waits s7'", "Save + red flag"
 export type BoardRule = { id: string; name: string; kb: string; state: "pass" | "fail" | "waits for s7"; n: number; lines: string[]; note: string };
 export type BoardCheck = { at: string; rules: BoardRule[]; pass: number; fail: number; wait: number };
@@ -605,7 +625,10 @@ export const tickHarness = (planId: string, h: HarnessItem, ok: boolean, v: numb
 // Async (the owner's picks, 2026-11-16: "Marked steps run together, max N", "Heavy tick: runs alone"): together lets the
 // step run beside other ticked steps, each in its own fresh session; heavy makes it run alone. maxTogether: N (default 2).
 export type StepPick = RunWith & { runner?: "claude"; together?: boolean; heavy?: boolean };
-export type PlanPicks = { planId: string; steps: Record<string, StepPick>; maxTogether?: number };
+// autoTick (C, the owner's pick 2026-11-25: "for c default is off"): the bridge ticks the check a session proposes.
+export type PlanPicks = { planId: string; steps: Record<string, StepPick>; maxTogether?: number; autoTick?: boolean };
+export const setAutoTick = (planId: string, on: boolean) =>
+  setDoc(doc(db, "planPicks", planId), { planId, autoTick: on, updatedAt: new Date().toISOString() }, { merge: true });
 export const setMaxTogether = (planId: string, n: number) =>
   setDoc(doc(db, "planPicks", planId), { planId, maxTogether: n, updatedAt: new Date().toISOString() }, { merge: true });
 export function usePlanPicks(planId: string | undefined): PlanPicks | null {
@@ -625,7 +648,7 @@ export const setStepPick = (planId: string, stepId: string, pick: StepPick) =>
 export type CheckRun = { at: string; endedAt: string; exit: number | null; seconds: number; trigger: "done" | "button";
   command: string; tail: string; timedOut: boolean; runId: string };
 export type StepCheck = { id: string; planId: string; stepId: string; command: string; proposedBy?: "session" | "owner";
-  tick?: { ok: boolean; hash: string; at: string }; state?: "idle" | "queued" | "running"; last?: CheckRun; runs?: CheckRun[] };
+  tick?: { ok: boolean; hash: string; at: string; by?: "auto" | "owner-inbox" }; state?: "idle" | "queued" | "running"; last?: CheckRun; runs?: CheckRun[] };
 export function useStepChecks(planId: string | undefined): StepCheck[] {
   const [c, setC] = useState<StepCheck[]>([]);
   const active = useActive();

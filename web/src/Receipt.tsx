@@ -28,7 +28,7 @@ export function ReceiptChip({ sv, c }: { sv?: PlanStep; c?: StepCheck }) {
   if (sv?.state === "checking") {
     const by = [...(sv.versions ?? [])].reverse().find((v) => v.state === "checking")?.receiptBy;
     return <span className="check-chip unclear" data-receipt="checking"
-      title="The done report waits for its receipt">waiting for receipt · {by === "pictures" ? "LLM check" : "check"}</span>;
+      title="The done report waits for its receipt">waiting for receipt · {by === "pictures" ? "LLM check" : by === "owner" ? "your answer in the inbox" : "check"}</span>;
   }
   if (sv?.state !== "done") return null;
   const v = receiptOf(sv, c);

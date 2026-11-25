@@ -3,6 +3,7 @@ import {
   PLAN_KINDS, runAllSteps, runStep, sendPlanMessage, updateBoard, setMaxTogether, setStepPick, stopChain, useHarness, usePlanChain, usePlanPicks, usePlanSteps,
   EFFORTS, exactEffort, exactModel, MODELS, useRunPrefs, type Fresh, type PlanPicks, type StepPick,
   checkTicked, runCheck, saveCheckCommand, setPlanRound, tickCheck, useClaims, usePlanRound, useStepChecks, type StepCheck,
+  setAutoTick, usePlanRevises, type PlanRevise,
   type InboxItem, type Parts, type Plan, type PlanGenerated, type PlanKind, type PlanStep, type PlanVersion, type Run,
 } from "./data";
 import { isWaiting } from "./Inbox";
@@ -579,10 +580,10 @@ function RunReports({ plan, v, runs, steps, evidence, generated, stale }: {
               {md(last.reply, plan)}
             </Section>
             {sv.versions.length > 1 && (
-              <Section id={`plan.report.older.${plan.id}.${st.id}`} title="Older step versions" extra={sv.versions.length - 1}>
+              <Section id={`plan.report.older.${plan.id}.${st.id}`} title="Older rounds" extra={sv.versions.length - 1}>
                 {sv.versions.slice(0, -1).reverse().map((x) => (
                   <div key={x.n}>
-                    <p className="small muted">step version {x.n} · {x.state} · {when(x.at)} · on plan v{x.planVersion}</p>
+                    <p className="small muted">round {x.n} · {x.state} · {when(x.at)} · on step v{x.stepV ?? 1} · plan v{x.planVersion}</p>
                     {x.report ? <ExactFields r={x.report} plan={plan} /> : null}
                     {md(x.reply, plan)}
                   </div>
@@ -767,6 +768,9 @@ function StepBar({ plan, rows, steps, runs, harness, picks }: {
         </select>
       </label>
       {together > 0 && <span className="small muted">{together} ticked Together</span>}
+      <label className="small" title="On: the bridge ticks the check command each session proposes, so a done report runs it with no question. Off (default): you tick each one, or answer the inbox question">
+        <input type="checkbox" checked={!!picks?.autoTick} onChange={(e) => setAutoTick(plan.id, e.target.checked).catch(fail)} /> Auto-tick checks
+      </label>
       {w && <span className="small muted">{id}: Claude · {w.model} · {w.effort} · handoff {w.fresh}</span>}
       {chain && (
         <span className={"status " + (on ? "running" : chain.state === "done" ? "done" : "failed")}>
@@ -930,6 +934,7 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
   const generated = usePlanGenerated(plan.id);
   const [checked, setChecked] = useState<string | null>(null); // when Check plan was pressed
   const picks = usePlanPicks(plan.id);
+  const revises = usePlanRevises(plan.id);
   const harnessNote = buildNote(versions.find((x) => x.n === plan.current)?.harness, ticks);
   const withParts = versions.filter((v) => v.parts).sort((a, b) => a.n - b.n);
   const [picked, setPicked] = useState<number | null>(null);
@@ -988,13 +993,14 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
 
       <RunReports plan={plan} v={v} runs={runs} steps={steps} evidence={evidence} generated={generated} stale={staleMark(stale, "results")} />
 
-      <Section id="plan.part.steps" title="6. Steps" extra={`${v.parts.steps.length} steps`} stale={staleMark(stale, "results")}>
+      <Section id="plan.part.steps" title="6. Steps" extra={`${v.parts.steps.length} steps · ${revises.length} revises`} stale={staleMark(stale, "results")}>
         {before && <DiffBlock a={partLines(before, "steps")} b={partLines(v.parts, "steps")} />}
         {!before && v.n === plan.current && (
           <>
             <StepBar plan={plan} rows={v.parts.steps} runs={runs} harness={harnessNote} picks={picks}
               steps={steps.filter((x) => v.parts!.steps.some((st) => st.id === x.stepId))} />
             {phaseOf(plan) !== "explore" && <PicksTable plan={plan} rows={v.parts.steps} picks={picks} />}
+            <RevisesSection plan={plan} revises={revises} due={Object.keys(plan.reviseDue ?? {})} />
           </>
         )}
         {v.parts.steps.map((st) => {
@@ -1006,6 +1012,7 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
               title={<span data-step={st.id}>
                 <span className={"step-state " + (sv?.state ?? "next")}>{sv?.state ?? "next"}</span>
                 <b>{st.id} · {st.title}</b>{st.new && <span className="tag" title="Work the session's record does not hold">new</span>}
+                {" "}<span className="tag" data-step-v={st.v ?? 1} title={`The step's own version: its text (title, does, check) changed ${(st.v ?? 1) - 1} times${st.vSince ? `; this text since plan v${st.vSince}` : ""}`}>v{st.v ?? 1}</span>
                 {" "}<ReceiptChip sv={sv} c={checks.find((x) => x.stepId === st.id)} />
                 {" "}<ClaimChip c={claims.find((x) => x.kind === "step" && x.stepId === st.id)} />
               </span>}
@@ -1014,6 +1021,7 @@ export function PartsView({ plan, versions, items, runs, onOpenItem }: {
               <p className="step-tools"><StepActions step={st} /></p>
               <ClaimLine c={claims.find((x) => x.kind === "step" && x.stepId === st.id)} />
               <Md text={linkEntries(`${st.does}\n\n**Check:** ${st.check}`, plan)} cwd={plan.cwd} />
+              <StepRevises id={st.id} revises={revises} />
               <ReceiptBox sv={sv} c={checks.find((x) => x.stepId === st.id)} />
               <OwnerReceipt plan={plan} sv={sv} />
               <StepCheckBox plan={plan} stepId={st.id} c={checks.find((x) => x.stepId === st.id)} done={sv?.state === "done" || sv?.state === "failed" || sv?.state === "checking"} />
@@ -1152,5 +1160,42 @@ function StepCheckBox({ plan, stepId, c, done }: { plan: Plan; stepId: string; c
         </div>
       )}
     </div>
+  );
+}
+
+// B, the revise after each step's result (the owner, 2026-11-25: "any work will change the plan and show it out, so the
+// step in future will have the flexible the adjust due to previous step result"): every revise, newest first, and the
+// steps whose revise is still due (the next step waits for it).
+const reviseLine = (r: PlanRevise) =>
+  r.change === "none" ? "no change · every step keeps its version"
+    : `plan v${r.planVersion} · ${r.changed.map((c) => `${c.id} ${c.from ? `v${c.from}` : "new"}→v${c.to}`).join(", ") || "no step text changed"}`;
+
+function RevisesSection({ plan, revises, due }: { plan: Plan; revises: PlanRevise[]; due: string[] }) {
+  return (
+    <Section id={`plan.steps.revises.${plan.id}`} title="Revises after each step"
+      extra={`${revises.length} posted · ${revises.filter((r) => r.change === "steps").length} changed steps${due.length ? ` · due: ${due.join(", ")}` : ""}`} open={false}>
+      {due.length > 0 && <p className="small wait-fg">Revise due after {due.join(", ")}: the next step starts after the session posts it.</p>}
+      {!revises.length && <p className="small muted">No revise yet. Each done or failed step gets one.</p>}
+      <ul className="small">
+        {[...revises].reverse().map((r) => (
+          <li key={r.id}><b>after {r.after}</b> round {r.round} ({r.result}, step v{r.stepV}) · {reviseLine(r)} · {r.why} <span className="muted">{dt(r.at)}</span></li>
+        ))}
+      </ul>
+    </Section>
+  );
+}
+
+function StepRevises({ id, revises }: { id: string; revises: PlanRevise[] }) {
+  const after = revises.filter((r) => r.after === id);
+  const changed = revises.filter((r) => r.changed.some((c) => c.id === id));
+  if (!after.length && !changed.length) return null;
+  return (
+    <ul className="small">
+      {after.map((r) => <li key={r.id}>Revise after round {r.round}: {reviseLine(r)} · {r.why}</li>)}
+      {changed.map((r) => {
+        const c = r.changed.find((x) => x.id === id)!;
+        return <li key={`c${r.id}`}>Changed by the revise after {r.after}: {c.from ? `v${c.from}` : "new"}→v{c.to} · {r.why}</li>;
+      })}
+    </ul>
   );
 }

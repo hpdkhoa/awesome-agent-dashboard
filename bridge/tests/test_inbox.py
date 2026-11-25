@@ -427,7 +427,7 @@ def test_plan_get_reads_the_current_parts_harness_and_step_states():
     ib.plan_version(pid, "", "harness", parts=PARTS, harness=h)
     store.put_many({f"planHarness/{pid}": {"items": {"h1": {"ok": True, "hash": item_hash(h[0])}}}})
     got = ib.plan_get(pid)
-    assert got["version"] == 2 and got["parts"]["steps"] == PARTS["steps"] and got["stepStates"] == {"s1": "next"}
+    assert got["version"] == 2 and [{k: v for k, v in s.items() if k not in ("v", "vSince")} for s in got["parts"]["steps"]] == PARTS["steps"] and got["stepStates"] == {"s1": "next"}
     assert [x["approved"] for x in got["harness"]] == [True, False]
     assert ib.plan_get(pid, "rules") == {"plan": pid, "title": "P", "phase": "explore", "version": 2, "rules": []}
     assert [x["id"] for x in ib.plan_get(pid, "harness")["harness"]] == ["h1", "h2"]
@@ -548,7 +548,8 @@ def test_patch_changes_only_what_it_names():
                                                                          {"group": "g", "term": "B", "means": "b"}]}})
     p = store.docs[f"planVersions/{pid}_v{n}"]["parts"]
     assert [r["rule"] for r in p["rules"]] == ["a", "B", "c"] and p["rules"][1]["source"] == "2"
-    assert p["steps"][1] == {"id": "s2", "title": "t2", "does": "D2", "check": "c2"} and p["steps"][0]["does"] == "d"
+    assert p["steps"][1] == {"id": "s2", "title": "t2", "does": "D2", "check": "c2", "v": 2, "vSince": 2} and p["steps"][0]["does"] == "d"
+    assert p["steps"][0]["v"] == 1 and p["steps"][0]["vSince"] == 1  # A: an unchanged step keeps its version
     assert len(p["board"]["glossary"]) == 2 and p["board"]["whatFor"] == BOARD["what_for"]
     assert p["goal"] == "g" and p["board"]["product"] == [{"feature": "Send", "steps": ["s1", "s2"]}]
     m = ib.plan_version(pid, "", "append", patch={"goal": {"append": "more"}})

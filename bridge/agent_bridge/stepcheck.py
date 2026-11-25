@@ -30,7 +30,7 @@ import time
 import uuid
 
 from .chain import item_hash
-from .inbox import now_iso
+from .inbox import now_iso, step_v
 from .redact import redact
 
 TIMEOUT_S = 600
@@ -66,6 +66,7 @@ def settle(store, plan: dict, sid: str, receipt: dict | None, why: str, by: str,
     versions = list(step.get("versions") or [])
     state = "done" if receipt else "failed"
     ver = {"n": len(versions) + 1, "state": state, "at": now_iso(), "planVersion": int(plan.get("current", 0)), "by": by,
+           "stepV": step_v(store, plan, sid),
            "reply": (f"- Receipt: {receipt.get('kind')} passed" + (f" · commit {receipt['commit']}" if receipt.get("commit") else "")
                      if receipt else redact(why, 8000))}
     if receipt:
@@ -93,7 +94,7 @@ def owner_confirm(store, plan: dict, sid: str, note: str = "", push=None) -> dic
     receipt = {"kind": "owner", "at": now_iso(), "note": redact(str(note or "").strip(), 2000),
                "commit": commit_of(plan.get("cwd", "")) if plan.get("cwd") else ""}
     ver = {"n": len(versions) + 1, "state": "done", "at": receipt["at"], "planVersion": int(plan.get("current", 0)),
-           "by": "owner", "reply": "- Receipt: the owner checked it" + (f": {receipt['note']}" if receipt["note"] else ""),
+           "by": "owner", "stepV": step_v(store, plan, sid), "reply": "- Receipt: the owner checked it" + (f": {receipt['note']}" if receipt["note"] else ""),
            "receipt": receipt}
     store.put_many({path: {**step, "state": "done", "versions": versions + [ver], "updatedAt": now_iso()}})
     if push is not None:
@@ -129,16 +130,30 @@ def inside(cwd: str, roots: list[tuple[str, str]]) -> bool:
     return False
 
 
+def auto_tick(store, plan_id: str, step_id: str) -> bool:
+    """C, the plan's Auto-tick switch (planPicks/<plan id>.autoTick; the owner's pick 2026-11-25 "for c default is
+    off"): when on, the step's command is ticked by the bridge (tick.by "auto"). Returns True when it ticked now."""
+    if not (store.get(f"planPicks/{plan_id}") or {}).get("autoTick"):
+        return False
+    path = f"planChecks/{plan_id}_{step_id}"
+    rec = store.get(path) or {}
+    cmd = str(rec.get("command") or "").strip()
+    if not cmd or ticked(rec):
+        return False
+    store.update(path, {"tick": {"ok": True, "hash": check_hash(cmd), "at": now_iso(), "by": "auto"}, "updatedAt": now_iso()})
+    return True
+
+
 def propose(store, plan_id: str, step_id: str, command: str) -> None:
     """The session's proposal (step_update's check_command). A changed command keeps the old tick, which no longer
     matches its hash, so it shows unticked until the owner ticks it."""
     path = f"planChecks/{plan_id}_{step_id}"
     old = store.get(path) or {}
-    if str(old.get("command") or "") == command:
-        return
-    store.put_many({path: {**old, "id": f"{plan_id}_{step_id}", "planId": plan_id, "stepId": step_id, "command": command,
-                           "proposedBy": "session", "proposedAt": now_iso(), "state": old.get("state") or "idle",
-                           "updatedAt": now_iso()}})
+    if str(old.get("command") or "") != command:
+        store.put_many({path: {**old, "id": f"{plan_id}_{step_id}", "planId": plan_id, "stepId": step_id, "command": command,
+                               "proposedBy": "session", "proposedAt": now_iso(), "state": old.get("state") or "idle",
+                               "updatedAt": now_iso()}})
+    auto_tick(store, plan_id, step_id)
 
 
 def queue(store, plan: dict, step_id: str, trigger: str, machine: str) -> str | None:
@@ -193,8 +208,10 @@ class StepChecks:
             self.store.update(f"commands/{cid}", {"status": "failed", "endedAt": now_iso(), "error": why})
             if rec:
                 self.store.update(path, {"state": "idle", "updatedAt": now_iso()})
-            if plan:
-                settle(self.store, {**plan, "id": pid}, sid, None, f"- No receipt: the check could not run: {why}", "check", self.push)
+            if plan and (self.store.get(f"planSteps/{pid}_{sid}") or {}).get("state") == CHECKING:
+                # C: a check that cannot run asks the owner (stepgate.py) instead of failing the step
+                from .stepgate import ask as gate_ask
+                gate_ask(self.store, {**plan, "id": pid}, sid, "refused", f"Why: {why}", self.machine, self.push)
             self._after(pid)
             return f"{cid}: step check refused, {why}"
         self.store.update(f"commands/{cid}", {"status": "running", "startedAt": now_iso()})
@@ -247,7 +264,7 @@ class StepChecks:
         code = "stopped at 10 min" if run["timedOut"] else f"exit {run['exit']}"
         reply = self._why(run)
         versions.append({"n": n, "state": "failed", "reply": redact(reply, 8000), "at": now_iso(),
-                         "planVersion": int(plan.get("current", 0)), "by": "check"})
+                         "planVersion": int(plan.get("current", 0)), "by": "check", "stepV": step_v(self.store, plan, sid)})
         self.store.put_many({f"planSteps/{pid}_{sid}": {**step, "state": "failed", "versions": versions, "updatedAt": now_iso()}})
         if self.push is not None:
             self.push.notify(f"Check failed: step {sid}", f"{code}: {run['command']}"[:160], f"/?plan={pid}", f"plan-{pid}-{sid}")

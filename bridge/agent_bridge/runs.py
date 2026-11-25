@@ -637,6 +637,7 @@ class Runs:
                     else self._delete_plan_files(c) if action == "delete_plan_files"
                     else self._phase(c) if action == "phase"
                     else self._owner_receipt(c) if action == "owner_receipt"
+                    else self._step_gate(c) if action == "step_gate"
                     else self.chains.start(c) if action == "chain"
                     else self.checks.start(c) if action == "step_check"
                     else self.evidence.start(c) if action == "evidence"
@@ -1329,6 +1330,23 @@ class Runs:
         except Exception:  # the chain re-checks on the next run's end and at the bridge's start
             pass
         return f"{c['id']}: {pid} {sid} done on the owner's receipt"
+
+    def _step_gate(self, c: dict) -> str:
+        """C, the owner's answer on a step's gate question (stepgate.act): bridge work only, no Claude run; the plan's
+        chain moves on when the step settled."""
+        from .stepgate import act
+        item = self.store.get(f"inbox/{c.get('inboxId', '')}") or {}
+        if not item.get("stepGate"):
+            self.store.update(f"commands/{c['id']}", {"status": "failed", "endedAt": now_iso(), "error": "no gate question"})
+            return f"{c['id']}: no gate question {c.get('inboxId')}"
+        line, settled = act(self.store, item, self.machine, self.push)
+        self.store.delete(f"commands/{c['id']}")
+        if settled:
+            try:
+                self.chains.after({"planId": item.get("planId", "")})
+            except Exception:  # the chain re-checks on the next run's end and at the bridge's start
+                pass
+        return line
 
     def _check(self, c: dict) -> str:
         """"Check now" on a session page: writes what the wait rule sees, once, on the command itself."""

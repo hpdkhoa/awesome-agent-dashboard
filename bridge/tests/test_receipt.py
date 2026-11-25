@@ -14,13 +14,16 @@ from test_inbox import FakeStore
 from test_stepcheck import REP, ROOT, cmd, fake, setup
 
 
-def test_done_with_neither_a_ticked_check_nor_a_picture_is_refused_and_writes_nothing():
+def test_done_with_neither_a_ticked_check_nor_a_picture_waits_and_asks_the_owner():
     store = FakeStore()
     setup(store, tick=False)
     ib = Inbox(store, "PC", [("t", ROOT)], "s1", ROOT)
-    with pytest.raises(ValueError, match="Done needs a receipt"):
-        ib.step_update("p1", "S1", "done", "built", report=REP, evidence=["gone.png"])
-    assert "planSteps/p1_S1" not in store.docs and not store.where("commands", "action", "step_check")
+    ib.step_update("p1", "S1", "done", "built", report=REP, evidence=["gone.png"])
+    st = store.get("planSteps/p1_S1")
+    assert st["state"] == "checking" and st["versions"][-1]["receiptBy"] == "owner"
+    assert not store.where("commands", "action", "step_check")
+    gate = [i for i in store.where("inbox", "planId", "p1") if i.get("stepGate")]
+    assert len(gate) == 1 and gate[0]["sessionId"] == "" and "were not found" in gate[0]["text"]
 
 
 def test_done_with_a_ticked_check_waits_then_exit_0_gives_the_receipt():
@@ -52,7 +55,7 @@ def test_done_with_a_ticked_check_that_fails_turns_failed_and_stops_the_chain():
     assert store.get("planChains/p1")["state"] == "stopped"
 
 
-def test_a_check_that_cannot_run_fails_the_waiting_step():
+def test_a_check_that_cannot_run_asks_the_owner_and_the_step_waits():
     store = FakeStore()
     setup(store, cwd="C:/Windows")
     store.update("plans/p1", {"cwd": ROOT})
@@ -60,7 +63,9 @@ def test_a_check_that_cannot_run_fails_the_waiting_step():
     store.update("plans/p1", {"cwd": "C:/Windows"})
     StepChecks(store, "PC", [("t", ROOT)], runner=fake(0)).start(cmd(store, "done"), wait=True)
     st = store.get("planSteps/p1_S1")
-    assert st["state"] == "failed" and "could not run" in st["versions"][-1]["reply"]
+    gate = [i for i in store.where("inbox", "planId", "p1") if i.get("stepGate")]
+    assert st["state"] == "checking" and len(gate) == 1 and gate[0]["stepGate"]["kind"] == "refused"
+    assert "not inside a work folder" in gate[0]["text"]
 
 
 def test_a_chain_with_only_checking_steps_left_waits_instead_of_ending():

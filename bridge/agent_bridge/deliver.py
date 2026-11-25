@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 
 from .inbox import answer_text, ask_back_text, is_polling, now_iso, open_ask
 from .snapshot import take as take_snapshot
+from .stepgate import gate_for_result
 
 RETRY_SECONDS = 600
 
@@ -64,6 +65,20 @@ def deliver(store, machine: str, claude: str | None, rows: list[dict] | None = N
             log.append(f"{item['id']}: cancelled")
     ready: dict[str, list[dict]] = {}
     for item in by("answered"):
+        # C (stepgate.py): an answer on a step's gate question goes to the bridge, never to a session; a written ok on
+        # the step's result card, while its gate question is open, answers that question
+        gate = item if item.get("stepGate") else gate_for_result(store, item)
+        if gate is not None and (gate.get("machine") or machine) == machine:
+            if gate is not item:
+                store.update(f"inbox/{gate['id']}", {"status": "answered", "answer": {**(item.get("answer") or {}), "via": item["id"]}})
+                store.update(f"inbox/{item['id']}", {"status": "closed", "deliveredAt": now_iso(), "gateAnswered": gate["id"]})
+            cid = uuid.uuid4().hex[:20]
+            store.put_many({f"commands/{cid}": {"id": cid, "action": "step_gate", "machine": machine, "inboxId": gate["id"],
+                                                "planId": gate.get("planId", ""), "stepId": gate.get("stepId", ""),
+                                                "status": "new", "createdAt": now_iso()}})
+            store.update(f"inbox/{gate['id']}", {"status": "delivering", "commandId": cid, "lastTryAt": now_iso()})
+            log.append(f"{gate['id']}: gate answer handed to the bridge ({cid})")
+            continue
         if item.get("kind") == "approval":
             continue  # approvals are only ever answered live, inside the waiting run
         if item.get("machine") != machine or item.get("sessionId") in (None, "", "unknown"):

@@ -283,6 +283,40 @@ def clean_parts(parts: dict) -> dict:
     return out
 
 
+# A, the step's own version (the owner, 2026-11-25: "I want each step has a version and when any work not change the
+# step then the version is kept"): v counts the changes of the step's text (title, does, check) across plan versions.
+# The bridge sets it, never the session: a step whose text is the same as in the parent keeps its v and vSince (the
+# plan version where that text began); a changed text gets v + 1 from this version; a new step starts at v1.
+STEP_TEXT = ("title", "does", "check")
+
+
+def step_text_hash(st: dict) -> str:
+    return item_hash({"kind": "step", "item": "\n".join(str(st.get(k) or "") for k in STEP_TEXT)})
+
+
+def number_steps(steps: list[dict], parent_steps: list[dict] | None, n: int) -> list[dict]:
+    """Each step with its v and vSince, read against the parent version's steps."""
+    old = {s.get("id"): s for s in parent_steps or []}
+    for st in steps:
+        p = old.get(st["id"])
+        if p is None:
+            st.update(v=1, vSince=n)
+        elif step_text_hash(p) == step_text_hash(st):
+            st["v"] = int(p.get("v") or 1)
+            if p.get("vSince"):
+                st["vSince"] = int(p["vSince"])
+        else:
+            st.update(v=int(p.get("v") or 1) + 1, vSince=n)
+    return steps
+
+
+def step_v(store, plan: dict, sid: str) -> int:
+    """The step's v in the plan's current version (1 for a version made before A)."""
+    v = store.get(f"planVersions/{plan['id']}_v{plan.get('current', 0)}") or {}
+    st = next((s for s in (v.get("parts") or {}).get("steps") or [] if s.get("id") == sid), {})
+    return int(st.get("v") or 1)
+
+
 # The plan's board (the owner's words, 2026-11-16: "Make this report become the main look where I can see what this
 # plan used for (the meaning), the idea, what is the progress (means what is currently build and progress compare with
 # the final product of the plan). Not redunant what I can look at the steps section"; pick "Product board, new
@@ -730,7 +764,8 @@ class Inbox:
 
     def plan_version(self, plan_id: str, text: str, note: str = "", parent: int | None = None,
                      answers: list[str] | None = None, parts: dict | None = None, change: str = "",
-                     phase: str = "", order: str = "", harness: list | None = None, patch: dict | None = None) -> int:
+                     phase: str = "", order: str = "", harness: list | None = None, patch: dict | None = None,
+                     revise: dict | None = None) -> int:
         """Saves the next version of a plan and returns its number. Questions asked from now on are its round.
 
         parent: the version this one grows from (default: the current one; an older one makes a branch).
@@ -814,7 +849,15 @@ class Inbox:
         if checks and checks["refs"] + checks["quotes"]:
             version["checks"] = checks
         if parts is not None:
+            parent_steps = ((self.store.get(f"planVersions/{plan_id}_v{parent}") or {}).get("parts") or {}).get("steps") if current else None
+            number_steps(parts.get("steps") or [], parent_steps, n)  # A: the step's own version
             version["parts"] = parts
+            if revise:  # B: this version is the revise after a step's result
+                was_v = {s.get("id"): int(s.get("v") or 1) for s in parent_steps or []}
+                version["revise"] = {**revise, "changed": [
+                    {"id": s["id"], "from": was_v.get(s["id"]), "to": s["v"]} for s in parts["steps"]
+                    if s["id"] in (revise.get("ids") or []) and was_v.get(s["id"]) != s["v"]]}
+                version["revise"].pop("ids", None)
             # s5: the auto rule check B1 to B10 on every version with a board; saved with a red flag, never refused
             # (the owner's pick "Save + red flag"; refusing is open: "refuse will come when I decide later")
             bc = check_board(parts.get("board"))
@@ -852,24 +895,33 @@ class Inbox:
         # "checking" until the bridge's check exits 0 (stepcheck.py) or the LLM check passes the pictures (evidence.py)
         from .evidence import add_set, on_done, pictures
         from .evidence import queue as evidence_queue
-        from .stepcheck import CHECKING, propose, queue, ticked
+        from .stepcheck import CHECKING, auto_tick, propose, queue, ticked
         if check_command.strip():
             propose(self.store, plan_id, step_id, check_command.strip())
+        if state == "done":
+            auto_tick(self.store, plan_id, step_id)  # C: the plan's Auto-tick switch (default off)
         has_check = state == "done" and ticked(self.store.get(f"planChecks/{plan_id}_{step_id}"))
         pics = pictures(evidence, plan.get("cwd", "")) if state == "done" else []
-        if state == "done" and not has_check and not pics:
-            raise ValueError("Done needs a receipt (the owner's picks 2026-11-13 \"Check or checked pictures\", 2026-11-19 "
-                             "\"Done waits for its receipt\"): this step has no ticked check and the report attaches no "
-                             "picture that exists. Propose a check_command and ask the owner to tick it, or attach the "
-                             "pictures that show the step working (evidence=[paths]); then report done again.")
+        # C (the owner, 2026-11-25: "build a b c"): no ticked check and no picture no longer throws mid run; the step
+        # waits as checking and the bridge asks the owner (stepgate.py), whose answer ticks, confirms or fails it
+        gate = state == "done" and not has_check and not pics
+        # B: a step ends -> its revise is due; another step does not start until it is posted (plan_revise)
+        due = dict(plan.get("reviseDue") or {})
+        late = [s for s in due if s != step_id]
+        if state == "now" and late:
+            raise ValueError(f"Post the revise for {', '.join(late)} first (the owner, 2026-11-25: \"any work will change "
+                             "the plan and show it out, so the step in future will have the flexible the adjust due to "
+                             "previous step result\"): plan_revise(step_id, why, steps=None for no change, or a patch "
+                             "of the later steps). Then report this step now again.")
         cited = self.check_cites(state, reply, rep)
         saved = CHECKING if state == "done" else state
         path = f"planSteps/{plan_id}_{step_id}"
         versions = list((self.store.get(path) or {}).get("versions") or [])
         n = len(versions) + 1
-        versions.append({"n": n, "state": saved, "reply": redact(reply, 8000), "at": now_iso(),
+        sv = int(steps[step_id].get("v") or 1)
+        versions.append({"n": n, "state": saved, "reply": redact(reply, 8000), "at": now_iso(), "stepV": sv,
                          "planVersion": int(plan.get("current", 0)), **({"report": rep} if rep else {}),
-                         **({"receiptBy": "check" if has_check else "pictures"} if state == "done" else {})})
+                         **({"receiptBy": "owner" if gate else "check" if has_check else "pictures"} if state == "done" else {})})
         self.store.put_many({path: {"id": f"{plan_id}_{step_id}", "planId": plan_id, "stepId": step_id, "state": saved,
                                     "versions": versions, "updatedAt": now_iso()}})
         # step i8: a done report asks the bridge to run the ticked check
@@ -877,18 +929,73 @@ class Inbox:
             queue(self.store, {**plan, "id": plan_id}, step_id, "done", self.machine)
             # 8. Evidence, flow 1 (the owner's pick, 2026-11-12: "Attach, else picture run")
             on_done(self.store, {**plan, "id": plan_id}, step_id, evidence or [], n, self.machine)
+        elif gate:
+            from .stepgate import ask as gate_ask
+            cmd = str((self.store.get(f"planChecks/{plan_id}_{step_id}") or {}).get("command") or "").strip()
+            gate_ask(self.store, {**plan, "id": plan_id}, step_id, "tick" if cmd else "none",
+                     "Pictures named in the report were not found." if evidence else "", self.machine, self.push)
         elif state == "done":  # F4: no ticked check: the LLM check on the attached pictures gives the receipt
             add_set(self.store, plan_id, step_id, pics, "report", "done", step_version=n)
             evidence_queue(self.store, {**plan, "id": plan_id}, step_id, "check", "receipt", self.machine)
         active = step_id if state == "now" else (None if plan.get("activeStep") == step_id else plan.get("activeStep"))
-        self.store.update(f"plans/{plan_id}", {"activeStep": active, "updatedAt": now_iso()})
+        if state in ("done", "failed"):
+            due[step_id] = {"round": n, "stepV": sv, "at": now_iso()}
+        self.store.update(f"plans/{plan_id}", {"activeStep": active, "updatedAt": now_iso(), "reviseDue": due})
         if state in ("done", "failed"):
             # the report as a result to review in the inbox (the owner's choice, 2026-11-15: "v7 data + code fix"; the
             # owner's words: "the result report is not visible"); its push replaces the step's own push
-            said = f"done, waiting for its receipt ({'the ticked check' if has_check else 'the LLM check of the pictures'})" if state == "done" else state
+            by = "your answer in the inbox" if gate else "the ticked check" if has_check else "the LLM check of the pictures"
+            said = f"done, waiting for its receipt ({by})" if state == "done" else state
             self.result(f"Step {said}: {step_id} · {steps[step_id]['title']}", report_text(rep) or reply, evidence or [],
                         plan_id=plan_id, step_id=step_id, extra={"round": int(plan.get("current", 0)), "stepVersion": n})
         return n
+
+    def plan_revise(self, plan_id: str, step_id: str, why: str, steps: dict | None = None) -> str:
+        """B, the revise after a step's result (the owner, 2026-11-25: "any work will change the plan and show it out, so
+        the step in future will have the flexible the adjust due to previous step result"; the pick "build a b c").
+        steps None or {}: no change, recorded with no plan version, so every step keeps its v (A). steps given: a patch of
+        the steps after step_id ({"s4": {"does": ...}}; a new id adds a step at the end), saved as a plan version
+        whose revise names the step, its round, why, and each changed step's v before and after. A revise never
+        changes step_id itself or a step before it. Returns a short line for the session."""
+        plan = self.store.get(f"plans/{plan_id}")
+        if not plan:
+            raise ValueError(f"no plan {plan_id}")
+        why = " ".join(str(why or "").split())
+        if not why:
+            raise ValueError("why: what in the step's result makes the later steps stay or change, in one line")
+        rec = self.store.get(f"planSteps/{plan_id}_{step_id}") or {}
+        last = (rec.get("versions") or [{}])[-1]
+        if last.get("state") not in ("checking", "done", "failed"):
+            raise ValueError(f"{step_id} has no done or failed report yet: a revise follows a step's result")
+        cur = self.store.get(f"planVersions/{plan_id}_v{plan.get('current', 0)}") or {}
+        order = [s.get("id") for s in (cur.get("parts") or {}).get("steps") or []]
+        if step_id not in order:
+            raise ValueError(f"plan v{plan.get('current', 0)} has no step {step_id}")
+        steps = {str(k): v for k, v in (steps or {}).items()}
+        later = set(order[order.index(step_id) + 1:])
+        bad = [k for k in steps if k in order and k not in later]
+        if bad:
+            raise ValueError(f"A revise changes only the steps after {step_id}; not: {', '.join(bad)}. Nothing was saved.")
+        for k, f in steps.items():
+            if not isinstance(f, dict) or not f or set(f) - {"title", "does", "check", "new"}:
+                raise ValueError(f"steps.{k}: give the fields to change (title, does, check). Nothing was saved.")
+        rnd, sv = int(last.get("n") or len(rec.get("versions") or [])), int(last.get("stepV") or step_v(self.store, plan, step_id))
+        info = {"after": step_id, "round": rnd, "stepV": sv, "why": redact(why, 600), "result": last.get("state")}
+        n, changed = int(plan.get("current", 0)), []
+        if steps:
+            n = self.plan_version(plan_id, "", f"Revise after {step_id}: {why}"[:400], patch={"steps": steps},
+                                  revise={**info, "ids": list(steps)})
+            changed = (self.store.get(f"planVersions/{plan_id}_v{n}") or {}).get("revise", {}).get("changed") or []
+        self.store.put_many({f"planRevises/{plan_id}_{step_id}_r{rnd}": {
+            "id": f"{plan_id}_{step_id}_r{rnd}", "planId": plan_id, **info, "at": now_iso(),
+            "change": "steps" if steps else "none", "planVersion": n, "changed": changed}})
+        due = dict((self.store.get(f"plans/{plan_id}") or {}).get("reviseDue") or {})
+        due.pop(step_id, None)
+        self.store.update(f"plans/{plan_id}", {"reviseDue": due, "updatedAt": now_iso()})
+        if not steps:
+            return f"Revise after {step_id} round {rnd}: no change; every step keeps its version (plan v{n})."
+        moved = ", ".join(f"{c['id']} v{c['from'] or 'new'}→v{c['to']}" for c in changed) or "no step text changed"
+        return f"Revise after {step_id} round {rnd}: plan v{n}; {moved}."
 
     def check_cites(self, state: str, reply: str, rep: dict) -> list[str]:
         """KB first (plan bf73af63 F1, the mockup: "run must cite them"): a done or failed report of a run that was given
@@ -1655,9 +1762,12 @@ def server():
         check_command: propose one PowerShell command that checks this step (run in the plan's folder, 10 min max,
         exit 0 = pass). The bridge runs it only after the owner ticks it on the page, on each done report and on the
         page's Run check; a non-zero exit after done turns the step failed.
-        Done needs a receipt (F4): a done report needs a ticked check or attached pictures, else it is refused. The step
-        then shows "checking" until the bridge settles it: the ticked check exits 0, or (no ticked check) the LLM check
-        passes the pictures -> done with its receipt; anything else -> failed.
+        Done needs a receipt (F4): the step shows "checking" until the bridge settles it: the ticked check exits 0, or
+        (no ticked check) the LLM check passes the pictures -> done with its receipt; a failing check or a picture
+        check that says fail -> failed. With neither a ticked check nor a picture, or when the picture check is unclear
+        or a check cannot run, the bridge asks the owner in the inbox and the owner's answer settles it (C). With the
+        plan's Auto-tick on, a proposed check is ticked by itself.
+        After every done or failed report, post plan_revise for the step before another step reports now (B).
         evidence: on a done report, the paths of the pictures that show the step's feature working (screenshots,
         renders), taken before reporting; the owner wants pictures, not text. None attached: the bridge starts a
         picture run.
@@ -1676,7 +1786,33 @@ def server():
             n = await asyncio.to_thread(inbox.step_update, plan_id, step_id, state, reply, check_command, evidence, report)
         except ValueError as e:
             return str(e)
-        return f"Saved step version {n} of {step_id} ({state})."
+        out = f"Saved step version {n} of {step_id} ({state})."
+        if state in ("done", "failed"):
+            last = ((await asyncio.to_thread(inbox.store.get, f"planSteps/{plan_id}_{step_id}")) or {}).get("versions", [{}])[-1]
+            if last.get("receiptBy") == "owner":
+                out += (" No ticked check and no picture: the step waits as checking and the bridge asked the owner in "
+                        "the inbox (tick, I checked it, or not done). Do not ask again.")
+            out += (f" Now post the revise for {step_id} (plan_revise): read this result against the later steps; "
+                    "steps=None when they stay as they are (every step keeps its version), else a patch of the later "
+                    "steps, with why. The next step does not start before it.")
+        return out
+
+    @mcp.tool()
+    async def plan_revise(step_id: str, why: str, steps: dict | None = None, plan_id: str = "") -> str:
+        """The revise after a step's done or failed report (the owner, 2026-11-25: "any work will change the plan and
+        show it out, so the step in future will have the flexible the adjust due to previous step result"). Required
+        after every done or failed step_update, before another step reports now. Read the step's result against the
+        steps after it. why: one line, what in the result keeps or changes them. steps: None when nothing changes (no
+        plan version; every step keeps its version), else a patch of the later steps by id ({"s4": {"does": "..."}};
+        a new id adds a step at the end). Only steps after step_id; never the step itself or an earlier one. The page
+        shows each revise under the step and each changed step's version before and after."""
+        plan_id = plan_id or ((await asyncio.to_thread(inbox.open_plan)) or {}).get("id", "")
+        if not plan_id:
+            return "No plan in this session."
+        try:
+            return await asyncio.to_thread(inbox.plan_revise, plan_id, step_id, why, steps)
+        except ValueError as e:
+            return str(e)
 
     @mcp.tool()
     async def headline(now: str, next: str = "", done: int | None = None, total: int | None = None,
