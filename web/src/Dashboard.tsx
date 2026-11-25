@@ -41,6 +41,7 @@ import { EntryForm, MoneyView } from "./Money";
 import { RatesReport, RatesSide } from "./Rates";
 import { StorageSide, StorageView } from "./Storage";
 import { dt, nf, ago } from "./fmt";
+import { BackToTop } from "./BackToTop";
 
 const ACTIVE_MS = 5 * 60 * 1000;
 
@@ -315,6 +316,7 @@ export function Dashboard() {
 
       <main className="main" ref={mainRef}>
         <SelectAsk root={mainRef} />
+        <BackToTop main={mainRef} />
         {tab === "settings" ? (
           <SettingsView onResetLayout={resetLayout} />
         ) : tab === "storage" ? (
