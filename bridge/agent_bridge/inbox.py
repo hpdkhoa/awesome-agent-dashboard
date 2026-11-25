@@ -189,25 +189,93 @@ def harness_split(harness: list[dict], ticks: dict | None) -> dict:
     return {"approved": ok, "notApproved": [h["id"] for h in harness if h["id"] not in ok]}
 
 
+PART_LIMITS = {"goal": 40000, "summary": 40000, "cite": 40000, "rule": 2000, "source": 400, "lesson": 600,
+               "leftover": 600, "title": 200, "does": 3000, "check": 1000}
+
+
+def fit(text: str, limit: int, where: str) -> str:
+    """Secrets redacted; a text over its limit is refused with its length, never cut (no silent "…")."""
+    t = redact(text, 10**9)
+    if len(t) > limit:
+        raise ValueError(f"{where} is {len(t)} characters, over its limit of {limit}. Nothing was saved: shorten it "
+                         "or move detail into a file the plan links.")
+    return t
+
+
+def apply_patch(base: dict, patch: dict) -> dict:
+    """The current parts with only the changed ones put in (the owner, 2026-11-25, #169: "Nâng mức + thêm patch").
+    A part given whole (a string, a list) replaces that part; goal, summary and cite also take {"append": text}, added
+    after a blank line. A dict for a list part changes items in place:
+    steps by id ({"s3k": {"does": ...}} changes the named fields; a new id is added at the end), rules, lessons and
+    leftover by index ({"27": {...}}; the next free index adds one). A dict for board replaces the named board keys.
+    Nothing is ever removed by a patch: to drop an item, send that part whole."""
+    import copy
+    out = copy.deepcopy(base or {})
+    for k, v in (patch or {}).items():
+        if k not in PARTS + ("cite", "board"):
+            raise ValueError(f"patch names no part {k!r}; the parts are {', '.join(PARTS + ('cite', 'board'))}")
+        if k == "board" and isinstance(v, dict):
+            board = dict(out.get("board") or {})
+            for bk, bv in v.items():
+                camel = {"what_for": "whatFor", "step_cards": "stepCards", "idea_groups": "ideaGroups"}.get(bk, bk)
+                board.pop(bk, None)
+                board[camel] = bv
+            out["board"] = board
+        elif k in ("goal", "summary", "cite") and isinstance(v, dict):
+            if set(v) != {"append"}:
+                raise ValueError(f'patch {k} takes a whole text or {{"append": text}}')
+            out[k] = (str(out.get(k) or "").rstrip("\n") + "\n\n" + str(v["append"]).strip("\n")).strip("\n")
+        elif k == "steps" and isinstance(v, dict):
+            steps = list(out.get("steps") or [])
+            for sid, fields in v.items():
+                if not isinstance(fields, dict):
+                    raise ValueError(f"patch steps.{sid} must be the fields to change")
+                at = next((i for i, st in enumerate(steps) if st.get("id") == sid), None)
+                if at is None:
+                    steps.append({"id": sid, **fields})
+                else:
+                    steps[at] = {**steps[at], **fields}
+            out["steps"] = steps
+        elif k in ("rules", "lessons", "leftover") and isinstance(v, dict):
+            items = list(out.get(k) or [])
+            for idx, item in sorted(v.items(), key=lambda kv: int(kv[0])):
+                i = int(idx)
+                if i == len(items):
+                    items.append(item)
+                elif 0 <= i < len(items):
+                    items[i] = {**items[i], **item} if isinstance(item, dict) and isinstance(items[i], dict) else item
+                else:
+                    raise ValueError(f"patch {k}.{idx}: the plan has {len(items)} {k}; use 0 to {len(items)}")
+            out[k] = items
+        else:
+            out[k] = v
+    return out
+
+
 def clean_parts(parts: dict) -> dict:
     """The six parts, each kept; steps get ids. Raises ValueError when one is missing."""
     missing = [k for k in PARTS if k not in (parts or {})]
     if missing:
         raise ValueError("a plan needs all six parts; missing: " + ", ".join(missing))
-    out = {k: redact(_lines(parts[k]), 12000) for k in ("goal", "summary")}
+    # a part's text is never cut on save (the owner, 2026-11-25, plan 41e0e5f2 #169: "Nâng mức + thêm patch"): rules were
+    # saved cut at 400 characters with "…" and the lost words came back on every version; over a limit is now refused
+    out = {k: fit(_lines(parts[k]), PART_LIMITS[k], k) for k in ("goal", "summary")}
     # the cite (the owner's words, 2026-11-05: "move what the plan read (current inside the goal section) out into the
     # cite section like generated section"): the owner's quotes the plan reads; part 1 says what the plan is for
     if str(parts.get("cite") or "").strip():
-        out["cite"] = redact(_lines(parts["cite"]), 12000)
-    out["rules"] = [{"rule": redact(str(r.get("rule", "")), 400), "source": redact(str(r.get("source", "")), 200)}
-                    for r in parts["rules"] or [] if isinstance(r, dict)]
-    out["lessons"] = [{"lesson": redact(str(r.get("lesson", "")), 400),
-                       "taughtBy": redact(str(r.get("taught_by", r.get("taughtBy", ""))), 400),
-                       "appliedIn": redact(str(r.get("applied_in", r.get("appliedIn", ""))), 400)}
-                      for r in parts["lessons"] or [] if isinstance(r, dict)]
-    out["leftover"] = [redact(str(x), 400) for x in parts["leftover"] or []]
-    out["steps"] = [{"id": str(st.get("id") or f"s{i}")[:20], "title": redact(str(st.get("title", "")), 200),
-                     "does": redact(str(st.get("does", "")), 1000), "check": redact(str(st.get("check", "")), 600),
+        out["cite"] = fit(_lines(parts["cite"]), PART_LIMITS["cite"], "cite")
+    out["rules"] = [{"rule": fit(str(r.get("rule", "")), PART_LIMITS["rule"], f"rules[{i}].rule"),
+                     "source": fit(str(r.get("source", "")), PART_LIMITS["source"], f"rules[{i}].source")}
+                    for i, r in enumerate(parts["rules"] or []) if isinstance(r, dict)]
+    out["lessons"] = [{"lesson": fit(str(r.get("lesson", "")), PART_LIMITS["lesson"], f"lessons[{i}].lesson"),
+                       "taughtBy": fit(str(r.get("taught_by", r.get("taughtBy", ""))), PART_LIMITS["lesson"], f"lessons[{i}].taught_by"),
+                       "appliedIn": fit(str(r.get("applied_in", r.get("appliedIn", ""))), PART_LIMITS["lesson"], f"lessons[{i}].applied_in")}
+                      for i, r in enumerate(parts["lessons"] or []) if isinstance(r, dict)]
+    out["leftover"] = [fit(str(x), PART_LIMITS["leftover"], f"leftover[{i}]") for i, x in enumerate(parts["leftover"] or [])]
+    out["steps"] = [{"id": str(st.get("id") or f"s{i}")[:20],
+                     "title": fit(str(st.get("title", "")), PART_LIMITS["title"], f"step {st.get('id') or i} title"),
+                     "does": fit(str(st.get("does", "")), PART_LIMITS["does"], f"step {st.get('id') or i} does"),
+                     "check": fit(str(st.get("check", "")), PART_LIMITS["check"], f"step {st.get('id') or i} check"),
                      **({"new": True} if st.get("new") else {})}
                     for i, st in enumerate(parts["steps"] or [], 1) if isinstance(st, dict)]
     if parts.get("board"):
@@ -662,7 +730,7 @@ class Inbox:
 
     def plan_version(self, plan_id: str, text: str, note: str = "", parent: int | None = None,
                      answers: list[str] | None = None, parts: dict | None = None, change: str = "",
-                     phase: str = "", order: str = "", harness: list | None = None) -> int:
+                     phase: str = "", order: str = "", harness: list | None = None, patch: dict | None = None) -> int:
         """Saves the next version of a plan and returns its number. Questions asked from now on are its round.
 
         parent: the version this one grows from (default: the current one; an older one makes a branch).
@@ -699,6 +767,13 @@ class Inbox:
         parent = current if parent is None else parent
         if not 0 <= parent <= current:
             raise ValueError(f"plan {plan_id} has no version {parent}")
+        if patch:  # only the changed parts, put into the version it grows from (#169)
+            if parts is not None or text.strip():
+                raise ValueError("Send parts or patch, not both. Nothing was saved.")
+            base = (self.store.get(f"planVersions/{plan_id}_v{parent}") or {}).get("parts")
+            if not base:
+                raise ValueError(f"plan {plan_id} v{parent} has no parts to patch; send the six parts. Nothing was saved.")
+            parts = apply_patch(base, patch)
         given = parts is not None or bool(text.strip())  # the session's own data: its file links are checked
         if parts is None and not text.strip() and phase != was:  # a plain version: the parent's data, a new phase
             base = self.store.get(f"planVersions/{plan_id}_v{parent}") or {}
@@ -730,7 +805,7 @@ class Inbox:
         n = int(plan.get("last", current)) + 1
         version = {
             "id": f"{plan_id}_v{n}", "planId": plan_id, "n": n, "parent": parent, "madeBy": made_by,
-            "text": redact(text, 30000), "note": redact(note, 400), "createdAt": now_iso(), "phase": phase,
+            "text": redact(text, 200000), "note": redact(note, 400), "createdAt": now_iso(), "phase": phase,
         }
         if phase != was:
             version["phaseMove"] = {"from": was, "to": phase, "order": redact(order, 2000)}
@@ -1527,7 +1602,7 @@ def server():
 
     @mcp.tool()
     async def plan_version(note: str, text: str = "", plan_id: str = "", parent: int = -1, parts: dict | None = None,
-                           phase: str = "", order: str = "", harness: list | None = None) -> str:
+                           phase: str = "", order: str = "", harness: list | None = None, patch: dict | None = None) -> str:
         """Post the next version of the plan (the whole text, markdown, or for a plan with parts the whole six parts).
         Only when the plan's data changes; a step moving is step_update. note: one line on what changed and which
         answers or message caused it. plan_id: this session's plan when empty. parent: the version it grows
@@ -1541,13 +1616,18 @@ def server():
         a version that drops the board its parent had is refused. Before each version, read the board again against
         the goal, the steps and the step results, and adjust What for, Idea and the features (the owner's words,
         2026-11-16: "in new version you should look back and adjust the What for, Idea and 8 features ... Don't let
-        the dashboard out of date in any kind")."""
+        the dashboard out of date in any kind").
+        patch (instead of parts): only what changes, put into the current version: a whole part ("goal": "..."),
+        text added to goal, summary or cite ({"goal": {"append": "..."}}),
+        steps by id ({"steps": {"s3k": {"does": "..."}}}), rules, lessons or leftover by index ({"rules": {"27":
+        {"rule": "..."}}}; the next index adds one), board keys ({"board": {"glossary": [...]}}). A patch never removes
+        an item. No text is cut on save: a text over its limit (rule 2,000, step does 3,000, goal 40,000) is refused."""
         plan_id = plan_id or ((await asyncio.to_thread(inbox.open_plan)) or {}).get("id", "")
         if not plan_id:
             return "No plan in this session. Open one with plan_start."
         try:
             n = await asyncio.to_thread(inbox.plan_version, plan_id, text, note, None if parent < 0 else parent, None, parts,
-                                      "", phase, order, harness)
+                                      "", phase, order, harness, patch)
         except ValueError as e:
             return str(e)
         out = f"Saved version {n} of plan {plan_id}. Questions asked from now on are round {n}."

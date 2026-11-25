@@ -515,3 +515,45 @@ def test_set_waiting_writes_waiting_on_with_the_beat():
     assert store.get("liveSessions/s1")["waitingOn"] == ["q1"]  # a second wait on the same item still polls
     ib.set_waiting("q1", False)
     assert store.get("liveSessions/s1")["waitingOn"] == []
+
+
+def test_long_text_is_kept_or_refused_never_cut():
+    # the owner, 2026-11-25 (plan 41e0e5f2 #169): rules were saved cut at 400 chars with "…"; now kept whole up to
+    # the limit, refused over it, nothing saved
+    import pytest
+    store = FakeStore()
+    ib = make(store)
+    pid = ib.plan_start("Long", parts=PARTS)
+    rule = "r" * 1500
+    n = ib.plan_version(pid, "", "long rule", parts={**PARTS, "rules": [{"rule": rule, "source": "s"}], "goal": "g" * 30000})
+    saved = store.docs[f"planVersions/{pid}_v{n}"]["parts"]
+    assert saved["rules"][0]["rule"] == rule and len(saved["goal"]) == 30000
+    with pytest.raises(ValueError, match=r"rules\[0\]\.rule is 2001 characters"):
+        ib.plan_version(pid, "", "too long", parts={**PARTS, "rules": [{"rule": "x" * 2001, "source": "s"}]})
+    assert store.docs[f"plans/{pid}"]["current"] == n
+
+
+def test_patch_changes_only_what_it_names():
+    import pytest
+    store = FakeStore()
+    ib = make(store)
+    base = {**PARTS, "rules": [{"rule": "a", "source": "1"}, {"rule": "b", "source": "2"}],
+            "steps": [{"id": "s1", "title": "t", "does": "d", "check": "c"}, {"id": "s2", "title": "t2", "does": "d2", "check": "c2"}],
+            "board": {**BOARD, "product": [{"feature": "Send", "steps": ["s1", "s2"]}],
+                      "glossary": [{"group": "g", "term": "A", "means": "a"}]}}
+    pid = ib.plan_start("Patch", parts=base)
+    n = ib.plan_version(pid, "", "patch", patch={"rules": {"1": {"rule": "B"}, "2": {"rule": "c", "source": "3"}},
+                                                  "steps": {"s2": {"does": "D2"}},
+                                                  "board": {"glossary": [{"group": "g", "term": "A", "means": "a"},
+                                                                         {"group": "g", "term": "B", "means": "b"}]}})
+    p = store.docs[f"planVersions/{pid}_v{n}"]["parts"]
+    assert [r["rule"] for r in p["rules"]] == ["a", "B", "c"] and p["rules"][1]["source"] == "2"
+    assert p["steps"][1] == {"id": "s2", "title": "t2", "does": "D2", "check": "c2"} and p["steps"][0]["does"] == "d"
+    assert len(p["board"]["glossary"]) == 2 and p["board"]["whatFor"] == BOARD["what_for"]
+    assert p["goal"] == "g" and p["board"]["product"] == [{"feature": "Send", "steps": ["s1", "s2"]}]
+    m = ib.plan_version(pid, "", "append", patch={"goal": {"append": "more"}})
+    assert store.docs[f"planVersions/{pid}_v{m}"]["parts"]["goal"] == "g\n\nmore"
+    with pytest.raises(ValueError, match="not both"):
+        ib.plan_version(pid, "", "x", parts=base, patch={"goal": "x"})
+    with pytest.raises(ValueError, match="use 0 to 3"):
+        ib.plan_version(pid, "", "x", patch={"rules": {"7": {"rule": "z"}}})
