@@ -23,7 +23,7 @@ def test_done_with_neither_a_ticked_check_nor_a_picture_waits_and_asks_the_owner
     assert st["state"] == "checking" and st["versions"][-1]["receiptBy"] == "owner"
     assert not store.where("commands", "action", "step_check")
     gate = [i for i in store.where("inbox", "planId", "p1") if i.get("stepGate")]
-    assert len(gate) == 1 and gate[0]["sessionId"] == "" and "were not found" in gate[0]["text"]
+    assert len(gate) == 1 and gate[0]["sessionId"] == "s1" and "were not found" in gate[0]["text"]  # the plan session (2026-11-25)
 
 
 def test_done_with_a_ticked_check_waits_then_exit_0_gives_the_receipt():

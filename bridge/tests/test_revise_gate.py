@@ -197,3 +197,19 @@ def test_an_unclear_picture_check_asks_the_owner_and_a_fail_still_fails():
                                "done", '{"overall": "%s", "pictures": [], "note": "blurry"}' % overall)
         assert store.get(f"planSteps/{pid}_s1")["state"] == state
         assert [g["stepGate"]["kind"] for g in gates(store, pid) if g["status"] == "open"] == kinds
+
+
+def test_an_ask_back_on_a_gate_question_goes_to_the_plan_session():
+    # 2026-11-25: the gate question had sessionId "", so the owner's ask back "what is #149 which need me?" reached no
+    # session and stayed unanswered; the owner's pick "Gắn phiên của plan khi tạo"
+    store, ib, pid = make()
+    ib.step_update(pid, "s1", "done", "built", report=REP)
+    g = gates(store, pid)[0]
+    assert g["sessionId"] == store.get(f"plans/{pid}")["sessionId"] == "s1"
+    store.update(f"inbox/{g['id']}", {"thread": [{"who": "owner", "kind": "ask", "text": "what is #149?", "at": "t1"}]})
+    deliver(store, "PC", "claude")
+    runs = store.where("commands", "action", "message")
+    assert len(runs) == 1 and runs[0]["sessionId"] == "s1" and runs[0]["askBackId"] == g["id"]
+    answer(store, g["id"], text="ok")  # the answer still goes to the bridge, not to the session
+    deliver(store, "PC", "claude")
+    assert len(store.where("commands", "action", "message")) == 1 and store.where("commands", "action", "step_gate")

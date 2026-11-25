@@ -10,7 +10,10 @@ bridge asks the owner one inbox question with buttons that act on the step:
   unclear: the LLM check of the pictures could not tell: "I checked it" / "Check the pictures again" / "Not done"
   refused: the check or the LLM check could not run: "Tick and run the check" (when a command exists) / "I checked it"
            / "Not done"
-The answer goes to the bridge, never to a session (sessionId ""): deliver.py turns it into a command {action:
+The question carries the plan's session (the owner's pick, 2026-11-25: "Gắn phiên của plan khi tạo"): with sessionId ""
+an ask back on it ("what is #149 which need me?") reached no session and stayed unanswered; now deliver.py hands an ask
+back to the plan's session like any other question. The answer still goes to the bridge, never to a session (deliver.py
+checks stepGate before the session): deliver.py turns it into a command {action:
 "step_gate"}, runs.py calls act() and moves the plan's chain on. A written "ok", "agree", "yes" (and the Vietnamese
 "đồng ý", "được") with no button picks the recommended option; any other text without a button opens the question
 again with a note. A written "ok" on the step's result card, while its gate question is open, answers that question.
@@ -73,7 +76,7 @@ def ask(store, plan: dict, sid: str, kind: str, detail: str, machine: str, push=
             + (f"- {detail.strip()}\n" if detail.strip() else "")
             + "- The step waits as checking; nothing runs until you answer. Writing ok picks the recommended option.")
     store.put_many({f"inbox/{iid}": {
-        "id": iid, "kind": "question", "sessionId": "", "machine": plan.get("machine") or machine, "cwd": plan.get("cwd", ""),
+        "id": iid, "kind": "question", "sessionId": plan.get("sessionId") or "", "machine": plan.get("machine") or machine, "cwd": plan.get("cwd", ""),
         "title": redact(f"Step {sid}: how is it checked?", 200), "text": redact(text, 4000), "options": opts,
         "recommended": 0, "files": [], "status": "open", "createdAt": now_iso(), "answer": None,
         "planId": pid, "stepId": sid, "round": int(plan.get("current", 0)), "route": "owner", "topic": "approval",
