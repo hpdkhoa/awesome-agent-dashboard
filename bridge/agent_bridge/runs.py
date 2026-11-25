@@ -863,7 +863,10 @@ class Runs:
         run never started. A spawn that still fails marks its row failed and raises SpawnFailed, which step() catches
         for that one command, so one bad run never stalls the watch loop (it retried every 6 s, every other run waited)."""
         env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
-        extra = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt" else {"start_new_session": True}
+        # CREATE_NO_WINDOW: the bridge runs as pythonw, so without it every claude run opened a console window on the
+        # owner's screen (the owner, 2026-11-26: "the Claude CLI pop up and close directly"; pick "Fallback + no window")
+        extra = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW} if os.name == "nt"
+                 else {"start_new_session": True})
         cmd, prompt = stdin_prompt(cmd)
         try:
             with (

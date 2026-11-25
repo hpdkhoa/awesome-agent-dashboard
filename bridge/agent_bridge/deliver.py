@@ -124,11 +124,24 @@ def deliver(store, machine: str, claude: str | None, rows: list[dict] | None = N
             store.update(f"inbox/{i}", {"status": "delivering", "commandId": cid, "lastTryAt": now_iso(), "error": None})
         log.append(f"{', '.join(ids)}: handed to run {cid}")
     for item in by("open"):
-        if item.get("kind") != "question" or item.get("machine") != machine or item.get("sessionId") in (None, "", "unknown"):
+        if item.get("kind") != "question" or item.get("machine") != machine:
             continue
         ask = open_ask(item.get("thread") or [])
         if not ask or item.get("askBackSentAt") == ask.get("at"):
             continue  # no open ask back, or this one already went
+        if item.get("sessionId") in (None, "", "unknown"):
+            # a gate question made before be53aea has sessionId "": its ask back goes to the plan's session (the
+            # owner's pick, 2026-11-26: "Fallback + no window"); the ask "what is #149 which need me?" sat unsent
+            plan = store.get(f"plans/{item['planId']}") if item.get("stepGate") and item.get("planId") else None
+            sid = (plan or {}).get("sessionId") or ""
+            if not sid:
+                if item.get("askBackSkipped") != ask.get("at"):
+                    store.update(f"inbox/{item['id']}", {"askBackSkipped": ask.get("at"),
+                                 "error": "Your ask back has no session to go to (the question carries none)."})
+                    log.append(f"{item['id']}: ask back skipped, no session")
+                continue
+            store.update(f"inbox/{item['id']}", {"sessionId": sid})
+            item = {**item, "sessionId": sid}
         if is_polling(store, item["sessionId"]):
             continue  # the session's inbox_ask or inbox_wait still polls and sees the ask back itself
         if not claude:

@@ -213,3 +213,27 @@ def test_an_ask_back_on_a_gate_question_goes_to_the_plan_session():
     answer(store, g["id"], text="ok")  # the answer still goes to the bridge, not to the session
     deliver(store, "PC", "claude")
     assert len(store.where("commands", "action", "message")) == 1 and store.where("commands", "action", "step_gate")
+
+
+def test_an_ask_back_on_an_old_gate_question_without_session_goes_to_the_plan_session():
+    # 2026-11-26: gate question f9847d5e was made before be53aea with sessionId ""; the owner asked again and nothing
+    # ran (the owner's pick "Fallback + no window")
+    store, ib, pid = make()
+    ib.step_update(pid, "s1", "done", "built", report=REP)
+    g = gates(store, pid)[0]
+    store.update(f"inbox/{g['id']}", {"sessionId": "", "thread": [{"who": "owner", "kind": "ask", "text": "what is #149?", "at": "t1"}]})
+    deliver(store, "PC", "claude")
+    runs = store.where("commands", "action", "message")
+    assert len(runs) == 1 and runs[0]["sessionId"] == "s1" and runs[0]["askBackId"] == g["id"]
+    assert store.get(f"inbox/{g['id']}")["sessionId"] == "s1"
+
+
+def test_an_ask_back_with_no_session_anywhere_is_logged_once():
+    store, ib, pid = make()
+    ib.step_update(pid, "s1", "done", "built", report=REP)
+    g = gates(store, pid)[0]
+    store.update(f"plans/{pid}", {"sessionId": ""})
+    store.update(f"inbox/{g['id']}", {"sessionId": "", "thread": [{"who": "owner", "kind": "ask", "text": "what?", "at": "t1"}]})
+    assert any("no session" in l for l in deliver(store, "PC", "claude"))
+    assert not any("no session" in l for l in deliver(store, "PC", "claude"))
+    assert not store.where("commands", "action", "message") and store.get(f"inbox/{g['id']}")["error"]
