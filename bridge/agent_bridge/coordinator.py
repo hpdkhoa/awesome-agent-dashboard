@@ -41,7 +41,8 @@ def route_of(route: str) -> str:
 
 
 def ask(inbox, question: str, title: str = "", options: list[dict] | None = None, recommended: int | None = None,
-        context: str = "", more_questions: list[dict] | None = None, route: str = "") -> tuple[str, list[str]]:
+        context: str = "", more_questions: list[dict] | None = None, route: str = "",
+        files: list[str] | None = None) -> tuple[str, list[str]]:
     """inbox_ask's routing: every question names its route; one batch goes to one party. Owner topics go to the
     owner's inbox (inbox/, as before, the item stamped with its topic); coordinator questions go to coordinator/ and
     the plan's session. Returns (party "owner" | "coordinator", ids); raises ValueError when it refuses."""
@@ -60,10 +61,11 @@ def ask(inbox, question: str, title: str = "", options: list[dict] | None = None
     if why:
         raise ValueError(why.removeprefix("Not asked: "))
     if rest:
-        batch = [{"title": t, "text": x, "options": o, "recommended": r, "extra": {"topic": topic}}
-                 for (t, x, o, r), topic in zip([first, *rest], routes)]
+        own = [files] + [(q or {}).get("files") for q in more_questions or []]
+        batch = [{"title": t, "text": x, "options": o, "recommended": r, "files": f, "extra": {"topic": topic}}
+                 for (t, x, o, r), topic, f in zip([first, *rest], routes, own)]
         return "owner", inbox.post_batch(batch)
-    return "owner", [inbox.post("question", *first, None, {"topic": routes[0]})]
+    return "owner", [inbox.post("question", *first, files, {"topic": routes[0]})]
 
 
 def post(inbox, title: str, text: str, options: list[dict] | None, recommended: int | None) -> str:

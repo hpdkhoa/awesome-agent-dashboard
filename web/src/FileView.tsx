@@ -110,6 +110,10 @@ export const isLocal = (href?: string) =>
 const FILE_RE = /^[\w.\-\\/:~ ]+\.(png|jpe?g|gif|webp|svg|avif|html?|pdf|md|mp4|webm|mov|txt|log|json|csv|py|ts|tsx|go)(:\d+)?$/i;
 export const looksLikeFile = (s: string) => FILE_RE.test(s) && /[\\/.]/.test(s);
 
+// A file link shows the file's name only; the full path stays in the link (its title, and the viewer's ask), the owner,
+// 2026-11-26: "link chỉ show tên file, còn path thì ở phần hyperlink để request như hiện tại". A line number stays.
+export const fileName = (path: string) => path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || path;
+
 export const openFile = (path: string, cwd: string) => window.dispatchEvent(new CustomEvent<Ask>(EVENT, { detail: { path, cwd } }));
 
 const size = (n: number) => (n >= 1 << 20 ? (n / (1 << 20)).toFixed(1) + " MB" : Math.ceil(n / 1024) + " KB");

@@ -6,7 +6,7 @@ import { dotState, isSaved, nextTodo, step, swipeDir } from "./phone";
 import { Example } from "./Example";
 import { Md } from "./Markdown";
 import { MoreMenu } from "./MoreMenu";
-import { openFile } from "./FileView";
+import { fileName, openFile } from "./FileView";
 import { Section } from "./Section";
 import { tm, ago } from "./fmt";
 
@@ -102,7 +102,8 @@ function QuestionCard({ q, batch, k, onSaved }: { q: InboxItem; batch: InboxItem
   const left = batch.filter((x) => x.status === "open" && !x.draft && x.id !== q.id).length;
   return (
     <div className="qcard">
-      <b>{batch.length > 1 ? `${k + 1}. ` : ""}{q.title}</b>{q.redrawn && <span className="tag">Redrawn {ago(q.redrawn)}{(q.revisions?.length ?? 0) > 1 ? ` · ${q.revisions!.length}x` : ""}</span>}
+      {/* one question: its title is the page's title already, so it is not shown twice */}
+      {batch.length > 1 && <b>{k + 1}. {q.title}</b>}{q.redrawn && <span className="tag">Redrawn {ago(q.redrawn)}{(q.revisions?.length ?? 0) > 1 ? ` · ${q.revisions!.length}x` : ""}</span>}
       {q.text && q.text !== q.title && <Md text={q.text} cwd={q.cwd} />}
       {q.options.length > 0 && (
         <div className={q.options.some((o) => o.example) ? "options wide" : "options"}>
@@ -319,16 +320,20 @@ export function InboxView({ item, session, plan, onOpenPlan, items = [], phone =
           <b>Withdrawn</b> by the session {ago(item.withdrawn.at)}: {item.withdrawn.reason}
         </p>
       )}
-      <Section id="inbox.text" title={item.kind === "approval" ? "The call" : "Details"}>
-        <Md text={body} cwd={item.cwd} />
-      </Section>
+      {/* a question's text is shown in its card, so no Details section repeats it (the owner, 2026-11-26: "phần the
+          question và details ở inbox y chang nhau thì không để 2 phần tốn chỗ") */}
+      {item.kind !== "question" && (
+        <Section id="inbox.text" title={item.kind === "approval" ? "The call" : "Details"}>
+          <Md text={body} cwd={item.cwd} />
+        </Section>
+      )}
 
       {item.files.length > 0 && (
         <Section id="inbox.files" title="Files" extra={item.files.length}>
           <ul className="small">
             {item.files.map((f) => (
               <li key={f}>
-                <code className="file-link" role="button" onClick={() => openFile(f, item.cwd)}>{f}</code>
+                <code className="file-link" role="button" title={f} onClick={() => openFile(f, item.cwd)}>{fileName(f)}</code>
               </li>
             ))}
           </ul>

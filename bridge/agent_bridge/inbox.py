@@ -599,6 +599,17 @@ def report_text(rep: dict) -> str:
     lines += [f"- Not done: {r['item']}" + (f" -> {r['fix']}" if r["fix"] else "") for r in rep.get("not_done", [])]
     return chr(10).join(lines)
 
+def item_files(files: list[str] | None, text: str) -> list[str]:
+    """Every file an inbox item names gets a preview link (the owner, 2026-11-26: "mọi file liên quan hoặc có chỉnh sửa
+    thì phải được preview link ở inbox"): the files given, then each file the text names (filelinks.file_refs), once."""
+    from .filelinks import file_refs
+    out: list[str] = []
+    for f in [*(files or []), *file_refs(text or "")]:
+        if f and f not in out:
+            out.append(f)
+    return out
+
+
 class Inbox:
     """Inbox operations on any store with get, update, put_many and where (Firestore, or a fake in tests)."""
 
@@ -1086,7 +1097,7 @@ class Inbox:
             "text": redact(text, 4000),
             "options": opts,
             "recommended": recommended,
-            "files": [redact(f, 300) for f in files or []],
+            "files": [redact(f, 300) for f in item_files(files, text)],
             "status": "open",
             "createdAt": now_iso(),
             "answer": None,
@@ -1170,7 +1181,7 @@ class Inbox:
         question. questions: [{"title", "text", "options", "recommended", "extra"}]."""
         batch = uuid.uuid4().hex[:12]
         return [self.post("question", q.get("title") or q.get("text", "")[:80], q.get("text", ""), q.get("options"),
-                          q.get("recommended"), extra={**(q.get("extra") or {}), **({"via": via} if via else {}),
+                          q.get("recommended"), q.get("files"), extra={**(q.get("extra") or {}), **({"via": via} if via else {}),
                                                        "batchId": batch, "batchIndex": k, "batchSize": len(questions)})
                 for k, q in enumerate(questions)]
 
@@ -1557,7 +1568,8 @@ def server():
     @mcp.tool()
     async def inbox_ask(question: str, ctx: Context, title: str = "", options: list[dict] | None = None,
                         recommended: int | None = None, context: str = "", wait_minutes: float = MAX_WAIT_MINUTES,
-                        more_questions: list[dict] | None = None, route: str = "") -> str:
+                        more_questions: list[dict] | None = None, route: str = "",
+                        files: list[str] | None = None) -> str:
         """Ask the owner on the dashboard and wait for the answer. Draw before you write: the owner reads pictures
         faster than words.
 
@@ -1581,11 +1593,13 @@ def server():
         decides; it goes to the owner's inbox. coordinator: GPU, host, job, CI, review, disk and agent conflicts; the
         plan's own session answers it and it never reaches the owner's inbox. Each of more_questions names its own
         route; one batch goes to one party (owner topics together, or coordinator questions together).
+        files: full paths of every file the question is about or changed; each shows as a preview link (its name only)
+        on the page, and every file the text names is added too. Each of more_questions may give its own "files".
         """
         from . import coordinator as co
         try:
             party, ids = await asyncio.to_thread(co.ask, inbox, question, title, options, recommended, context,
-                                                 more_questions, route)
+                                                 more_questions, route, files)
         except ValueError as e:
             return f"Not asked: {e}"
         if party == co.COORDINATOR:

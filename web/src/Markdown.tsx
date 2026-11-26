@@ -3,7 +3,7 @@ import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 import { SANITIZE, splitDrawings, svgSrc } from "./richText";
-import { isLocal, LocalImg, looksLikeFile, openFile } from "./FileView";
+import { fileName, isLocal, LocalImg, looksLikeFile, openFile } from "./FileView";
 
 // Prompts, replies and inbox text are markdown. Safe raw HTML in them renders (tables, details, b, br; rehype-sanitize),
 // a drawing (<svg> or a ```svg fence) shows as a picture (richText.ts, the owner 2026-11-20: "make sure not display
@@ -54,8 +54,8 @@ function MdPiece({ text, cwd, line }: { text: string; cwd?: string; line?: boole
           ...(line ? { p: ({ children }) => <span>{children}</span> } : {}),
           a: ({ href, children }) =>
             cwd !== undefined && isLocal(href) ? (
-              <a href="#" className="file-link" onClick={(e) => (e.preventDefault(), openFile(href!, cwd))}>
-                {children}
+              <a href="#" className="file-link" title={href} onClick={(e) => (e.preventDefault(), openFile(href!, cwd))}>
+                {String(children) === href ? fileName(href!) : children}
               </a>
             ) : !href ? (
               <span>{children}</span>
@@ -69,8 +69,8 @@ function MdPiece({ text, cwd, line }: { text: string; cwd?: string; line?: boole
           code: ({ className: c, children }) => {
             const s = String(children ?? "");
             return cwd !== undefined && !c && looksLikeFile(s) ? (
-              <code className="file-link" role="button" onClick={() => openFile(s, cwd)}>
-                {children}
+              <code className="file-link" role="button" title={s} onClick={() => openFile(s, cwd)}>
+                {fileName(s)}
               </code>
             ) : (
               <code className={c}>{children}</code>

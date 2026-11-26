@@ -117,3 +117,16 @@ def test_parse_answer_keeps_only_a_real_option_label():
     assert co.parse_answer('x\n{"choice": "Nope", "text": "t"}', OPTS) == {"choice": "", "text": "t"}
     assert co.parse_answer(json.dumps({"choice": "Keep it"}), OPTS)["choice"] == "Keep it"
     assert co.parse_answer("no json", OPTS) is None
+
+
+def test_every_file_a_question_names_gets_a_preview_link(tmp_path):
+    """The owner, 2026-11-26: "mọi file liên quan hoặc có chỉnh sửa thì phải được preview link ở inbox": the files
+    given and each file the text names are on the item, once; each question of a batch keeps its own."""
+    store, _runs, inbox, _push = make(tmp_path)
+    ex = {"differs": "x", "example": {"type": "text", "draft": "d"}}
+    opts = [{**o, **ex} for o in OPTS]
+    _, ids = co.ask(inbox, "Duyệt `K:/s/bang-ten-v1.md`?", "", opts, 0, "see `K:/s/bang-ten-v1.md` and `npm run build`",
+                    [{"question": "And `K:/s/a.png`?", "options": opts, "route": "approval", "files": ["K:/s/b.md"]}],
+                    "approval", ["K:/s/SO-PHAN-HOI.md"])
+    assert store.get(f"inbox/{ids[0]}")["files"] == ["K:/s/SO-PHAN-HOI.md", "K:/s/bang-ten-v1.md"]
+    assert store.get(f"inbox/{ids[1]}")["files"] == ["K:/s/b.md", "K:/s/a.png"]

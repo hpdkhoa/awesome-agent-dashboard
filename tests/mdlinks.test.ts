@@ -32,3 +32,18 @@ describe("report links to PC files", () => {
     expect(html("[a](javascript:alert(1))")).not.toContain("javascript:");
   });
 });
+
+// The owner, 2026-11-26: "link chỉ show tên file, còn path thì ở phần hyperlink để request như hiện tại".
+describe("a file link shows the file name only", () => {
+  it("a `path` shows its name, the path stays in the link", () => {
+    const h = html(String.raw`see ${"`"}K:\Projects\x\story\bang-ten-v1.md${"`"} and ${"`"}out/a.png${"`"}`);
+    expect(h).toContain(">bang-ten-v1.md</code>");
+    expect(h).toContain(String.raw`title="K:\Projects\x\story\bang-ten-v1.md"`);
+    expect(h).toContain(">a.png</code>");
+    expect(h).not.toContain(">out/a.png<");
+  });
+  it("a link written as its own path shows the name; a link with words keeps the words", () => {
+    expect(html("[K:/x/a.md](<K:/x/a.md>)")).toContain(">a.md</a>");
+    expect(html("[the table](<K:/x/a.md>)")).toContain(">the table</a>");
+  });
+});
