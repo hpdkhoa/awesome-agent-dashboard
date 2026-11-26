@@ -497,6 +497,8 @@ def clean_step_cards(cards, step_ids: list[str]) -> list[dict]:
         sid = str(c.get("step", c.get("id", "")) or "").strip()
         fr = redact(str(c.get("for", "") or "").strip(), 160)
         how = redact(str(c.get("how", "") or "").strip(), 160)
+        # the owner's words 2026-11-26: "add action which show what step does"; pick "A: one short line, written per step"
+        action = redact(str(c.get("action", "") or "").strip(), 160)
         # the owner's words 2026-11-21: "the result must do as i read it i know what has been done and what missed"
         done = redact(str(c.get("done", "") or "").strip(), 240)
         missed = redact(str(c.get("missed", "") or "").strip(), 240)
@@ -508,7 +510,7 @@ def clean_step_cards(cards, step_ids: list[str]) -> list[dict]:
         src = [src] if isinstance(src, str) else src
         src = [str(x).strip().strip("`") for x in src if str(x).strip()][:8]
         bad += check_sources(src, step_ids)
-        out.append({"step": sid, "for": fr, "how": how, **({"done": done} if done else {}), **({"missed": missed} if missed else {}),
+        out.append({"step": sid, "for": fr, **({"action": action} if action else {}), "how": how, **({"done": done} if done else {}), **({"missed": missed} if missed else {}),
                     **({"src": src} if src else {})})
     if bad:
         raise ValueError("board.step_cards: steps or source ids not understood: " + ", ".join(bad))

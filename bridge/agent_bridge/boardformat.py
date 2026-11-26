@@ -10,7 +10,7 @@ the command), and first thing in a Run step on a plan whose board has gaps. No p
 """
 from __future__ import annotations
 
-CARD_FIELDS = ("for", "how", "done", "missed")
+CARD_FIELDS = ("for", "action", "how", "done", "missed")  # action: the owner, 2026-11-26, "add action which show what step does"
 
 
 def board_gaps(parts: dict | None) -> list[str]:
@@ -44,8 +44,8 @@ def update_block(gaps: list[str], by_button: bool) -> str:
     return (f"Board update (plan 44fc4979 s6, the owner's words 2026-11-21: \"I want the update button so I can do manual "
             f"update for the roll out, the next run steps on a plan will auto generate to selfupdate the work to keep up "
             f"with latest work\"). {why}\nGaps:\n{have}\n"
-            "Do: read the plan with plan_get and its step reports; write board.stepCards for every step (step, for, how, "
-            "done, missed in plain words, src), board.glossary for the plan's own terms ({group, term, means}), idea "
+            "Do: read the plan with plan_get and its step reports; write board.stepCards for every step (step, for, action = one short line of what "
+            "the step does, how, done, missed in plain words, src), board.glossary for the plan's own terms ({group, term, means}), idea "
             "groups when the idea has more than 4 lines, a source chip on every line (rules B1 to B10, "
             "cc/dashboard/ATTENTION.md). Change only the board; keep every other part as it is. Count steps, rules, "
             "lessons, leftover, harness, idea and features before and after: any loss stops the call (rule:23). Post "

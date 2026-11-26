@@ -5,7 +5,7 @@ from agent_bridge.runs import Runs
 from test_inbox import FakeStore
 
 STEPS = [{"id": "s1", "title": "a"}, {"id": "s2", "title": "b"}]
-CARD = {"for": "f", "how": "h", "done": "d", "missed": "nothing"}
+CARD = {"for": "f", "action": "a", "how": "h", "done": "d", "missed": "nothing"}
 NEW = {"steps": STEPS, "board": {"whatFor": "x", "idea": ["i"], "glossary": [{"group": "g", "term": "t", "means": "m"}],
                                  "stepCards": [{"step": "s1", **CARD}, {"step": "s2", **CARD}]}}
 OLD = {"steps": STEPS, "board": {"whatFor": "x", "idea": ["1", "2", "3", "4", "5"],
@@ -16,7 +16,7 @@ def test_gaps():
     assert board_gaps(NEW) == []
     assert board_gaps({"steps": STEPS}) == ["no board"]
     g = board_gaps(OLD)
-    assert "no step card: s2" in g and "step cards without Done: s1" in g and "step cards without Missed: s1" in g
+    assert "step cards without Action: s1" in g and "no step card: s2" in g and "step cards without Done: s1" in g and "step cards without Missed: s1" in g
     assert "no glossary" in g and "idea over 4 lines with no idea groups" in g
     assert "Update board" in update_block([], True) and "rule:23" in update_block(g, False)
 

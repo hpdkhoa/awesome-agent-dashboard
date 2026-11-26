@@ -289,7 +289,7 @@ export function ReportBoard({ plan, v, steps, evidence, asked, onOpenItem, stale
     return { done, missed };
   };
   const cards = rows.map((st) => { const c = cardOf(st.id); return { st, c, state: CARD_STATE[stOf(st.id)] ?? "next", result: resultOf(st.id, c) }; });
-  const cardKey = (x: (typeof cards)[number]) => `card|${x.st.id}|${x.state}|${x.c?.for ?? ""}|${x.c?.how ?? ""}|${x.result.done}|${x.result.missed}`;
+  const cardKey = (x: (typeof cards)[number]) => `card|${x.st.id}|${x.state}|${x.c?.for ?? ""}|${x.c?.action ?? ""}|${x.c?.how ?? ""}|${x.result.done}|${x.result.missed}`;
   // s7 rule B7, the owner's pick "Bridge, all devices": each line as a key; a key the last look did not hold is changed.
   // The last look is read once when the board opens; the lines shown are saved after they stay the same for 3 s.
   const keys = {
@@ -371,13 +371,15 @@ export function ReportBoard({ plan, v, steps, evidence, asked, onOpenItem, stale
             </SrcLine>
           </div>
           <div className="board-box" data-step-cards>
-            <p className="board-lab"><Term parts={v.parts} name="Step card">Steps · For / How / Done / Missed</Term></p>
+            <p className="board-lab"><Term parts={v.parts} name="Step card">Steps · For / Action / How / Done / Missed</Term></p>
             {CARD_GROUPS.map(([state, head]) => (
               <Chunks key={state} head={head} state={state} wrap="step-cards" items={cards.filter((x) => x.state === state).map((x) => (
                 <div key={x.st.id} className="step-card" data-state={state} data-step-card={x.st.id}>
                   <SrcLine ids={[x.st.id, ...(x.c?.src ?? [])]} ctx={ctx} changed={changed(cardKey(x))}>
                     <p className="step-card-head"><b data-state={state}>{x.st.id}</b> {x.st.title}</p>
                     <p data-card-line="for"><b><Term parts={v.parts} name="For">For</Term></b> {x.c?.for || <span className="muted">not written yet</span>}</p>
+                    {/* the owner, 2026-11-26: "add action which show what step does"; pick "A: one short line, written per step" */}
+                    <p data-card-line="action"><b><Term parts={v.parts} name="Action">Action</Term></b> {x.c?.action || <span className="muted">not written yet</span>}</p>
                     <p data-card-line="how"><b><Term parts={v.parts} name="How">How</Term></b> {x.c?.how || <span className="muted">not written yet</span>}</p>
                     <p data-card-line="result"><b><Term parts={v.parts} name="Done (list)">Done</Term></b> {x.result.done}</p>
                     <p data-card-line="missed"><b><Term parts={v.parts} name="Missed">Missed</Term></b> <span data-state={x.result.missed === "nothing" ? undefined : "need"}>{x.result.missed}</span></p>

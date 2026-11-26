@@ -70,6 +70,9 @@ def test_step_cards_kept_and_checked():
     assert b["stepCards"] == [{"step": "s1", "for": "see gaps", "how": "count items", "src": ["goal"]}]
     assert "Step card s1: For see gaps" in board_markdown(b)
     assert clean_board(b, ["s1", "s2"])["stepCards"] == b["stepCards"]  # a cleaned board re-sent keeps its cards
+    # Action (the owner, 2026-11-26: "add action which show what step does"): kept, placed after For
+    a = clean_board({**base, "step_cards": [{"step": "s1", "for": "f", "action": "adds a button", "how": "h"}]}, ["s1", "s2"])
+    assert a["stepCards"][0]["action"] == "adds a button" and list(a["stepCards"][0])[:3] == ["step", "for", "action"]
     with pytest.raises(ValueError):
         clean_board({**base, "step_cards": [{"step": "s9", "for": "a", "how": "b"}]}, ["s1", "s2"])
     assert "stepCards" not in clean_board(base, ["s1", "s2"])

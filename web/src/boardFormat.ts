@@ -3,7 +3,7 @@
 // with latest work"). The same gaps as the bridge's boardformat.board_gaps; the bridge puts the update order in the run.
 import type { Parts } from "./data";
 
-const FIELDS = ["for", "how", "done", "missed"] as const;
+const FIELDS = ["for", "action", "how", "done", "missed"] as const; // action: the owner, 2026-11-26, "add action which show what step does"
 
 export function boardGaps(parts?: Parts | null): string[] {
   const steps = (parts?.steps ?? []).map((s) => s.id).filter(Boolean);
