@@ -280,7 +280,6 @@ export function InboxView({ item, session, plan, onOpenPlan, items = [], phone =
       </Section>
     );
   })();
-  const body = item.kind === "approval" ? "```json\n" + item.text + "\n```" : item.text;
   return (
     <article {...(item.planId ? { "data-quote-plan": item.planId } : item.sessionId && item.sessionId !== "unknown" ? { "data-quote-session": item.sessionId } : {})}>
       {onBack && (
@@ -320,13 +319,8 @@ export function InboxView({ item, session, plan, onOpenPlan, items = [], phone =
           <b>Withdrawn</b> by the session {ago(item.withdrawn.at)}: {item.withdrawn.reason}
         </p>
       )}
-      {/* a question's text is shown in its card, so no Details section repeats it (the owner, 2026-11-26: "phần the
-          question và details ở inbox y chang nhau thì không để 2 phần tốn chỗ") */}
-      {item.kind !== "question" && (
-        <Section id="inbox.text" title={item.kind === "approval" ? "The call" : "Details"}>
-          <Md text={body} cwd={item.cwd} />
-        </Section>
-      )}
+      {/* no Details section on any kind (the owner, 2026-11-26: "remove the details section in the inbox, that section
+          is over placed and not useful"; choice "Remove it fully") */}
 
       {item.files.length > 0 && (
         <Section id="inbox.files" title="Files" extra={item.files.length}>
