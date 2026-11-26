@@ -610,6 +610,26 @@ def item_files(files: list[str] | None, text: str) -> list[str]:
     return out
 
 
+def missing_changes(files: list[str] | None, changes: list[dict] | None) -> list[str]:
+    """The paths in files with no changes row: inbox_result refuses them, so every file link has its two lines."""
+    have = {str(c.get("file") or "") for c in changes or [] if isinstance(c, dict)}
+    return [f for f in files or [] if f not in have]
+
+
+def clean_changes(changes: list[dict] | None) -> list[dict]:
+    """A result's per file lines: {file, changed, check}, each a short line (what changed in the file, what the owner
+    checks there). A row with no file, or with neither line, is refused, so the card never shows an empty pair."""
+    out = []
+    for n, c in enumerate(changes or []):
+        if not isinstance(c, dict):
+            raise ValueError(f"changes[{n}] must be {{file, changed, check}}.")
+        f, a, b = (str(c.get(k) or "").strip() for k in ("file", "changed", "check"))
+        if not f or not a or not b:
+            raise ValueError(f"changes[{n}] needs file, changed and check, each one short line.")
+        out.append({"file": redact(f, 300), "changed": redact(a, 300), "check": redact(b, 300)})
+    return out
+
+
 class Inbox:
     """Inbox operations on any store with get, update, put_many and where (Firestore, or a fake in tests)."""
 
@@ -1112,7 +1132,7 @@ class Inbox:
         return item_id
 
     def result(self, title: str, text: str, files: list[str] | None = None, plan_id: str = "", step_id: str = "",
-               edit_of: str = "", extra: dict | None = None) -> tuple[str, int]:
+               edit_of: str = "", extra: dict | None = None, changes: list[dict] | None = None) -> tuple[str, int]:
         """F12, one result per item, later ones edit it (plan bf73af63; the owner's picks 2026-11-19 "Start F12, build
         now", "Same plan step"). The item is the plan step: a result on a step edits that step's newest result (any
         session, so a handoff keeps one card); a result with no step edits edit_of when given, else it is a new card.
@@ -1134,10 +1154,15 @@ class Inbox:
                     if i.get("kind") == "result" and i.get("stepId") == step_id]
             old = max(same, key=lambda i: i.get("editedAt") or i.get("createdAt", ""), default=None)
         ex = {**(extra or {}), **({"planId": plan_id} if plan_id else {}), **({"stepId": step_id} if step_id else {})}
+        # per file lines on the result card (the owner, 2026-11-27: "at least show me a short summarize what is changed
+        # in the files and what need to review so I can check via the file link"; pick "A: per file lines")
+        ch = clean_changes(changes)
+        files = list(dict.fromkeys([*(files or []), *(c["file"] for c in ch)]))
+        ex["changes"] = ch
         if not old:
             return self.post("result", title, text, files=files, extra=ex), 1
         at = now_iso()
-        keep = ("title", "text", "files", "status", "answer", "sessionId", "deliveredAt", "deliveredVia")
+        keep = ("title", "text", "files", "changes", "status", "answer", "sessionId", "deliveredAt", "deliveredVia")
         versions = list(old.get("versions") or []) + [
             {**{k: old.get(k) for k in keep}, "at": old.get("editedAt") or old.get("createdAt"), "n": int(old.get("version") or 1)}]
         n = len(versions) + 1
@@ -1957,13 +1982,20 @@ def server():
 
     @mcp.tool()
     async def inbox_result(title: str, summary: str, files: list[str] | None = None, step: str = "", plan_id: str = "",
-                           edit_of: str = "") -> str:
+                           edit_of: str = "", changes: list[dict] | None = None) -> str:
         """Post a result for the owner to review: what was done, the numbers, the files to look at. Does not wait.
+        changes: one row per file, {"file": full path, "changed": one short line of what changed in it, "check": one
+        short line of what the owner reviews there}; the card shows the two lines under the file's link. Every path in
+        files needs its row (the owner, 2026-11-27: "show me a short summarize what is changed in the files and what
+        need to review so I can check via the file link").
         One result per item (F12): a result on a plan step (step, default: this dashboard run's step) edits that step's
         result, which keeps the earlier text as a version and opens again for review. No step: edit_of=<result id>
         edits that result; else a new one."""
+        missing = missing_changes(files, changes)
+        if missing:
+            return ("Not posted: every file needs its changes row {file, changed, check}; missing: " + ", ".join(missing))
         try:
-            item_id, n = await asyncio.to_thread(inbox.result, title, summary, files, plan_id, step, edit_of)
+            item_id, n = await asyncio.to_thread(inbox.result, title, summary, files, plan_id, step, edit_of, None, changes)
         except ValueError as e:
             return f"Not posted: {e}"
         replies = await asyncio.to_thread(inbox.other_replies, item_id)

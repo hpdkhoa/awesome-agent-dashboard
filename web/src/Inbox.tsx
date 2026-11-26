@@ -325,11 +325,22 @@ export function InboxView({ item, session, plan, onOpenPlan, items = [], phone =
       {item.files.length > 0 && (
         <Section id="inbox.files" title="Files" extra={item.files.length}>
           <ul className="small">
-            {item.files.map((f) => (
-              <li key={f}>
-                <code className="file-link" role="button" title={f} onClick={() => openFile(f, item.cwd)}>{fileName(f)}</code>
-              </li>
-            ))}
+            {item.files.map((f) => {
+              // under each file link: what changed there and what to check (the owner, 2026-11-27: "show me a short
+              // summarize what is changed in the files and what need to review so I can check via the file link")
+              const c = (item.changes ?? []).find((x) => x.file === f);
+              return (
+                <li key={f}>
+                  <code className="file-link" role="button" title={f} onClick={() => openFile(f, item.cwd)}>{fileName(f)}</code>
+                  {c && (
+                    <div className="file-change">
+                      <div><b>Changed:</b> {c.changed}</div>
+                      <div className="wait-fg"><b>Check:</b> {c.check}</div>
+                    </div>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </Section>
       )}

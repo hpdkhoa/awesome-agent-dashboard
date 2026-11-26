@@ -59,6 +59,8 @@ export type InboxItem = {
   options: { label: string; detail: string; differs?: string; example?: Example }[]; // differs: what is different
   recommended: number | null;
   files: string[];
+  // a result's per file lines (bridge inbox.py clean_changes; the owner's pick 2026-11-27 "A: per file lines")
+  changes?: { file: string; changed: string; check: string }[];
   status: "open" | "answered" | "delivering" | "delivered" | "closed";
   createdAt: string;
   answer: { choice: string; text: string; at: string } | null;

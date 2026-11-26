@@ -558,3 +558,28 @@ def test_patch_changes_only_what_it_names():
         ib.plan_version(pid, "", "x", parts=base, patch={"goal": "x"})
     with pytest.raises(ValueError, match="use 0 to 3"):
         ib.plan_version(pid, "", "x", patch={"rules": {"7": {"rule": "z"}}})
+
+
+def test_result_keeps_per_file_change_lines():
+    # the owner, 2026-11-27: "show me a short summarize what is changed in the files and what need to review so I can
+    # check via the file link"; pick "A: per file lines"
+    from agent_bridge.inbox import missing_changes
+    store = FakeStore()
+    inbox = make(store)
+    rows = [{"file": "K:/a/x.py", "changed": "adds the gate", "check": "the gate refuses empty rows"}]
+    rid, n = inbox.result("r", "done", ["K:/a/x.py"], changes=rows, edit_of="")
+    item = store.get(f"inbox/{rid}")
+    assert n == 1 and item["changes"] == rows and "K:/a/x.py" in item["files"]
+    # an edit replaces the lines and keeps the earlier ones in its version
+    rid2, n2 = inbox.result("r", "done 2", [], edit_of=rid,
+                            changes=[{"file": "K:/a/y.py", "changed": "c", "check": "k"}])
+    item = store.get(f"inbox/{rid}")
+    assert rid2 == rid and n2 == 2 and item["files"] == ["K:/a/y.py"] and item["versions"][-1]["changes"] == rows
+    # a row missing a line is refused; a file with no row is named
+    for bad in ([{"file": "K:/a/x.py", "changed": "c"}], ["x"]):
+        try:
+            inbox.result("r", "t", changes=bad)
+            raise AssertionError("not refused")
+        except ValueError:
+            pass
+    assert missing_changes(["K:/a/x.py", "K:/a/z.py"], rows) == ["K:/a/z.py"]

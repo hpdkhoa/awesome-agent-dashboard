@@ -303,3 +303,6 @@ span[data-state], b[data-state], p[data-state], .board-feat[data-state] .board-k
 /* F9 detached jobs: the job's own PROGRESS as a bar */
 .job-bar { height: 0.45rem; background: var(--line, #333); border-radius: 0.25rem; overflow: hidden; margin: 0.3rem 0; }
 .job-bar span { display: block; height: 100%; background: var(--ok, #3a3); }
+
+/* a result's per file lines under the file link (Inbox.tsx, the owner's pick 2026-11-27 "A: per file lines") */
+.file-change { margin: 0.125rem 0 0.5rem 0.75rem; line-height: 1.4; }
