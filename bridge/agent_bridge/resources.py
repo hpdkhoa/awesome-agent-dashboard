@@ -47,7 +47,8 @@ def gpus(clock=time.time) -> list[dict]:
     if exe:
         try:
             r = subprocess.run([exe, "--query-gpu=name,memory.free,memory.total", "--format=csv,noheader,nounits"],
-                               capture_output=True, text=True, timeout=10)
+                               capture_output=True, text=True, timeout=10,
+                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             for line in r.stdout.splitlines():
                 name, free, total = [x.strip() for x in line.split(",")]
                 out.append({"name": name, "freeGB": round(float(free) / 1024, 2), "totalGB": round(float(total) / 1024, 2)})

@@ -183,7 +183,8 @@ def run_command(command: str, cwd: str, timeout: int = TIMEOUT_S) -> tuple[int |
         out, _ = p.communicate(timeout=timeout)
         code: int | None = p.returncode
     except subprocess.TimeoutExpired:
-        subprocess.run(["taskkill", "/T", "/F", "/PID", str(p.pid)], capture_output=True)
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(p.pid)], capture_output=True,
+                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         out, _ = p.communicate()
         code = None
     return code, out.decode("utf-8", errors="replace"), round(time.monotonic() - t0, 1)
