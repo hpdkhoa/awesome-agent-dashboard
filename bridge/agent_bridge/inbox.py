@@ -1993,7 +1993,9 @@ def server():
         edits that result; else a new one."""
         missing = missing_changes(files, changes)
         if missing:
-            return ("Not posted: every file needs its changes row {file, changed, check}; missing: " + ", ".join(missing))
+            return ("Not posted: every file needs its changes row; send the argument changes=[{\"file\": full path, "
+                    "\"changed\": one short line, \"check\": one short line}] (a list beside files; reload the tool list "
+                    "if your copy of inbox_result has no changes field); missing: " + ", ".join(missing))
         try:
             item_id, n = await asyncio.to_thread(inbox.result, title, summary, files, plan_id, step, edit_of, None, changes)
         except ValueError as e:
