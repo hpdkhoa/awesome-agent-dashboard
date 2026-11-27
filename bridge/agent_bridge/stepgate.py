@@ -30,6 +30,7 @@ from .inbox import now_iso
 from .redact import redact
 
 TICK, CHECKED, AGAIN, NOT_DONE = "Tick and run the check", "I checked it", "Check the pictures again", "Not done"
+REVIEWED = "Reviewed, see note"  # the result card's button when the owner writes a note (web/src/Inbox.tsx)
 KINDS = ("tick", "none", "unclear", "refused")
 AGREE = re.compile(r"^\s*(ok(ay)?|yes|y|agree[ds]?|approve[ds]?|lgtm|go( ahead)?|đồng ý|dong y|được|duoc|ừ|uh)\b[\s.!,]*$", re.I)
 
@@ -103,9 +104,29 @@ def gate_for_result(store, item: dict) -> dict | None:
     """A written agree word on a step's result card while the step's gate question is open: that question."""
     if item.get("kind") != "result" or not item.get("planId") or not item.get("stepId"):
         return None
-    if not AGREE.match(str((item.get("answer") or {}).get("text") or "")) or (item.get("answer") or {}).get("choice"):
+    a = item.get("answer") or {}
+    # the result card's own button sends "Reviewed, see note" whenever text is written (web/src/Inbox.tsx); with an
+    # agree word it is the same ok (the owner, 2026-11-27: "Reviewed, see note: ok" on s3p left the gate asking)
+    if not AGREE.match(str(a.get("text") or "")) or (a.get("choice") or "") not in ("", REVIEWED):
         return None
     return open_gate(store, item["planId"], item["stepId"])
+
+
+def tell_session(store, item: dict, text: str, machine: str) -> str:
+    """The owner's own words on a gate question, as a message run to the plan's session, so they are never only kept
+    on the card (the owner, 2026-11-27: "inbox message đang có lỗi, không gửi answer và không thấy chạy": "resend the
+    inbox, I don't see the work ..." and "mẫu đã chỉnh sửa đâu không thấy?" reached no session). Returns the command
+    id, or "" when the plan has no session."""
+    sid = item.get("sessionId") or (store.get(f"plans/{item.get('planId', '')}") or {}).get("sessionId") or ""
+    if not sid:
+        return ""
+    cid = uuid.uuid4().hex[:20]
+    store.put_many({f"commands/{cid}": {
+        "id": cid, "action": "message", "machine": item.get("machine") or machine, "sessionId": sid,
+        "cwd": item.get("cwd", ""), "prompt": redact(text, 4000), "inboxId": item["id"], "status": "new",
+        "createdAt": now_iso(), "planId": item.get("planId", ""), "answerStep": item.get("stepId", ""),
+    }})
+    return cid
 
 
 def act(store, item: dict, machine: str, push=None) -> tuple[str, bool]:
@@ -118,10 +139,12 @@ def act(store, item: dict, machine: str, push=None) -> tuple[str, bool]:
     pick = choice_of(item)
     note = str(a.get("text") or "").strip()
     if not pick:
-        store.update(f"inbox/{iid}", {"status": "open", "answer": None, "error": "Pick one of the buttons (or write ok for "
-                                      f"the recommended one). Your words were kept: {note[:200]}",
-                                      "thread": list(item.get("thread") or []) + [{"who": "owner", "kind": "answer", "text": note, "at": now_iso()}]})
-        return f"{iid}: gate answer names no option, asked again", False
+        # the words go to the plan's session as an ask back (deliver.py sends an open question's ask to its session);
+        # the step still waits for a button
+        store.update(f"inbox/{iid}", {"status": "open", "answer": None, "error": "Your words went to the plan's session; "
+                                      "the step still waits for one of the buttons (or ok for the recommended one).",
+                                      "thread": list(item.get("thread") or []) + [{"who": "owner", "kind": "ask", "text": note, "at": now_iso()}]})
+        return f"{iid}: gate answer names no option, words sent to the session, asked again", False
     plan = store.get(f"plans/{pid}") or {}
     step = store.get(f"planSteps/{pid}_{sid}") or {}
     done = {"status": "closed", "gateDone": {"choice": pick, "at": now_iso()}, "deliveredAt": now_iso(), "error": None}
@@ -157,5 +180,11 @@ def act(store, item: dict, machine: str, push=None) -> tuple[str, bool]:
     elif pick == NOT_DONE:
         settled = settle(store, plan, sid, None, "- The owner: not done" + (f": {note}" if note else ""), "owner", push)
         outcome = "failed on the owner's word" if settled else "the step was not waiting"
+    if pick == NOT_DONE and note and not AGREE.match(note):
+        # not done with the owner's reason: a run on the plan's session, so the fix starts (not only a failed mark)
+        cid = tell_session(store, item, f'The owner marked step {sid} not done on its gate question, with these words: '
+                           f'"{note}". Do what the words ask on step {sid}, post its result with inbox_result (the work '
+                           f'and a changes row per file), then report the step with step_update.', machine)
+        outcome += f"; the owner's words sent to the session ({cid})" if cid else "; no session for the owner's words"
     store.update(f"inbox/{iid}", {**done, "gateDone": {**done["gateDone"], "outcome": redact(outcome, 400)}})
     return f"{iid}: gate {sid} {pick}: {outcome}", settled

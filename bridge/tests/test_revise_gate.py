@@ -146,7 +146,7 @@ def test_other_text_with_no_button_asks_again_and_not_done_fails():
     deliver(store, "PC", None)
     run_gate_commands(store)
     again = store.get(f"inbox/{g['id']}")
-    assert again["status"] == "open" and "Pick one of the buttons" in again["error"]
+    assert again["status"] == "open" and "went to the plan's session" in again["error"]
     assert store.get(f"planSteps/{pid}_s1")["state"] == "checking"
     answer(store, g["id"], choice=NOT_DONE)
     deliver(store, "PC", None)
@@ -237,3 +237,51 @@ def test_an_ask_back_with_no_session_anywhere_is_logged_once():
     assert any("no session" in l for l in deliver(store, "PC", "claude"))
     assert not any("no session" in l for l in deliver(store, "PC", "claude"))
     assert not store.where("commands", "action", "message") and store.get(f"inbox/{g['id']}")["error"]
+
+
+# 2026-11-27, the owner: "inbox message đang có lỗi, không gửi answer và không thấy chạy"
+def test_written_words_with_no_button_on_a_gate_go_to_the_plan_session():
+    store, ib, pid = make()
+    ib.step_update(pid, "s1", "done", "built", report=REP)
+    g = gates(store, pid)[0]
+    answer(store, g["id"], text="resend the inbox, I don't see the work")
+    deliver(store, "PC", "claude")
+    run_gate_commands(store)
+    deliver(store, "PC", "claude")  # the open question's ask back goes to the session
+    runs = store.where("commands", "action", "message")
+    assert len(runs) == 1 and runs[0]["sessionId"] == "s1" and "resend the inbox" in runs[0]["prompt"]
+    assert store.get(f"planSteps/{pid}_s1")["state"] == "checking"
+
+
+def test_reviewed_see_note_ok_on_the_result_card_answers_the_gate():
+    store, ib, pid = make()
+    ib.step_update(pid, "s1", "done", "built", report=REP)
+    res = next(i for i in store.where("inbox", "planId", pid) if i["kind"] == "result")
+    answer(store, res["id"], choice="Reviewed, see note", text="ok")
+    deliver(store, "PC", "claude")
+    run_gate_commands(store)
+    assert store.get(f"planSteps/{pid}_s1")["state"] == "done"
+    assert not store.where("commands", "action", "message")
+
+
+def test_not_done_with_words_fails_the_step_and_starts_a_run_with_the_words():
+    store, ib, pid = make()
+    ib.step_update(pid, "s1", "done", "built", report=REP)
+    g = gates(store, pid)[0]
+    answer(store, g["id"], choice=NOT_DONE, text="where are the edited samples?")
+    deliver(store, "PC", "claude")
+    run_gate_commands(store)
+    assert store.get(f"planSteps/{pid}_s1")["state"] == "failed"
+    runs = store.where("commands", "action", "message")
+    assert len(runs) == 1 and runs[0]["sessionId"] == "s1" and "where are the edited samples?" in runs[0]["prompt"]
+    assert runs[0]["planId"] == pid and runs[0]["answerStep"] == "s1"
+
+
+def test_not_done_without_words_starts_no_run():
+    store, ib, pid = make()
+    ib.step_update(pid, "s1", "done", "built", report=REP)
+    g = gates(store, pid)[0]
+    answer(store, g["id"], choice=NOT_DONE)
+    deliver(store, "PC", "claude")
+    run_gate_commands(store)
+    assert store.get(f"planSteps/{pid}_s1")["state"] == "failed" and not store.where("commands", "action", "message")
