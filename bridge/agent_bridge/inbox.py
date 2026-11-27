@@ -980,7 +980,8 @@ class Inbox:
             by = "your answer in the inbox" if gate else "the ticked check" if has_check else "the LLM check of the pictures"
             said = f"done, waiting for its receipt ({by})" if state == "done" else state
             self.result(f"Step {said}: {step_id} · {steps[step_id]['title']}", report_text(rep) or reply, evidence or [],
-                        plan_id=plan_id, step_id=step_id, extra={"round": int(plan.get("current", 0)), "stepVersion": n})
+                        plan_id=plan_id, step_id=step_id, extra={"round": int(plan.get("current", 0)), "stepVersion": n},
+                        report=True)
         return n
 
     def plan_revise(self, plan_id: str, step_id: str, why: str, steps: dict | None = None) -> str:
@@ -1132,7 +1133,8 @@ class Inbox:
         return item_id
 
     def result(self, title: str, text: str, files: list[str] | None = None, plan_id: str = "", step_id: str = "",
-               edit_of: str = "", extra: dict | None = None, changes: list[dict] | None = None) -> tuple[str, int]:
+               edit_of: str = "", extra: dict | None = None, changes: list[dict] | None = None,
+               report: bool = False) -> tuple[str, int]:
         """F12, one result per item, later ones edit it (plan bf73af63; the owner's picks 2026-11-19 "Start F12, build
         now", "Same plan step"). The item is the plan step: a result on a step edits that step's newest result (any
         session, so a handoff keeps one card); a result with no step edits edit_of when given, else it is a new card.
@@ -1161,6 +1163,12 @@ class Inbox:
         ex["changes"] = ch
         if not old:
             return self.post("result", title, text, files=files, extra=ex), 1
+        if report and old.get("changes"):
+            # a step report never wipes the work the session posted on the card (the owner, 2026-11-27: "không thấy gì
+            # thay đổi với s3p cả": the done report after inbox_result replaced the samples with the report lines)
+            text = f"{old.get('text') or ''}\n\nStep report:\n{text}"
+            ex["changes"] = list(old.get("changes") or [])
+            files = list(dict.fromkeys([*(old.get("files") or []), *files]))
         at = now_iso()
         keep = ("title", "text", "files", "changes", "status", "answer", "sessionId", "deliveredAt", "deliveredVia")
         versions = list(old.get("versions") or []) + [

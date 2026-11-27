@@ -285,3 +285,16 @@ def test_not_done_without_words_starts_no_run():
     deliver(store, "PC", "claude")
     run_gate_commands(store)
     assert store.get(f"planSteps/{pid}_s1")["state"] == "failed" and not store.where("commands", "action", "message")
+
+
+def test_a_done_report_after_inbox_result_keeps_the_posted_work_on_the_card():
+    # 2026-11-27, the owner: "không thấy gì thay đổi với s3p cả" (the report replaced the samples posted before it)
+    store, ib, pid = make()
+    f = ROOT + "/a.md"
+    ib.result("work", "- the samples", [f], plan_id=pid, step_id="s1",
+              changes=[{"file": f, "changed": "new samples", "check": "part 2"}])
+    ib.step_update(pid, "s1", "done", "built", report=REP)
+    res = [i for i in store.where("inbox", "planId", pid) if i["kind"] == "result"]
+    assert len(res) == 1
+    assert "- the samples" in res[0]["text"] and "Step report:" in res[0]["text"]
+    assert res[0]["changes"] and res[0]["changes"][0]["changed"] == "new samples"
