@@ -1983,7 +1983,9 @@ def server():
     @mcp.tool()
     async def inbox_result(title: str, summary: str, files: list[str] | None = None, step: str = "", plan_id: str = "",
                            edit_of: str = "", changes: list[dict] | None = None) -> str:
-        """Post a result for the owner to review: what was done, the numbers, the files to look at. Does not wait.
+        """Post a result for the owner to review. Does not wait. summary: the work itself, shown in full as Done on the
+        card: what was done, what was not, the numbers (never a reword of the question or a summary of the chat; the
+        owner, 2026-11-27: "the inbox must always show what has been done and need to review").
         changes: one row per file, {"file": full path, "changed": one short line of what changed in it, "check": one
         short line of what the owner reviews there}; the card shows the two lines under the file's link. Every path in
         files needs its row (the owner, 2026-11-27: "show me a short summarize what is changed in the files and what

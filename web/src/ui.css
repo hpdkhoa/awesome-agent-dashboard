@@ -177,8 +177,20 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
 .claim-chip { display: inline-block; padding: 0 0.5rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600;
   border: 1px solid #6aa9ff; color: #6aa9ff; }
 /* F7: the owner topic of an inbox question (Inbox.tsx Topic) */
-.topic-chip { display: inline-block; margin-right: 0.4rem; padding: 0 0.5rem; border-radius: 999px; font-size: 0.75rem;
-  font-weight: 600; vertical-align: middle; background: var(--wait-fg); color: var(--bg); text-transform: uppercase; }
+/* small and grey since 2026-11-27: the coloured tag is the type (kind-chip below) */
+.topic-chip { display: inline-block; margin-right: 0.4rem; padding: 0 0.4rem; border-radius: 999px; font-size: 0.6875rem;
+  font-weight: 600; vertical-align: middle; border: 1px solid var(--line); color: var(--muted, #8b949e); text-transform: lowercase; }
+/* the inbox type: one colour per type on its tag and on the row's and card's left bar (the owner's pick 2026-11-27
+   "B: tag + left bar") */
+[data-kind="question"] { --kind: #2ea043; }
+[data-kind="result"] { --kind: #1f6feb; }
+[data-kind="suggestion"] { --kind: #8957e5; }
+[data-kind="approval"] { --kind: #d29922; }
+.kind-chip { display: inline-block; margin-right: 0.4rem; padding: 0 0.5rem; border-radius: 999px; font-size: 0.75rem;
+  font-weight: 700; vertical-align: middle; background: var(--kind); color: #fff; text-transform: uppercase; }
+.kind-chip[data-kind="approval"] { color: #000; }
+.list .row[data-kind] { border-left: 4px solid var(--kind); }
+.inbox-card[data-kind] { border-left: 4px solid var(--kind); padding-left: 0.75rem; }
 /* F5: the LLM check's findings, each with its disposition (Findings.tsx) */
 .findings { margin: 0.375rem 0; padding: 0.375rem 0.5rem; border: 1px solid var(--line); border-radius: 8px; }
 .findings-list { margin: 0.25rem 0 0; padding-left: 1.1rem; }

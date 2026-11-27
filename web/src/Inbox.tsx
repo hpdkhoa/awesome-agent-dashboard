@@ -11,6 +11,12 @@ import { Section } from "./Section";
 import { tm, ago } from "./fmt";
 
 const KIND = { question: "Question", suggestion: "Suggestion", result: "Result to review", approval: "Approval" };
+// The type tag (the owner, 2026-11-27: "make the tag and different the inbox message type so no work on 1 type replace
+// work on another type"; pick "B: tag + left bar"): one colour per type on the tag, the row's and the card's left bar.
+const TAG = { question: "Question", result: "Review", suggestion: "Suggestion", approval: "Approval" };
+function KindTag({ item }: { item: InboxItem }) {
+  return <span className="kind-chip" data-kind={item.kind}>{TAG[item.kind]}</span>;
+}
 // F7: a question's owner topic, shown on the row and the item (why it is the owner's to decide)
 const OWNER_TOPICS = ["scope", "policy", "approval", "spend"];
 function Topic({ item }: { item: InboxItem }) {
@@ -50,10 +56,10 @@ export function InboxList({ items, picked, onPick }: { items: InboxItem[]; picke
   return (
     <ul className="list">
       {sorted.map((i) => (
-        <li key={i.id} className={i.id === picked ? "row on" : "row"} onClick={() => onPick(i.id)}>
+        <li key={i.id} className={i.id === picked ? "row on" : "row"} data-kind={i.kind} onClick={() => onPick(i.id)}>
           <span className={size(i).some(isWaiting) ? "dot wait" : "dot"} />
           <div className="grow">
-            <div className="title"><Topic item={i} />{size(i).length > 1 ? `${size(i).length} questions: ` : ""}{i.title}</div>
+            <div className="title"><KindTag item={i} /><Topic item={i} />{size(i).length > 1 ? `${size(i).length} questions: ` : ""}{i.title}</div>
             <div className="muted small">
               {KIND[i.kind]} · {i.workType} · {ago(i.editedAt ?? i.createdAt)} · {i.withdrawn ? "withdrawn by the session" : STATUS[i.status]}
               {(i.version ?? 1) > 1 && <span className="tag" data-edited>edited v{i.version}</span>}
@@ -70,6 +76,27 @@ export function InboxList({ items, picked, onPick }: { items: InboxItem[]; picke
       )}
     </ul>
   );
+}
+
+// The work of each type, one view per type (the owner's pick 2026-11-27 "A: Done + To review"): a result shows what
+// was done in full, then its files with Changed + Check (to review); a suggestion its idea; an approval the call.
+function KindWork({ item }: { item: InboxItem }) {
+  if (item.kind === "result") return <ResultWork item={item} />;
+  if (item.kind === "suggestion") return <SuggestionWork item={item} />;
+  if (item.kind === "approval") return <ApprovalWork item={item} />;
+  return null;
+}
+function ResultWork({ item }: { item: InboxItem }) {
+  if (!item.text.trim()) return null;
+  return <Section id="inbox.result.done" title="Done"><Md text={item.text} cwd={item.cwd} /></Section>;
+}
+function SuggestionWork({ item }: { item: InboxItem }) {
+  if (!item.text.trim()) return null;
+  return <Section id="inbox.suggestion.idea" title="Suggestion"><Md text={item.text} cwd={item.cwd} /></Section>;
+}
+function ApprovalWork({ item }: { item: InboxItem }) {
+  const call = ["```json", item.text, "```"].join("\n");
+  return <Section id="inbox.approval.call" title="The call"><Md text={call} cwd={item.cwd} /></Section>;
 }
 
 // One question of a batch (the owner's words, 2026-11-07): options drawn or with their difference, a text box for your
@@ -281,13 +308,13 @@ export function InboxView({ item, session, plan, onOpenPlan, items = [], phone =
     );
   })();
   return (
-    <article {...(item.planId ? { "data-quote-plan": item.planId } : item.sessionId && item.sessionId !== "unknown" ? { "data-quote-session": item.sessionId } : {})}>
+    <article className="inbox-card" data-kind={item.kind} {...(item.planId ? { "data-quote-plan": item.planId } : item.sessionId && item.sessionId !== "unknown" ? { "data-quote-session": item.sessionId } : {})}>
       {onBack && (
         <div className="pback">
           <button className="link" onClick={onBack}>‹ Inbox</button>
         </div>
       )}
-      <h1><Topic item={item} />{item.title}</h1>
+      <h1><KindTag item={item} /><Topic item={item} />{item.title}</h1>
       {/* phone: the questions come first, right under the title (the owner's pick "Full screen, Back to list") */}
       {phone && questions}
       <p className="meta">
@@ -319,11 +346,13 @@ export function InboxView({ item, session, plan, onOpenPlan, items = [], phone =
           <b>Withdrawn</b> by the session {ago(item.withdrawn.at)}: {item.withdrawn.reason}
         </p>
       )}
-      {/* no Details section on any kind (the owner, 2026-11-26: "remove the details section in the inbox, that section
-          is over placed and not useful"; choice "Remove it fully") */}
+      {/* each type shows its own work, so a change on one type never touches another (the owner, 2026-11-27: "the
+          inbox must always show what has been done and need to review, not summaries or reword of the questions").
+          A question shows its text in its card above, so it has no section here (2026-11-26). */}
+      <KindWork item={item} />
 
       {item.files.length > 0 && (
-        <Section id="inbox.files" title="Files" extra={item.files.length}>
+        <Section id="inbox.files" title={item.kind === "result" ? "Files to review" : "Files"} extra={item.files.length}>
           <ul className="small">
             {item.files.map((f) => {
               // under each file link: what changed there and what to check (the owner, 2026-11-27: "show me a short
