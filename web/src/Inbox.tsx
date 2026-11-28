@@ -33,6 +33,17 @@ const STATUS = {
 
 export const isWaiting = (i: InboxItem) => i.status === "open";
 
+// A question asked on a review (inbox_ask review=<result id>) is listed inside that review card, not as its own inbox
+// message (the owner, 2026-11-28: "the question will listed inside the review/report if it is belong to this review,
+// not like current 2 messages and send two times when I answered each").
+export const reviewQuestions = (r: InboxItem, items: InboxItem[]) =>
+  r.kind === "result" ? items.filter((q) => q.kind === "question" && q.reviewId === r.id) : [];
+export const inReview = (q: InboxItem, items: InboxItem[]) =>
+  q.kind === "question" && !!q.reviewId && items.some((r) => r.id === q.reviewId && r.kind === "result");
+// the card to show for a picked item: a review's question opens its review
+export const shownItem = (i: InboxItem | undefined, items: InboxItem[]) =>
+  i && inReview(i, items) ? items.find((r) => r.id === i.reviewId) ?? i : i;
+
 // The owner's pick 2026-11-16, "Fix the dashboard": an approved answer on a Generated result approves that result's
 // files alone (from <version>/tmp/ to <version>/, onto the plan's Generated section) and keeps the rest of tmp/.
 // Approved = the Approve button, or a note that starts with "approve" / "approved" (the owner's own answer).
@@ -48,18 +59,25 @@ export function generatedApproval(item: InboxItem, plan?: Plan) {
 export function InboxList({ items, picked, onPick }: { items: InboxItem[]; picked?: string; onPick: (id: string) => void }) {
   // one row per batch: its first question stands for it
   // the lowest index still stored, so a batch whose first question is gone still has a row
-  const head = (i: InboxItem) =>
-    !i.batchId || !items.some((x) => x.batchId === i.batchId && (x.batchIndex ?? 0) < (i.batchIndex ?? 0));
+  const head = (i: InboxItem) => !inReview(i, items) &&
+    (!i.batchId || !items.some((x) => x.batchId === i.batchId && (x.batchIndex ?? 0) < (i.batchIndex ?? 0)));
   const sorted = [...items].filter(head)
-    .sort((a, b) => Number(isWaiting(b)) - Number(isWaiting(a)));
+    .sort((a, b) => Number(rowWaits(b)) - Number(rowWaits(a)));
   const size = (i: InboxItem) => (i.batchId ? items.filter((x) => x.batchId === i.batchId) : [i]);
+  // a review's row waits while its card waits or one of its questions does (the owner, 2026-11-28)
+  function rowWaits(i: InboxItem) {
+    return size(i).some(isWaiting) || reviewQuestions(i, items).some(isWaiting);
+  }
   return (
     <ul className="list">
       {sorted.map((i) => (
         <li key={i.id} className={i.id === picked ? "row on" : "row"} data-kind={i.kind} onClick={() => onPick(i.id)}>
-          <span className={size(i).some(isWaiting) ? "dot wait" : "dot"} />
+          <span className={rowWaits(i) ? "dot wait" : "dot"} />
           <div className="grow">
-            <div className="title"><KindTag item={i} /><Topic item={i} />{size(i).length > 1 ? `${size(i).length} questions: ` : ""}{i.title}</div>
+            <div className="title"><KindTag item={i} /><Topic item={i} />{size(i).length > 1 ? `${size(i).length} questions: ` : ""}{i.title}
+              {reviewQuestions(i, items).length > 0 && (
+                <span className="muted small"> · {reviewQuestions(i, items).filter(isWaiting).length} of {reviewQuestions(i, items).length} questions waiting</span>
+              )}</div>
             <div className="muted small">
               {KIND[i.kind]} · {i.workType} · {ago(i.editedAt ?? i.createdAt)} · {i.withdrawn ? "withdrawn by the session" : STATUS[i.status]}
               {(i.version ?? 1) > 1 && <span className="tag" data-edited>edited v{i.version}</span>}
@@ -80,8 +98,8 @@ export function InboxList({ items, picked, onPick }: { items: InboxItem[]; picke
 
 // The work of each type, one view per type (the owner's pick 2026-11-27 "A: Done + To review"): a result shows what
 // was done in full, then its files with Changed + Check (to review); a suggestion its idea; an approval the call.
-function KindWork({ item }: { item: InboxItem }) {
-  if (item.kind === "result") return <ResultWork item={item} />;
+function KindWork({ item, items }: { item: InboxItem; items: InboxItem[] }) {
+  if (item.kind === "result") return <><ResultReportView item={item} items={items} /><ResultWork item={item} /></>;
   if (item.kind === "suggestion") return <SuggestionWork item={item} />;
   if (item.kind === "approval") return <ApprovalWork item={item} />;
   return null;
@@ -94,6 +112,81 @@ function ResultWork({ item }: { item: InboxItem }) {
 // me exactly the part of the work ... quote what changed inside what file, sort by file and is sub collapsed
 // sections"; pick "Session quote, bridge checks"): one folded part per file, sorted by path, its text as the bridge
 // found it in the file.
+// The Result section (the owner, 2026-11-28: pick "New Result field", the "Dashboard Card / Report Layout"; "Add
+// Failed"; "Item + fix"; "Layout order, orange"): the header line, then the five parts in the layout's order, each
+// folding. Exceptions carry the one action colour. Needs Approval lists the questions asked on this review, answered
+// here. Status shows Needs Your Input while one of them waits (a Failed report stays Failed).
+export function reportStatus(r: NonNullable<InboxItem["report"]>, waiting: number) {
+  return r.status !== "Failed" && waiting > 0 ? "Needs Your Input" : r.status;
+}
+export function runTime(seconds: number | null | undefined) {
+  if (seconds == null) return "not measured";
+  const m = Math.floor(seconds / 60), s = seconds % 60;
+  return m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : m > 0 ? `${m} min ${s} s` : `${s} s`;
+}
+function Lines({ rows }: { rows: string[] }) {
+  return rows.length ? <ul>{rows.map((x, n) => <li key={n}>{x}</li>)}</ul> : <ul><li className="muted">None</li></ul>;
+}
+export function ResultReportView({ item, items }: { item: InboxItem; items: InboxItem[] }) {
+  const r = item.report;
+  if (!r) return null;
+  const qs = reviewQuestions(item, items);
+  const waiting = qs.filter(isWaiting).length;
+  const status = reportStatus(r, waiting);
+  // one entry per batch, in the order asked
+  const batches: InboxItem[][] = [];
+  for (const q of [...qs].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || (a.batchIndex ?? 0) - (b.batchIndex ?? 0))) {
+    const b = batches.find((x) => q.batchId && x[0].batchId === q.batchId);
+    if (b) b.push(q); else batches.push([q]);
+  }
+  const exceptions = qs.length + r.skipped.length;
+  return (
+    <Section id="inbox.result.report" title="Result" main>
+      <div className="result-report" data-report-status={status}>
+        <p className="report-head">
+          Status: <b data-status={status}>{status}</b> • Run: {r.runId ? `#${r.runId}` : "none"} • Time: {runTime(r.seconds)} • {tm(r.at)}
+        </p>
+        <Section id="inbox.result.bottom" title="1. Bottom Line">
+          <p>{r.bottom_line}</p>
+        </Section>
+        <Section id="inbox.result.deliverables" title="2. Deliverables & Changes Made" extra={r.created.length + r.updated.length + r.sent.length}>
+          <ul>
+            <li>Created<Lines rows={r.created} /></li>
+            <li>Updated<Lines rows={r.updated} /></li>
+            <li>Sent / Executed<Lines rows={r.sent} /></li>
+          </ul>
+        </Section>
+        <Section id="inbox.result.decisions" title="3. Decisions & Assumptions Made by Agent" extra={r.decisions.length}>
+          <Lines rows={r.decisions} />
+        </Section>
+        <div className={exceptions ? "report-exceptions need" : "report-exceptions"}>
+          <Section id="inbox.result.exceptions" title="4. Exceptions & Items for Your Review" extra={exceptions}>
+            <ul>
+              <li>
+                Needs Approval{qs.length > 0 && <span className="muted small"> · {waiting} of {qs.length} waiting</span>}
+                {qs.length === 0 ? <ul><li className="muted">None</li></ul> : (
+                  <div className="report-questions">
+                    {batches.map((b) => b.map((q, k) => <QuestionCard key={q.id} q={q} batch={b} k={k} titled />))}
+                  </div>
+                )}
+              </li>
+              <li>
+                Skipped / Flagged
+                {r.skipped.length === 0 ? <ul><li className="muted">None</li></ul> : (
+                  <ul>{r.skipped.map((s, n) => <li key={n}>{s.item}<ul><li><b>Fix:</b> {s.fix}</li></ul></li>)}</ul>
+                )}
+              </li>
+            </ul>
+          </Section>
+        </div>
+        <Section id="inbox.result.next" title="5. Next Scheduled Action">
+          <ul><li>{r.next}</li></ul>
+        </Section>
+      </div>
+    </Section>
+  );
+}
+
 export function quoteRows(item: Pick<InboxItem, "changes">) {
   return (item.changes ?? []).filter((c) => c.quote?.trim()).sort((a, b) => a.file.localeCompare(b.file));
 }
@@ -125,7 +218,8 @@ function ApprovalWork({ item }: { item: InboxItem }) {
 // own answer or a question instead of a pick (like "Other"), your saved answers kept as a thread, and ask back.
 // phone (step i7): a tap on an option saves it at once and onSaved moves to the next question; the batch is sent only
 // by the Send button (the owner's pick "Tap = save, go to next; Send at the end").
-function QuestionCard({ q, batch, k, onSaved }: { q: InboxItem; batch: InboxItem[]; k: number; onSaved?: (id: string) => void }) {
+// titled: inside a review card the question has no title of its own above it, so it shows its title (2026-11-28)
+function QuestionCard({ q, batch, k, onSaved, titled }: { q: InboxItem; batch: InboxItem[]; k: number; onSaved?: (id: string) => void; titled?: boolean }) {
   const [choice, setChoice] = useState(q.draft?.choice ?? "");
   const [text, setText] = useState(q.draft?.text ?? "");
   const [error, setError] = useState("");
@@ -152,7 +246,7 @@ function QuestionCard({ q, batch, k, onSaved }: { q: InboxItem; batch: InboxItem
   return (
     <div className="qcard">
       {/* one question: its title is the page's title already, so it is not shown twice */}
-      {batch.length > 1 && <b>{k + 1}. {q.title}</b>}{q.redrawn && <span className="tag">Redrawn {ago(q.redrawn)}{(q.revisions?.length ?? 0) > 1 ? ` · ${q.revisions!.length}x` : ""}</span>}
+      {(batch.length > 1 || titled) && <b>{batch.length > 1 ? `${k + 1}. ` : ""}{q.title}</b>}{q.redrawn && <span className="tag">Redrawn {ago(q.redrawn)}{(q.revisions?.length ?? 0) > 1 ? ` · ${q.revisions!.length}x` : ""}</span>}
       {q.text && q.text !== q.title && <Md text={q.text} cwd={q.cwd} />}
       {q.options.length > 0 && (
         <div className={q.options.some((o) => o.example) ? "options wide" : "options"}>
@@ -371,7 +465,7 @@ export function InboxView({ item, session, plan, onOpenPlan, items = [], phone =
       {/* each type shows its own work, so a change on one type never touches another (the owner, 2026-11-27: "the
           inbox must always show what has been done and need to review, not summaries or reword of the questions").
           A question shows its text in its card above, so it has no section here (2026-11-26). */}
-      <KindWork item={item} />
+      <KindWork item={item} items={items.length ? items : [item]} />
 
       {item.files.length > 0 && (
         <Section id="inbox.files" title={item.kind === "result" ? "Files to review" : "Files"} extra={item.files.length}>

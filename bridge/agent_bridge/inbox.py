@@ -703,6 +703,71 @@ def clean_changes(changes: list[dict] | None) -> list[dict]:
     return out
 
 
+# The Result report on a review card (the owner, 2026-11-28: pick "New Result field" with the "Dashboard Card / Report
+# Layout": Status, Run, Time; 1 Bottom Line; 2 Deliverables & Changes Made; 3 Decisions & Assumptions Made by Agent;
+# 4 Exceptions & Items for Your Review; 5 Next Scheduled Action; then "Add Failed", "Item + fix", "Layout order,
+# orange", and the questions of a review listed inside it).
+REPORT_STATUS = ("Completed", "Needs Your Input", "Failed")
+REPORT_LISTS = ("created", "updated", "sent", "decisions")
+
+
+def clean_result_report(report: dict | None) -> dict:
+    """The session's part of the report, checked: status one of REPORT_STATUS; bottom_line 1 to 2 sentences; created,
+    updated, sent, decisions lists of one line each (empty shows "None"); skipped [{item, fix}] (each skipped item
+    carries its fix, the owner's pick "Item + fix"); next one line. Needs Approval is not written by the session: the
+    card lists the questions asked on this review (inbox_ask review=<result id>). Raises ValueError."""
+    if not isinstance(report, dict):
+        raise ValueError("report must be {status, bottom_line, created, updated, sent, decisions, skipped, next}.")
+    status = str(report.get("status") or "").strip()
+    if status not in REPORT_STATUS:
+        raise ValueError(f"report.status must be one of {', '.join(REPORT_STATUS)}; got {status!r}.")
+    bottom = " ".join(str(report.get("bottom_line") or "").split())
+    if not bottom:
+        raise ValueError("report.bottom_line needs 1 to 2 plain sentences: what was done, the end result, and whether "
+                         "anything needs the owner.")
+    if len(re.findall(r"[.!?](\s|$)", bottom)) > 2 or len(bottom) > 400:
+        raise ValueError("report.bottom_line is over 2 sentences (or 400 characters): keep it to 1 to 2.")
+    out: dict = {"status": status, "bottom_line": redact(bottom, 400)}
+    for k in REPORT_LISTS:
+        v = report.get(k) or []
+        if isinstance(v, str):
+            v = [v]
+        if not isinstance(v, list):
+            raise ValueError(f"report.{k} must be a list of one line items.")
+        out[k] = [redact(" ".join(str(x).split()), 300) for x in v if str(x).strip()]
+    skipped = []
+    for n, s in enumerate(report.get("skipped") or []):
+        if not isinstance(s, dict):
+            raise ValueError(f"report.skipped[{n}] must be {{item, fix}}.")
+        item, fix = (" ".join(str(s.get(k) or "").split()) for k in ("item", "fix"))
+        if not item or not fix:
+            raise ValueError(f"report.skipped[{n}] needs item and fix: each skipped or flagged item carries a "
+                             "suggestion or a question to solve it.")
+        skipped.append({"item": redact(item, 300), "fix": redact(fix, 300)})
+    out["skipped"] = skipped
+    nxt = " ".join(str(report.get("next") or "").split())
+    if not nxt:
+        raise ValueError("report.next needs one line: what happens next automatically, or \"Task closed, no further "
+                         "runs scheduled\".")
+    out["next"] = redact(nxt, 300)
+    return out
+
+
+def review_questions(rows: list[dict], review_id: str) -> list[dict]:
+    """The questions asked on a review (inbox_ask review=<result id>), from rows."""
+    return [r for r in rows if r.get("kind") == "question" and r.get("reviewId") == review_id]
+
+
+def review_waits(rows: list[dict], item: dict) -> bool:
+    """True while a question of the item's review is still open: the answers of a review go to the session once, all
+    together (the owner, 2026-11-28: "not like current 2 messages and send two times when I answered each")."""
+    rid = item.get("reviewId") or (item.get("id") if item.get("kind") == "result" else "")
+    if not rid:
+        return False
+    return any(q.get("status") == "open" and not q.get("withdrawn") for q in review_questions(rows, rid)
+               if q.get("id") != item.get("id"))
+
+
 class Inbox:
     """Inbox operations on any store with get, update, put_many and where (Firestore, or a fake in tests)."""
 
@@ -1207,7 +1272,7 @@ class Inbox:
 
     def result(self, title: str, text: str, files: list[str] | None = None, plan_id: str = "", step_id: str = "",
                edit_of: str = "", extra: dict | None = None, changes: list[dict] | None = None,
-               report: bool = False) -> tuple[str, int]:
+               report: bool = False, result_report: dict | None = None) -> tuple[str, int]:
         """F12, one result per item, later ones edit it (plan bf73af63; the owner's picks 2026-11-19 "Start F12, build
         now", "Same plan step"). The item is the plan step: a result on a step edits that step's newest result (any
         session, so a handoff keeps one card); a result with no step edits edit_of when given, else it is a new card.
@@ -1234,6 +1299,18 @@ class Inbox:
         ch = clean_changes(changes)
         files = list(dict.fromkeys([*(files or []), *(c["file"] for c in ch)]))
         ex["changes"] = ch
+        if result_report is not None:
+            # the header is the bridge's, measured from the dashboard run (Run, Time, Timestamp), never typed
+            rr, run = clean_result_report(result_report), self.running_command() or {}
+            at = now_iso()
+            started = str(run.get("startedAt") or "")
+            secs = None
+            if started:
+                try:
+                    secs = max(0, int((datetime.fromisoformat(at) - datetime.fromisoformat(started)).total_seconds()))
+                except ValueError:
+                    secs = None
+            ex["report"] = {**rr, "runId": str(run.get("id") or ""), "startedAt": started, "seconds": secs, "at": at}
         if not old:
             return self.post("result", title, text, files=files, extra=ex), 1
         if report and old.get("changes"):
@@ -1241,9 +1318,12 @@ class Inbox:
             # thay đổi với s3p cả": the done report after inbox_result replaced the samples with the report lines)
             text = f"{old.get('text') or ''}\n\nStep report:\n{text}"
             ex["changes"] = list(old.get("changes") or [])
+            if old.get("report"):
+                ex["report"] = old["report"]
             files = list(dict.fromkeys([*(old.get("files") or []), *files]))
         at = now_iso()
-        keep = ("title", "text", "files", "changes", "status", "answer", "sessionId", "deliveredAt", "deliveredVia")
+        keep = ("title", "text", "files", "changes", "report", "status", "answer", "sessionId", "deliveredAt",
+                "deliveredVia")
         versions = list(old.get("versions") or []) + [
             {**{k: old.get(k) for k in keep}, "at": old.get("editedAt") or old.get("createdAt"), "n": int(old.get("version") or 1)}]
         n = len(versions) + 1
@@ -1624,6 +1704,11 @@ def server():
         if first.get("batchId"):
             ids = [i["id"] for i in sorted(await asyncio.to_thread(inbox.store.where, "inbox", "batchId", first["batchId"]),
                                            key=lambda i: i.get("batchIndex", 0))] or ids
+        if first.get("reviewId"):
+            # the questions of one review are answered and taken together, once (the owner, 2026-11-28)
+            more = await asyncio.to_thread(inbox.store.where, "inbox", "reviewId", first["reviewId"])
+            ids += [i["id"] for i in sorted(more, key=lambda i: (i.get("createdAt", ""), i.get("batchIndex", 0)))
+                    if i["id"] not in ids and i.get("kind") == "question"]
         while time.time() < end:
             for i in ids:
                 ask = await asyncio.to_thread(inbox.ask_back, i)
@@ -1675,7 +1760,7 @@ def server():
     async def inbox_ask(question: str, ctx: Context, title: str = "", options: list[dict] | None = None,
                         recommended: int | None = None, context: str = "", wait_minutes: float = MAX_WAIT_MINUTES,
                         more_questions: list[dict] | None = None, route: str = "",
-                        files: list[str] | None = None) -> str:
+                        files: list[str] | None = None, review: str = "") -> str:
         """Ask the owner on the dashboard and wait for the answer. Draw before you write: the owner reads pictures
         faster than words.
 
@@ -1701,11 +1786,16 @@ def server():
         route; one batch goes to one party (owner topics together, or coordinator questions together).
         files: full paths of every file the question is about or changed; each shows as a preview link (its name only)
         on the page, and every file the text names is added too. Each of more_questions may give its own "files".
+        review: the id of your result (inbox_result) that these questions belong to: they are listed inside that
+        review card under Needs Approval, not as their own inbox message, and all their answers (and the review's own
+        note) reach you once, when the last one is answered (the owner, 2026-11-28: "the question will listed inside
+        the review/report if it is belong to this review, not like current 2 messages and send two times when I
+        answered each"). Ask on a review only for what that result needs; never repeat the question in its report.
         """
         from . import coordinator as co
         try:
             party, ids = await asyncio.to_thread(co.ask, inbox, question, title, options, recommended, context,
-                                                 more_questions, route, files)
+                                                 more_questions, route, files, review)
         except ValueError as e:
             return f"Not asked: {e}"
         if party == co.COORDINATOR:
@@ -2063,7 +2153,7 @@ def server():
 
     @mcp.tool()
     async def inbox_result(title: str, summary: str, files: list[str] | None = None, step: str = "", plan_id: str = "",
-                           edit_of: str = "", changes: list[dict] | None = None) -> str:
+                           edit_of: str = "", changes: list[dict] | None = None, report: dict | None = None) -> str:
         """Post a result for the owner to review. Does not wait. summary: the work itself, shown in full as Done on the
         card: what was done, what was not, the numbers (never a reword of the question or a summary of the chat; the
         owner, 2026-11-27: "the inbox must always show what has been done and need to review").
@@ -2072,12 +2162,27 @@ def server():
         from the file (several excerpts split by a line holding only ...; up to 6000 characters)}; the card shows the
         two lines under the file's link and the quote in its folded Quote section, one folded part per file, sorted
         by file (the owner, 2026-11-28). The bridge refuses a quote not found in the file, and a text file with no
-        quote; an image, a binary or a deleted file takes no quote. Every path in
+        quote; an image, a binary or a deleted file takes no quote.
+        report (required): the Result section, the owner's report layout (2026-11-28): {"status": "Completed" |
+        "Needs Your Input" | "Failed", "bottom_line": 1 to 2 plain sentences (what was done, the end result, whether
+        anything needs the owner), "created": [file, draft, record or PR], "updated": [what was modified + count],
+        "sent": [messages sent, runs or tasks started], "decisions": [each choice you made yourself and why, or an edge
+        case handled], "skipped": [{"item": what was skipped or flagged, "fix": the suggestion or question that solves
+        it}], "next": what happens next automatically, or "Task closed, no further runs scheduled"}. Empty lists show
+        "None". Run, Time and Timestamp are filled by the bridge. Needs Approval lists the questions you ask on this
+        result with inbox_ask(review=<this result id>); a question is never repeated in the report. Every path in
         files needs its row (the owner, 2026-11-27: "show me a short summarize what is changed in the files and what
         need to review so I can check via the file link").
         One result per item (F12): a result on a plan step (step, default: this dashboard run's step) edits that step's
         result, which keeps the earlier text as a version and opens again for review. No step: edit_of=<result id>
         edits that result; else a new one."""
+        if not report:
+            return ("Not posted: send report={status, bottom_line, created, updated, sent, decisions, skipped, next} "
+                    "(the Result section; reload the tool list if your copy of inbox_result has no report field).")
+        try:
+            clean_result_report(report)
+        except ValueError as e:
+            return f"Not posted: {e}"
         missing = missing_changes(files, changes)
         unquoted = missing_quotes(changes)
         if not missing and unquoted:
@@ -2089,7 +2194,8 @@ def server():
                     "(a list beside files; reload the tool list "
                     "if your copy of inbox_result has no changes field); missing: " + ", ".join(missing))
         try:
-            item_id, n = await asyncio.to_thread(inbox.result, title, summary, files, plan_id, step, edit_of, None, changes)
+            item_id, n = await asyncio.to_thread(inbox.result, title, summary, files, plan_id, step, edit_of, None, changes,
+                                                 False, report)
         except ValueError as e:
             return f"Not posted: {e}"
         replies = await asyncio.to_thread(inbox.other_replies, item_id)

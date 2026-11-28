@@ -21,7 +21,7 @@ import shutil
 import uuid
 from datetime import datetime, timezone
 
-from .inbox import answer_text, ask_back_text, is_polling, now_iso, open_ask
+from .inbox import answer_text, ask_back_text, is_polling, now_iso, open_ask, review_waits
 from .snapshot import take as take_snapshot
 from .stepgate import gate_for_result
 
@@ -81,6 +81,9 @@ def deliver(store, machine: str, claude: str | None, rows: list[dict] | None = N
             continue
         if item.get("kind") == "approval":
             continue  # approvals are only ever answered live, inside the waiting run
+        if (item.get("reviewId") or item.get("kind") == "result") and review_waits(
+                rows if rows is not None else store.where("inbox", "reviewId", item.get("reviewId") or item["id"]), item):
+            continue  # a review's answers go once, all together, when its last question is answered (2026-11-28)
         if item.get("machine") != machine or item.get("sessionId") in (None, "", "unknown"):
             continue
         try:  # the decision's pictures as they are at the answer (snapshot.py); never blocks the answer

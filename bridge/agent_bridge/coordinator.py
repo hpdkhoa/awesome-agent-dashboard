@@ -42,7 +42,7 @@ def route_of(route: str) -> str:
 
 def ask(inbox, question: str, title: str = "", options: list[dict] | None = None, recommended: int | None = None,
         context: str = "", more_questions: list[dict] | None = None, route: str = "",
-        files: list[str] | None = None) -> tuple[str, list[str]]:
+        files: list[str] | None = None, review: str = "") -> tuple[str, list[str]]:
     """inbox_ask's routing: every question names its route; one batch goes to one party. Owner topics go to the
     owner's inbox (inbox/, as before, the item stamped with its topic); coordinator questions go to coordinator/ and
     the plan's session. Returns (party "owner" | "coordinator", ids); raises ValueError when it refuses."""
@@ -54,7 +54,17 @@ def ask(inbox, question: str, title: str = "", options: list[dict] | None = None
     rest = [(q.get("title") or str(q.get("question", ""))[:80], str(q.get("question", "")), q.get("options"),
              q.get("recommended")) for q in more_questions or []]
     if routes[0] == COORDINATOR:
+        if review:
+            raise ValueError("review links owner questions to a result card; a coordinator question never reaches the "
+                             "owner's inbox, so leave review out.")
         return COORDINATOR, [post(inbox, *q) for q in [first, *rest]]
+    tie = {}
+    if review:
+        # listed inside the review card (the owner, 2026-11-28): only a result this session can see
+        r = inbox.store.get(f"inbox/{review}")
+        if not r or r.get("kind") != "result":
+            raise ValueError(f"review {review} is not a result: post it with inbox_result first, then ask with its id.")
+        tie = {"reviewId": review}
     from .inbox import repeat_of
     plan = inbox.open_plan()
     why = repeat_of(inbox.store, (plan or {}).get("id", ""), [q[0] for q in [first, *rest]])
@@ -62,10 +72,10 @@ def ask(inbox, question: str, title: str = "", options: list[dict] | None = None
         raise ValueError(why.removeprefix("Not asked: "))
     if rest:
         own = [files] + [(q or {}).get("files") for q in more_questions or []]
-        batch = [{"title": t, "text": x, "options": o, "recommended": r, "files": f, "extra": {"topic": topic}}
+        batch = [{"title": t, "text": x, "options": o, "recommended": r, "files": f, "extra": {"topic": topic, **tie}}
                  for (t, x, o, r), topic, f in zip([first, *rest], routes, own)]
         return "owner", inbox.post_batch(batch)
-    return "owner", [inbox.post("question", *first, files, {"topic": routes[0]})]
+    return "owner", [inbox.post("question", *first, files, {"topic": routes[0], **tie})]
 
 
 def post(inbox, title: str, text: str, options: list[dict] | None, recommended: int | None) -> str:

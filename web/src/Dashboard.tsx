@@ -34,7 +34,7 @@ import { Md } from "./Markdown";
 import { Section } from "./Section";
 import { DigestView, LocalSearch } from "./LocalSearch";
 import { RecordsSide, RecordsView, useRecords } from "./Records";
-import { InboxList, InboxView, isWaiting } from "./Inbox";
+import { InboxList, InboxView, isWaiting, shownItem } from "./Inbox";
 import { usePhone } from "./phone";
 import { useEntries, useFx, useGold } from "./moneyData";
 import { EntryForm, MoneyView } from "./Money";
@@ -155,7 +155,7 @@ export function Dashboard() {
   const current = shown.find((s) => s.id === picked) ?? shown[0];
   const items = (inbox ?? []).filter((i) => wt === "all" || i.workType === wt);
   const waiting = (inbox ?? []).filter(isWaiting).length;
-  const item = items.find((i) => i.id === pickedItem) ?? items.find(isWaiting) ?? items[0];
+  const item = shownItem(items.find((i) => i.id === pickedItem) ?? items.find(isWaiting) ?? items[0], items);
   const shownPlans = (plans ?? []).filter((p) => wt === "all" || p.workType === wt);
   const plan = shownPlans.find((p) => p.id === pickedPlan) ?? shownPlans[0];
   const planInbox = usePlanInbox(plan?.id);

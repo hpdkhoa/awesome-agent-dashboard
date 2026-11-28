@@ -613,3 +613,64 @@ def test_result_quote_is_checked_against_the_file(tmp_path):
     # a text file with no quote is named; a picture and a deleted file need none
     gone = str(tmp_path / "gone.py")
     assert missing_quotes([{"file": str(f)}, {"file": str(img)}, {"file": gone}]) == [str(f)]
+
+
+REPORT = {"status": "Completed", "bottom_line": "Quote built and pushed. Nothing needs you.",
+          "created": ["tests/quote.card.test.ts"], "updated": ["inbox.py: 4 functions"], "sent": [],
+          "decisions": ["quote check ignores trailing spaces"], "skipped": [{"item": "no screenshot", "fix": "check on the next card"}],
+          "next": "Task closed, no further runs scheduled"}
+
+
+def test_result_report_is_checked_and_its_header_measured_from_the_run():
+    # the owner, 2026-11-28: "New Result field" in the "Dashboard Card / Report Layout"; "Add Failed"; "Item + fix"
+    from agent_bridge.inbox import clean_result_report as clean_report
+    store = FakeStore()
+    ib = make(store)
+    store.put_many({"commands/c1": {"id": "c1", "sessionId": "s1", "status": "running", "action": "message",
+                                    "startedAt": (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()}})
+    rid, _ = ib.result("r", "done", result_report=REPORT)
+    rep = store.get(f"inbox/{rid}")["report"]
+    assert rep["status"] == "Completed" and rep["runId"] == "c1" and 290 <= rep["seconds"] <= 320 and rep["sent"] == []
+    assert rep["skipped"] == [{"item": "no screenshot", "fix": "check on the next card"}] and rep["at"]
+    assert clean_report({**REPORT, "status": "Failed"})["status"] == "Failed"
+    for bad in ({**REPORT, "status": "Done"}, {**REPORT, "bottom_line": ""}, {**REPORT, "bottom_line": "A. B. C."},
+                {**REPORT, "skipped": [{"item": "x"}]}, {**REPORT, "next": ""}):
+        try:
+            clean_report(bad)
+            raise AssertionError(f"not refused: {bad}")
+        except ValueError:
+            pass
+    # an edit keeps the earlier report in its version; a step report keeps the posted report
+    ib.result("r2", "done 2", edit_of=rid, result_report={**REPORT, "status": "Failed"})
+    item = store.get(f"inbox/{rid}")
+    assert item["report"]["status"] == "Failed" and item["versions"][-1]["report"]["status"] == "Completed"
+
+
+def test_review_questions_sit_in_the_review_and_their_answers_go_once():
+    # the owner, 2026-11-28: "the question will listed inside the review/report if it is belong to this review, not like
+    # current 2 messages and send two times when I answered each"
+    from agent_bridge import coordinator as co
+    store = FakeStore()
+    ib = make(store)
+    rid, _ = ib.result("r", "done", result_report=REPORT)
+    opts = [{"label": "A", "differs": "d"}, {"label": "B", "differs": "d"}]
+    _, (q1,) = co.ask(ib, "First?", "First", opts, 0, route="scope", review=rid)
+    _, (q2, q3) = co.ask(ib, "Second?", "Second", opts, 0, route="scope", review=rid,
+                         more_questions=[{"question": "Third?", "title": "Third", "options": opts, "route": "scope"}])
+    assert all(store.get(f"inbox/{q}")["reviewId"] == rid for q in (q1, q2, q3))
+    beat(store, "s1", 10)
+    owner_answers(store, q1, "A")
+    owner_answers(store, rid, "", "ok")
+    assert deliver(store, "PC", "claude") == []  # q2, q3 still open: nothing goes yet
+    owner_answers(store, q2, "B")
+    owner_answers(store, q3, "A")
+    log = deliver(store, "PC", "claude")
+    cmds = store.where("commands", "action", "message")
+    assert len(log) == 1 and len(cmds) == 1 and set(cmds[0]["inboxIds"]) == {rid, q1, q2, q3}
+    # a review that is not a result, or a coordinator question, is refused
+    for kw in ({"review": q1, "route": "scope"}, {"review": rid, "route": "coordinator"}):
+        try:
+            co.ask(ib, "Fourth?", "Fourth", opts, 0, **kw)
+            raise AssertionError("not refused")
+        except ValueError:
+            pass

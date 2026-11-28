@@ -42,6 +42,15 @@ export type Session = {
 
 export type Usage = Tokens & { day: string; byWorkType: Record<string, Tokens>; byModel: Record<string, Tokens>; sessionCount: number };
 export type WorkType = Tokens & { id: string; sessions: number; lastAt: string };
+export type ResultReport = {
+  status: "Completed" | "Needs Your Input" | "Failed";
+  bottom_line: string;
+  created: string[]; updated: string[]; sent: string[]; decisions: string[];
+  skipped: { item: string; fix: string }[];
+  next: string;
+  runId: string; startedAt: string; seconds: number | null; at: string;
+};
+
 export type InboxItem = {
   id: string;
   kind: "question" | "suggestion" | "result" | "approval";
@@ -62,6 +71,10 @@ export type InboxItem = {
   // a result's per file lines (bridge inbox.py clean_changes; the owner's pick 2026-11-27 "A: per file lines")
   // quote: the exact changed text of the file, checked by the bridge to be in it (the owner, 2026-11-28)
   changes?: { file: string; changed: string; check: string; quote?: string }[];
+  // a result's Result section (bridge inbox.py clean_result_report; the owner's report layout, 2026-11-28): the session's
+  // parts, and the header the bridge measured from the run (runId, startedAt, seconds, at)
+  report?: ResultReport;
+  reviewId?: string; // a question asked on this result: listed inside the review card, answered and sent once
   status: "open" | "answered" | "delivering" | "delivered" | "closed";
   createdAt: string;
   answer: { choice: string; text: string; at: string } | null;
@@ -165,7 +178,7 @@ export type Receipt = { kind: "check" | "pictures" | "owner"; commit: string; at
   exit?: number; seconds?: number; command?: string; output?: string;
   overall?: string; set?: string; pictures?: string[]; marks?: { path: string; verdict: string; why: string }[]; note?: string;
   findings?: EvidenceFinding[] };
-// The run report's fields (bridge inbox.py clean_report; the owner's pick, 2026-11-15: "A + exact report fields").
+// The run report's fields (bridge inbox.py clean_result_report; the owner's pick, 2026-11-15: "A + exact report fields").
 export type StepReport = {
   built?: string[];
   numbers?: { metric: string; before: string; after: string; how: string }[];
