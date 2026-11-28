@@ -583,3 +583,33 @@ def test_result_keeps_per_file_change_lines():
         except ValueError:
             pass
     assert missing_changes(["K:/a/x.py", "K:/a/z.py"], rows) == ["K:/a/z.py"]
+
+
+def test_result_quote_is_checked_against_the_file(tmp_path):
+    # the owner, 2026-11-28: a "quote" section "which show me exactly the part of the work ... quote what changed inside
+    # what file"; pick "Session quote, bridge checks"
+    from agent_bridge.inbox import missing_quotes
+    f = tmp_path / "x.py"
+    f.write_bytes(b"def a():\r\n    return 1   \r\n\r\ndef b():\r\n    return 2\r\n")
+    img = tmp_path / "p.png"
+    img.write_bytes(b"\x89PNG\x00\x00")
+    store = FakeStore()
+    inbox = make(store)
+    ok = "def a():\n    return 1\n...\ndef b():"
+    rows = [{"file": str(f), "changed": "adds a and b", "check": "both return", "quote": ok},
+            {"file": str(img), "changed": "new picture", "check": "markers"}]
+    rid, _ = inbox.result("r", "done", changes=rows)
+    item = store.get(f"inbox/{rid}")
+    assert item["changes"][0]["quote"] == ok and "quote" not in item["changes"][1]
+    # a quote not in the file, a quote on a picture, and an over long quote are refused, never cut
+    for bad in ({"file": str(f), "changed": "c", "check": "k", "quote": "def c():"},
+                {"file": str(img), "changed": "c", "check": "k", "quote": "PNG"},
+                {"file": str(f), "changed": "c", "check": "k", "quote": "x" * 6001}):
+        try:
+            inbox.result("r", "t", changes=[bad])
+            raise AssertionError("not refused")
+        except ValueError:
+            pass
+    # a text file with no quote is named; a picture and a deleted file need none
+    gone = str(tmp_path / "gone.py")
+    assert missing_quotes([{"file": str(f)}, {"file": str(img)}, {"file": gone}]) == [str(f)]

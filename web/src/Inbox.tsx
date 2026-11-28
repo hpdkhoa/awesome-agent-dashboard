@@ -90,6 +90,28 @@ function ResultWork({ item }: { item: InboxItem }) {
   if (!item.text.trim()) return null;
   return <Section id="inbox.result.done" title="Done"><Md text={item.text} cwd={item.cwd} /></Section>;
 }
+// The exact work of a result, folded (the owner, 2026-11-28: "another default collapsed section is "quote" which show
+// me exactly the part of the work ... quote what changed inside what file, sort by file and is sub collapsed
+// sections"; pick "Session quote, bridge checks"): one folded part per file, sorted by path, its text as the bridge
+// found it in the file.
+export function quoteRows(item: Pick<InboxItem, "changes">) {
+  return (item.changes ?? []).filter((c) => c.quote?.trim()).sort((a, b) => a.file.localeCompare(b.file));
+}
+export function QuoteWork({ item }: { item: InboxItem }) {
+  const rows = quoteRows(item);
+  if (rows.length === 0) return null;
+  return (
+    <Section id="inbox.quote" title="Quote" extra={rows.length} open={false}>
+      <div data-quote>
+        {rows.map((c) => (
+          <Section key={c.file} id={`inbox.quote.${item.id}.${c.file}`} title={<span title={c.file}>{fileName(c.file)}</span>} open={false}>
+            <pre className="quote-text"><code>{c.quote}</code></pre>
+          </Section>
+        ))}
+      </div>
+    </Section>
+  );
+}
 function SuggestionWork({ item }: { item: InboxItem }) {
   if (!item.text.trim()) return null;
   return <Section id="inbox.suggestion.idea" title="Suggestion"><Md text={item.text} cwd={item.cwd} /></Section>;
@@ -373,6 +395,8 @@ export function InboxView({ item, session, plan, onOpenPlan, items = [], phone =
           </ul>
         </Section>
       )}
+
+      {item.kind === "result" && <QuoteWork item={item} />}
 
       {(item.versions?.length ?? 0) > 0 && (
         <Section id="inbox.versions" title="Earlier versions" extra={item.versions!.length}>

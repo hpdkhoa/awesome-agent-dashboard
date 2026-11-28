@@ -36,6 +36,7 @@ import re
 import threading
 import time
 import uuid
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
 from .aggregate import work_type_of
@@ -616,17 +617,89 @@ def missing_changes(files: list[str] | None, changes: list[dict] | None) -> list
     return [f for f in files or [] if f not in have]
 
 
+QUOTE_MAX = 6000  # characters per file's quote; a longer one is refused, never cut (a cut quote is not exact)
+QUOTE_GAP = ("...", "…")  # a line holding only this splits a quote into excerpts
+
+
+def norm_text(text: str) -> str:
+    """Text as the quote check compares it: LF line ends, no trailing spaces on a line."""
+    return re.sub(r"[ \t]+$", "", text.replace("\r\n", "\n").replace("\r", "\n"), flags=re.M)
+
+
+def file_text(path: str) -> str | None:
+    """A file's text for the quote check, or None when it is missing, not a file, or not text (an image, a binary)."""
+    try:
+        data = Path(path).read_bytes()
+    except OSError:
+        return None
+    if b"\0" in data[:8192]:
+        return None
+    try:
+        return data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return None
+
+
+def quote_misses(path: str, quote: str) -> str:
+    """Why a quote is not exactly in its file, or "" when every excerpt of it is (the owner's pick, 2026-11-28:
+    "Session quote, bridge checks"). Excerpts are split by a line holding only ... ; each must appear in the file as
+    it is now, compared with LF line ends and no trailing spaces."""
+    text = file_text(path)
+    if text is None:
+        return f"{path} is missing or not a text file, so it cannot be quoted; leave quote out for it"
+    body = norm_text(text)
+    parts, cur = [], []
+    for line in norm_text(quote).split("\n"):
+        if line.strip() in QUOTE_GAP:
+            parts.append(cur)
+            cur = []
+        else:
+            cur.append(line)
+    parts.append(cur)
+    for n, p in enumerate(parts):
+        ex = "\n".join(p).strip("\n")
+        if ex.strip() and ex not in body:
+            first = next((x for x in p if x.strip()), "")[:80]
+            return f"excerpt {n + 1} of the quote for {path} is not in the file as it is now (starts: {first!r})"
+    return ""
+
+
+def missing_quotes(changes: list[dict] | None) -> list[str]:
+    """The text files in changes with no quote: inbox_result refuses them, so the card's Quote shows every text file
+    it names (the owner, 2026-11-28: "quote what changed inside what file, sort by file"). Images, binaries and files
+    that no longer exist need none."""
+    out = []
+    for c in changes or []:
+        if isinstance(c, dict) and not str(c.get("quote") or "").strip():
+            f = str(c.get("file") or "")
+            if f and file_text(f) is not None:
+                out.append(f)
+    return out
+
+
 def clean_changes(changes: list[dict] | None) -> list[dict]:
     """A result's per file lines: {file, changed, check}, each a short line (what changed in the file, what the owner
-    checks there). A row with no file, or with neither line, is refused, so the card never shows an empty pair."""
+    checks there), and quote: the exact changed text of the file (the owner, 2026-11-28: the "quote" section "show me
+    exactly the part of the work"). A row with no file, or with neither line, is refused, so the card never shows an
+    empty pair; a quote not found in its file, or longer than QUOTE_MAX, is refused (never cut)."""
     out = []
     for n, c in enumerate(changes or []):
         if not isinstance(c, dict):
-            raise ValueError(f"changes[{n}] must be {{file, changed, check}}.")
+            raise ValueError(f"changes[{n}] must be {{file, changed, check, quote}}.")
         f, a, b = (str(c.get(k) or "").strip() for k in ("file", "changed", "check"))
         if not f or not a or not b:
             raise ValueError(f"changes[{n}] needs file, changed and check, each one short line.")
-        out.append({"file": redact(f, 300), "changed": redact(a, 300), "check": redact(b, 300)})
+        row = {"file": redact(f, 300), "changed": redact(a, 300), "check": redact(b, 300)}
+        q = str(c.get("quote") or "").strip("\n")
+        if q.strip():
+            if len(q) > QUOTE_MAX:
+                raise ValueError(f"changes[{n}] quote has {len(q)} characters, over {QUOTE_MAX}: quote the changed "
+                                 "parts only, split by a line holding only ...")
+            why = quote_misses(f, q)
+            if why:
+                raise ValueError(f"changes[{n}]: {why}.")
+            row["quote"] = redact(q, QUOTE_MAX)
+        out.append(row)
     return out
 
 
@@ -1995,16 +2068,25 @@ def server():
         card: what was done, what was not, the numbers (never a reword of the question or a summary of the chat; the
         owner, 2026-11-27: "the inbox must always show what has been done and need to review").
         changes: one row per file, {"file": full path, "changed": one short line of what changed in it, "check": one
-        short line of what the owner reviews there}; the card shows the two lines under the file's link. Every path in
+        short line of what the owner reviews there, "quote": the exact changed text of the file as it is now, copied
+        from the file (several excerpts split by a line holding only ...; up to 6000 characters)}; the card shows the
+        two lines under the file's link and the quote in its folded Quote section, one folded part per file, sorted
+        by file (the owner, 2026-11-28). The bridge refuses a quote not found in the file, and a text file with no
+        quote; an image, a binary or a deleted file takes no quote. Every path in
         files needs its row (the owner, 2026-11-27: "show me a short summarize what is changed in the files and what
         need to review so I can check via the file link").
         One result per item (F12): a result on a plan step (step, default: this dashboard run's step) edits that step's
         result, which keeps the earlier text as a version and opens again for review. No step: edit_of=<result id>
         edits that result; else a new one."""
         missing = missing_changes(files, changes)
+        unquoted = missing_quotes(changes)
+        if not missing and unquoted:
+            return ("Not posted: every text file needs its quote, the exact changed text as it is in the file now (one "
+                    "string in its changes row, excerpts split by a line holding only ...); missing: " + ", ".join(unquoted))
         if missing:
             return ("Not posted: every file needs its changes row; send the argument changes=[{\"file\": full path, "
-                    "\"changed\": one short line, \"check\": one short line}] (a list beside files; reload the tool list "
+                    "\"changed\": one short line, \"check\": one short line, \"quote\": the exact changed text}] "
+                    "(a list beside files; reload the tool list "
                     "if your copy of inbox_result has no changes field); missing: " + ", ".join(missing))
         try:
             item_id, n = await asyncio.to_thread(inbox.result, title, summary, files, plan_id, step, edit_of, None, changes)

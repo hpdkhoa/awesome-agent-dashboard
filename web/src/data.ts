@@ -60,7 +60,8 @@ export type InboxItem = {
   recommended: number | null;
   files: string[];
   // a result's per file lines (bridge inbox.py clean_changes; the owner's pick 2026-11-27 "A: per file lines")
-  changes?: { file: string; changed: string; check: string }[];
+  // quote: the exact changed text of the file, checked by the bridge to be in it (the owner, 2026-11-28)
+  changes?: { file: string; changed: string; check: string; quote?: string }[];
   status: "open" | "answered" | "delivering" | "delivered" | "closed";
   createdAt: string;
   answer: { choice: string; text: string; at: string } | null;
