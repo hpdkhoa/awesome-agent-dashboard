@@ -34,6 +34,29 @@ describe("result report", () => {
     expect(shownItem(q, [review, q])?.id).toBe("r1");
     const html = renderToStaticMarkup(createElement(ResultReportView, { item: review, items: [review, q] }));
     expect(html).toContain("Needs Your Input");
-    expect(html).toContain("report-exceptions need");
+    expect(html).toContain('data-part="need"');
+  });
+});
+
+import { colourCode, langOf } from "../web/src/codeColour";
+
+// the owner, 2026-11-29: "B: chips + status pill", "use b and c together"
+describe("review card colours", () => {
+  it("colours code by kind and leaves other files plain", () => {
+    const toks = colourCode('if x: f("a")  # note', "K:/a/x.py");
+    expect(toks.filter((t) => t.k).map((t) => [t.k, t.t])).toEqual([["k", "if"], ["f", "f"], ["s", '"a"'], ["c", "# note"]]);
+    expect(toks.map((t) => t.t).join("")).toBe('if x: f("a")  # note');
+    expect(colourCode("# title", "K:/a/x.md")).toEqual([{ t: "# title" }]);
+    expect(langOf("Inbox.tsx")).toBe("tsx");
+  });
+  it("parts carry their colour; orange only when exceptions hold something", () => {
+    const html = renderToStaticMarkup(createElement(ResultReportView, { item: review, items: [review, q] }));
+    for (const k of ["bottom", "deliver", "decide", "need", "next"]) expect(html).toContain(`data-part="${k}"`);
+    expect(html).toContain('class="rpill" data-status="Needs Your Input"');
+    expect(html).toContain('data-chip="fix"');
+    const clear = { ...review, report: { ...report, skipped: [] } } as unknown as InboxItem;
+    const h2 = renderToStaticMarkup(createElement(ResultReportView, { item: clear, items: [clear] }));
+    expect(h2).toContain('data-part="clear"');
+    expect(h2).not.toContain('data-chip="need"');
   });
 });

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { PcText } from "./FileView";
 import { answerItem, askBack, batchOf, cancelAnswer, forceAnswer, saveDraft, sendApproveGenerated, sendBatch, type InboxItem, type Plan, type Session } from "./data";
 import { relPath, tmpFolderOf, versionFolderOf } from "./planCheck";
@@ -8,6 +8,7 @@ import { Md } from "./Markdown";
 import { MoreMenu } from "./MoreMenu";
 import { fileName, openFile } from "./FileView";
 import { Section } from "./Section";
+import { colourCode } from "./codeColour";
 import { tm, ago } from "./fmt";
 
 const KIND = { question: "Question", suggestion: "Suggestion", result: "Result to review", approval: "Approval" };
@@ -127,6 +128,15 @@ export function runTime(seconds: number | null | undefined) {
 function Lines({ rows }: { rows: string[] }) {
   return rows.length ? <ul>{rows.map((x, n) => <li key={n}>{x}</li>)}</ul> : <ul><li className="muted">None</li></ul>;
 }
+// the colours (the owner, 2026-11-29: pick "B: chips + status pill", note "use b and c together"): each part its own
+// tint, bar and title colour (C), label chips, a status pill and the Bottom Line in a box (B). Orange is kept for what
+// needs the owner: the Exceptions part only when it holds something, the Needs Approval and Skipped chips.
+function Chip({ k, children }: { k: string; children: string }) {
+  return <span className="rchip" data-chip={k}>{children}</span>;
+}
+function Part({ k, children }: { k: string; children: ReactNode }) {
+  return <div className="rpart" data-part={k}>{children}</div>;
+}
 export function ResultReportView({ item, items }: { item: InboxItem; items: InboxItem[] }) {
   const r = item.report;
   if (!r) return null;
@@ -144,26 +154,33 @@ export function ResultReportView({ item, items }: { item: InboxItem; items: Inbo
     <Section id="inbox.result.report" title="Result" main>
       <div className="result-report" data-report-status={status}>
         <p className="report-head">
-          Status: <b data-status={status}>{status}</b> • Run: {r.runId ? `#${r.runId}` : "none"} • Time: {runTime(r.seconds)} • {tm(r.at)}
+          Status: <b className="rpill" data-status={status}>{status}</b> • Run: {r.runId ? `#${r.runId}` : "none"} • Time: {runTime(r.seconds)} • {tm(r.at)}
         </p>
-        <Section id="inbox.result.bottom" title="1. Bottom Line">
-          <p>{r.bottom_line}</p>
-        </Section>
-        <Section id="inbox.result.deliverables" title="2. Deliverables & Changes Made" extra={r.created.length + r.updated.length + r.sent.length}>
-          <ul>
-            <li>Created<Lines rows={r.created} /></li>
-            <li>Updated<Lines rows={r.updated} /></li>
-            <li>Sent / Executed<Lines rows={r.sent} /></li>
-          </ul>
-        </Section>
-        <Section id="inbox.result.decisions" title="3. Decisions & Assumptions Made by Agent" extra={r.decisions.length}>
-          <Lines rows={r.decisions} />
-        </Section>
-        <div className={exceptions ? "report-exceptions need" : "report-exceptions"}>
+        <Part k="bottom">
+          <Section id="inbox.result.bottom" title="1. Bottom Line">
+            <p className="rbottom">{r.bottom_line}</p>
+          </Section>
+        </Part>
+        <Part k="deliver">
+          <Section id="inbox.result.deliverables" title="2. Deliverables & Changes Made" extra={r.created.length + r.updated.length + r.sent.length}>
+            <ul>
+              <li><Chip k="created">Created</Chip><Lines rows={r.created} /></li>
+              <li><Chip k="updated">Updated</Chip><Lines rows={r.updated} /></li>
+              <li><Chip k="sent">Sent / Executed</Chip><Lines rows={r.sent} /></li>
+            </ul>
+          </Section>
+        </Part>
+        <Part k="decide">
+          <Section id="inbox.result.decisions" title="3. Decisions & Assumptions Made by Agent" extra={r.decisions.length}>
+            <Lines rows={r.decisions} />
+          </Section>
+        </Part>
+        <div className={exceptions ? "report-exceptions rpart need" : "report-exceptions rpart"} data-part={exceptions ? "need" : "clear"}>
           <Section id="inbox.result.exceptions" title="4. Exceptions & Items for Your Review" extra={exceptions}>
             <ul>
               <li>
-                Needs Approval{qs.length > 0 && <span className="muted small"> · {waiting} of {qs.length} waiting</span>}
+                <Chip k={qs.length ? "need" : "none"}>Needs Approval</Chip>
+                {qs.length > 0 && <span className="muted small"> · {waiting} of {qs.length} waiting</span>}
                 {qs.length === 0 ? <ul><li className="muted">None</li></ul> : (
                   <div className="report-questions">
                     {batches.map((b) => b.map((q, k) => <QuestionCard key={q.id} q={q} batch={b} k={k} titled />))}
@@ -171,17 +188,19 @@ export function ResultReportView({ item, items }: { item: InboxItem; items: Inbo
                 )}
               </li>
               <li>
-                Skipped / Flagged
+                <Chip k={r.skipped.length ? "need" : "none"}>Skipped / Flagged</Chip>
                 {r.skipped.length === 0 ? <ul><li className="muted">None</li></ul> : (
-                  <ul>{r.skipped.map((s, n) => <li key={n}>{s.item}<ul><li><b>Fix:</b> {s.fix}</li></ul></li>)}</ul>
+                  <ul>{r.skipped.map((s, n) => <li key={n}>{s.item}<ul><li><Chip k="fix">Fix</Chip> {s.fix}</li></ul></li>)}</ul>
                 )}
               </li>
             </ul>
           </Section>
         </div>
-        <Section id="inbox.result.next" title="5. Next Scheduled Action">
-          <ul><li>{r.next}</li></ul>
-        </Section>
+        <Part k="next">
+          <Section id="inbox.result.next" title="5. Next Scheduled Action">
+            <ul><li>{r.next}</li></ul>
+          </Section>
+        </Part>
       </div>
     </Section>
   );
@@ -194,15 +213,15 @@ export function QuoteWork({ item }: { item: InboxItem }) {
   const rows = quoteRows(item);
   if (rows.length === 0) return null;
   return (
-    <Section id="inbox.quote" title="Quote" extra={rows.length} open={false}>
+    <div className="quote-part"><Section id="inbox.quote" title="Quote" extra={rows.length} open={false}>
       <div data-quote>
         {rows.map((c) => (
-          <Section key={c.file} id={`inbox.quote.${item.id}.${c.file}`} title={<span title={c.file}>{fileName(c.file)}</span>} open={false}>
-            <pre className="quote-text"><code>{c.quote}</code></pre>
+          <Section key={c.file} id={`inbox.quote.${item.id}.${c.file}`} title={<span className="qfile" title={c.file}>{fileName(c.file)}</span>} open={false}>
+            <pre className="quote-text"><code>{colourCode(c.quote ?? "", c.file).map((t, n) => (t.k ? <span key={n} className={`ck-${t.k}`}>{t.t}</span> : t.t))}</code></pre>
           </Section>
         ))}
       </div>
-    </Section>
+    </Section></div>
   );
 }
 function SuggestionWork({ item }: { item: InboxItem }) {

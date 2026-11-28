@@ -319,9 +319,27 @@ span[data-state], b[data-state], p[data-state], .board-feat[data-state] .board-k
 /* a result's per file lines under the file link (Inbox.tsx, the owner's pick 2026-11-27 "A: per file lines") */
 .file-change { margin: 0.125rem 0 0.5rem 0.75rem; line-height: 1.4; }
 .report-head { margin: 0 0 0.5rem; }
-.report-head [data-status="Failed"] { color: var(--bad); }
-.report-head [data-status="Needs Your Input"] { color: var(--wait-fg); }
-.report-exceptions.need > .sec { border-left: 3px solid var(--wait-fg); padding-left: 0.5rem; }
-.report-exceptions.need > .sec .sec-title { color: var(--wait-fg); }
+/* Review card colours (the owner, 2026-11-29: "B: chips + status pill", "use b and c together"): a tint, bar and title
+   colour per part (C), chips, a status pill and the Bottom Line box (B). Orange (--wait-fg family) only for what
+   needs the owner. Tints mix the part colour into the card, so light and dark themes both read. */
+.result-report { --c-blue: #4f8fd6; --c-green: #6fa83a; --c-cyan: #3aa7bf; --c-orange: #d9891f; --c-grey: #7d8a9a; --c-red: #c94a4a; }
+.rpart { --pc: var(--c-grey); margin: 0.5rem 0; }
+.rpart[data-part="bottom"] { --pc: var(--c-blue); } .rpart[data-part="deliver"] { --pc: var(--c-green); }
+.rpart[data-part="decide"] { --pc: var(--c-cyan); } .rpart[data-part="need"] { --pc: var(--c-orange); }
+.rpart[data-part="next"], .rpart[data-part="clear"] { --pc: var(--c-grey); }
+.rpart > .sec { background: color-mix(in srgb, var(--pc) 14%, var(--card)); border-left: 4px solid var(--pc); }
+.rpart > .sec > .sec-wrap .sec-title { color: var(--pc); }
+.rpill { display: inline-block; padding: 0 0.6rem; border-radius: 999px; color: #fff; background: var(--c-green); }
+.rpill[data-status="Needs Your Input"] { background: var(--c-orange); }
+.rpill[data-status="Failed"] { background: var(--c-red); }
+.rbottom { margin: 0; padding: 0.4rem 0.75rem; border-radius: 6px; background: color-mix(in srgb, var(--c-blue) 55%, var(--card)); }
+.rchip { display: inline-block; padding: 0 0.5rem; border-radius: 6px; font-size: 0.88em; font-weight: bold; color: #111; background: var(--c-grey); }
+.rchip[data-chip="created"], .rchip[data-chip="fix"] { background: #97c459; } .rchip[data-chip="updated"] { background: #85b7eb; }
+.rchip[data-chip="sent"] { background: #6cc4d9; } .rchip[data-chip="need"] { background: #e8a23c; }
+.rchip[data-chip="none"] { background: color-mix(in srgb, var(--c-grey) 50%, var(--card)); color: var(--fg); }
 .report-questions { margin: 0.25rem 0 0.5rem; }
-.quote-text { margin: 0.25rem 0 0.5rem; padding: 0.5rem; max-height: 60vh; overflow: auto; white-space: pre-wrap; word-break: break-word; font-size: 0.88rem; line-height: 1.4; background: #111; border: 1px solid #333; border-radius: 6px; }
+.quote-part > .sec { background: color-mix(in srgb, #4f8fd6 10%, var(--card)); }
+.qfile { padding: 0 0.5rem; border-radius: 6px; background: color-mix(in srgb, #4f8fd6 45%, var(--card)); color: var(--fg); }
+.quote-text .ck-k { color: #ff7b72; } .quote-text .ck-s { color: #a5d6ff; } .quote-text .ck-f { color: #d2a8ff; }
+.quote-text .ck-c { color: #8b949e; font-style: italic; }
+.quote-text { margin: 0.25rem 0 0.5rem; padding: 0.5rem; max-height: 60vh; overflow: auto; white-space: pre-wrap; word-break: break-word; font-size: 0.88rem; line-height: 1.4; background: #111; border: 1px solid #333; border-left: 4px solid #6fa83a; border-radius: 6px; }
